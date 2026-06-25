@@ -213,6 +213,13 @@ def _download_ticker_batch(
     return result
 
 
+def _check_old_cache(start: str | date, end: str | date) -> None:
+    """이전 ``prices_*`` 캐시 키가 존재하면 디버그 로그를 남깁니다."""
+    old_key = f"prices_{_to_str(start)}_{_to_str(end)}"
+    if _cache.exists(old_key):
+        logger.debug("이전 캐시 키 발견: %s (마이그레이션되지 않음)", old_key)
+
+
 def get_price_data(
     tickers: list[str],
     start: str | date,
@@ -220,7 +227,8 @@ def get_price_data(
 ) -> pd.DataFrame:
     """여러 ticker의 일별 OHLCV + 시가총액을 다운로드합니다.
 
-    ``FinanceDataReader.DataReader``를 사용하며, 결합된 결과를 캐싱합니다.
+    연도별 Parquet 캐시 (``price_YYYY.parquet``)를 사용하며,
+    누락된 연도만 증분 다운로드합니다.
 
     Parameters
     ----------
@@ -239,13 +247,11 @@ def get_price_data(
         - ``open``, ``high``, ``low``, ``close``, ``volume``
         - ``mcap`` — 시가총액 (KRW)
     """
-    start_str = _to_str(start)
-    end_str = _to_str(end)
-    cache_key = f"prices_{start_str}_{end_str}"
+    start_date = _to_date(start)
+    end_date = _to_date(end)
 
-    cached = _cache.get(cache_key)
-    if cached is not None:
-        return cached
+    # 이전 캐시 키 확인 (로깅 전용)
+    _check_old_cache(start, end)
 
     # 시가총액 계산을 위해 발행주식수를 미리 로드
     listing = get_krx_listings()
@@ -257,10 +263,106 @@ def get_price_data(
             except (ValueError, TypeError, KeyError):
                 pass
 
-    result = _download_ticker_batch(tickers, start, end, shares_map)
-    result = result.set_index(["ticker", "date"]).sort_index()
+    # ── 1. Discovery ──────────────────────────────────────────────
+    years_needed = {str(y) for y in range(start_date.year, end_date.year + 1)}
 
-    _cache.put(cache_key, result)
+    meta = _cache.get_json("price_meta")
+    if meta is None:
+        meta = {"cache_version": 1, "years": {}}
+
+    download_years: set[str] = set()
+    reload_years: set[str] = set()
+
+    for y_str in sorted(years_needed):
+        y = int(y_str)
+        y_start = max(start_date, date(y, 1, 1))
+        y_end = min(end_date, date(y, 12, 31))
+
+        if y_str not in meta["years"]:
+            download_years.add(y_str)
+        else:
+            info = meta["years"][y_str]
+            # req_start/req_end = 이전에 다운로드한 요청 범위
+            # 캐시가 현재 요청 범위를 완전히 커버하지 않으면 reload
+            cached_start = _to_date(info["req_start"])
+            cached_end = _to_date(info["req_end"])
+            if cached_start > y_start or cached_end < y_end:
+                reload_years.add(y_str)
+
+    # ── 2. Download ───────────────────────────────────────────────
+    years_to_fetch = download_years | reload_years
+
+    if download_years == years_needed:
+        # First download: full range at once → split by year
+        logger.info("전체 범위 다운로드 중… (%d년)", len(years_needed))
+        full = _download_ticker_batch(tickers, start_date, end_date, shares_map)
+        if not full.empty:
+            full["_year"] = full["date"].dt.year.astype(str)
+            for y_str, grp in full.groupby("_year"):
+                grp = grp.drop(columns=["_year"])
+                y = int(y_str)
+                y_req_start = max(start_date, date(y, 1, 1))
+                y_req_end = min(end_date, date(y, 12, 31))
+                _cache.put(f"price_{y_str}", grp)
+                meta["years"][y_str] = {
+                    "req_start": y_req_start.isoformat(),
+                    "req_end": y_req_end.isoformat(),
+                }
+                logger.info("  %s → %s일 캐시됨", y_str, len(grp))
+            del full
+    elif years_to_fetch:
+        # Incremental: download missing / incomplete years
+        for y_str in sorted(years_to_fetch):
+            y = int(y_str)
+            if y_str in reload_years:
+                y_start = date(y, 1, 1)
+                y_end = date(y, 12, 31)
+                reason = "재다운로드 (부분 캐시)"
+            else:
+                y_start = max(start_date, date(y, 1, 1))
+                y_end = min(end_date, date(y, 12, 31))
+                reason = "신규"
+
+            logger.info(
+                "  %s 다운로드 중… %s (%s ~ %s)",
+                y_str, reason, y_start.isoformat(), y_end.isoformat(),
+            )
+            year_data = _download_ticker_batch(tickers, y_start, y_end, shares_map)
+            if year_data.empty:
+                logger.warning("  %s: 데이터 없음, 건너뜀", y_str)
+                continue
+            _cache.put(f"price_{y_str}", year_data)
+            meta["years"][y_str] = {
+                "req_start": y_start.isoformat(),
+                "req_end": y_end.isoformat(),
+            }
+
+    # Cache hit: nothing to download
+    if not years_to_fetch:
+        logger.info("캐시 적중: %s — 모든 데이터가 캐시되어 있습니다", ", ".join(sorted(years_needed)))
+
+    # Save metadata
+    _cache.put_json("price_meta", meta)
+
+    # ── 3. Assembly ───────────────────────────────────────────────
+    frames: list[pd.DataFrame] = []
+    for y_str in sorted(years_needed):
+        df = _cache.get(f"price_{y_str}")
+        if df is not None:
+            frames.append(df)
+
+    if not frames:
+        result = pd.DataFrame(
+            columns=["ticker", "date", "open", "high", "low", "close", "volume", "mcap"],
+        )
+        result = result.set_index(["ticker", "date"])
+    else:
+        result = pd.concat(frames, ignore_index=True)
+        result["date"] = pd.to_datetime(result["date"])
+        result = result.set_index(["ticker", "date"]).sort_index()
+        # Filter by requested range (cache may have wider data)
+        result = result.loc[(slice(None), slice(start_date, end_date)), :]
+
     return result
 
 
