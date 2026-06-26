@@ -1,0 +1,39 @@
+[project]
+name = "super-quality"
+version = "0.1.0"
+description = "Super Quality 2.0 — 한국형 퀀트 백테스팅 시스템"
+requires-python = ">=3.12"
+dependencies = [
+    "finance-datareader>=0.9.202",
+    "matplotlib>=3.11.0",
+    "numpy>=2.4.6",
+    "opendartreader>=0.2.3",
+    "pandas>=2.2.0,<3.0",
+    "plotly>=6.8.0",
+    "pyarrow>=24.0.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "pykrx>=1.2.8",
+    "pyyaml>=6.0.3",
+    "quantstats>=0.0.81",
+]
+
+[project.scripts]
+super-quality = "super_quality.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.19",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

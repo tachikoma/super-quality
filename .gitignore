@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# Data science / project
+data/raw/
+data/processed/
+outputs/
+docs_cache/
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+
+# OpenCode
+!.omo/
+.omo/*
+!.omo/evidence/
+!.omo/plans/
