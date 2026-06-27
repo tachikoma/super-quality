@@ -124,13 +124,12 @@ def _cmd_run(args: argparse.Namespace) -> None:
         # 2c. 재무 데이터 (백테스트 기간의 연도 범위)
         from_date: date = _parse_date(args.start)
         to_date: date = _parse_date(args.end) if args.end else date.today()
-        years = list(range(from_date.year, to_date.year + 1))
-        financial_data = get_financial_data(tickers[:50], years, api_key=api_key)  # API 속도 제한을 위해 일부 티커만 사용
+        years = list(range(from_date.year - 2, to_date.year + 1))
+        financial_data = get_financial_data(tickers[:200], years, api_key=api_key)  # API 속도 제한을 위해 일부 티커만 사용
         logger.info("로드된 재무 데이터: %d행", len(financial_data))
 
-        # 2d. 개인 순매수 (티커별, API 호출을 줄이기 위해 시총+PBR로 필터링된 티커 사용)
-        # 현재는 시연을 위해 상위 20개 티커만 샘플링
-        supply_tickers = tickers[:20]
+        # 2d. 개인 순매수 (티커별)
+        supply_tickers = tickers[:200]
         retail_frames: list[pd.DataFrame] = []
         for i, ticker in enumerate(supply_tickers):
             try:
@@ -149,7 +148,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
         # 2e. 유상증자 일정 조회 (DART API)
         capital_increases: dict[str, list[date]] = {}
         logger.info("유상증자 일정을 조회 중입니다…")
-        for i, ticker in enumerate(tickers[:50]):
+        for i, ticker in enumerate(tickers[:200]):
             try:
                 dts = get_paid_in_capital_increases(ticker, years, api_key=api_key)
                 capital_increases[ticker] = dts
@@ -167,90 +166,118 @@ def _cmd_run(args: argparse.Namespace) -> None:
     logger.info("팩터를 계산 중입니다…")
     try:
         from super_quality.factors.market_timing import KosdaqMAFactor
-        from super_quality.factors.quality import GPAFactor, NewFScoreFactor
+        from super_quality.factors.quality import GPAFactor
         from super_quality.factors.supply import RetailSupplyFactor
-        from super_quality.factors.value import MarketCapFactor, PBRFactor
+        from super_quality.factors.value import PBRFactor
 
-        # 3a. 재무 데이터로부터 티커별 최신 연간 스냅샷 생성
-        fin_latest = financial_data.copy()
-        if "year" in fin_latest.columns:
-            fin_latest = (
-                fin_latest.sort_values(["ticker", "year", "quarter"])
-                .groupby("ticker")
-                .last()
+        from super_quality.data.loader import (
+            date_to_financial_epoch,
+            get_financial_snapshot,
+            compute_ttm_snapshot,
+        )
+
+        # 3a. factor_data: 티커 × 날짜 그리드
+        factor_data = price_data.reset_index()[["ticker", "date"]].copy()
+        factor_data["date"] = pd.to_datetime(factor_data["date"])
+
+        # 3b. 날짜 → 재무 에포크 매핑
+        all_epoch_dates = sorted(factor_data["date"].unique())
+        date_epoch_map: dict = {}
+        for d in all_epoch_dates:
+            d_date = d.date() if hasattr(d, "date") else pd.Timestamp(d).date()
+            ey, eq = date_to_financial_epoch(d_date)
+            date_epoch_map[d] = ey * 10 + eq
+        factor_data["_epoch"] = factor_data["date"].map(date_epoch_map)
+
+        # 3c. 에포크별 횡단면 팩터 계산
+        unique_epochs = sorted(factor_data["_epoch"].unique())
+        epoch_factor_frames: list[pd.DataFrame] = []
+
+        for epoch_key in unique_epochs:
+            epoch_year, epoch_quarter = divmod(epoch_key, 10)
+
+            # epoch 첫째 날을 as_of_date로 사용
+            epoch_dates = factor_data.loc[
+                factor_data["_epoch"] == epoch_key, "date"
+            ]
+            as_of_ts = epoch_dates.min()
+            as_of_date = as_of_ts.date() if hasattr(as_of_ts, "date") else pd.Timestamp(as_of_ts).date()
+
+            # 재무 스냅샷 (as_of_date 기준) — 데이터가 없으면 epoch 건너뜀
+            fin_snap = get_financial_snapshot(financial_data, as_of_date)
+            if fin_snap.empty:
+                logger.warning("에포크 %d (%s): 재무 스냅샷 없음, 건너뜀", epoch_key, as_of_date)
+                continue
+
+            # epoch 첫째 날의 mcap을 스냅샷에 병합
+            mcap_at_epoch = (
+                price_data.xs(as_of_ts, level="date")["mcap"]
                 .reset_index()
+                .rename(columns={"mcap": "mcap_epoch"})
+            )
+            fin_snap = fin_snap.merge(mcap_at_epoch, on="ticker", how="left")
+
+            # 횡단면 팩터 계산 (에포크별 1회)
+            pbr_df = PBRFactor().compute(
+                fin_snap.rename(columns={"mcap_epoch": "mcap"})
+            )
+            gpa_df = GPAFactor().compute(fin_snap)
+
+            # TTM 계산 (as_of_date 기준)
+            ttm_df = compute_ttm_snapshot(financial_data, as_of_date)
+
+            # 하나로 합치기 (mcap_percentile은 일별 재계산하므로 epoch 단위 미포함)
+            epoch_df = pbr_df.merge(gpa_df, on="ticker", how="left")
+            if not ttm_df.empty:
+                epoch_df = epoch_df.merge(ttm_df, on="ticker", how="left")
+            else:
+                epoch_df["trailing_ni"] = 0.0
+                epoch_df["trailing_ocf"] = 0.0
+
+            epoch_df["_epoch"] = epoch_key
+            epoch_factor_frames.append(epoch_df)
+
+        if epoch_factor_frames:
+            epoch_factors_all = pd.concat(epoch_factor_frames, ignore_index=True)
+            factor_data = factor_data.merge(
+                epoch_factors_all, on=["ticker", "_epoch"], how="left"
+            )
+            # 티커별로 최신 epoch 값을 이후 날짜로 forward-fill
+            factor_data = factor_data.sort_values(["ticker", "date"])
+            for ck in ["pbr_percentile", "gpa_percentile", "trailing_ni", "trailing_ocf"]:
+                if ck in factor_data.columns:
+                    factor_data[ck] = factor_data.groupby("ticker")[ck].ffill()
+
+
+
+        # 3d. MCAP 백분위 거래일별 재계산 (시총은 매일 변하므로)
+        # MCAP 백분위는 재무 데이터가 있는 티커들만 대상으로 계산하여,
+        # 전략이 분석 대상 티커 집단 내에서의 상대적 시총을 평가하도록 함.
+        daily_mcap = price_data["mcap"].reset_index()
+        daily_mcap["date"] = pd.to_datetime(daily_mcap["date"])
+        factor_data = factor_data.merge(
+            daily_mcap[["ticker", "date", "mcap"]], on=["ticker", "date"], how="left"
+        )
+        factor_data["mcap_percentile"] = (
+            factor_data.groupby("date")["mcap"]
+            .rank(pct=True, ascending=True)
+            .fillna(50.0)
+            * 100.0
+        )
+        # ticker × date 수준이 아닌 전체 일간 percentile이므로,
+        # 재무 데이터가 없는 티커는 percentile이 full-universe 기준임.
+        # 전략 컨텍스트에 맞게 재무 데이터 존재 티커만의 percentile로 대체.
+        fin_tickers = set(factor_data.loc[factor_data["pbr_percentile"].notna(), "ticker"])
+        if fin_tickers:
+            fin_mask = factor_data["ticker"].isin(fin_tickers)
+            factor_data.loc[fin_mask, "mcap_percentile"] = (
+                factor_data.loc[fin_mask].groupby("date")["mcap"]
+                .rank(pct=True, ascending=True)
+                .fillna(50.0)
+                * 100.0
             )
 
-        # 가격 데이터에서 시가총액(mcap) 병합 (최신 유효 mcap 사용)
-        price_df = price_data.reset_index()
-        # 미래/휴일 데이터는 mcap=0이므로 유효한 mcap이 있는 최근일 사용
-        valid_mcap = price_df[price_df["mcap"] > 0]
-        if not valid_mcap.empty:
-            price_last_mcap = valid_mcap.groupby("ticker").last().reset_index()
-        else:
-            price_last_mcap = price_df.groupby("ticker").last().reset_index()
-        fin_with_mcap = fin_latest.merge(
-            price_last_mcap[["ticker", "mcap"]], on="ticker", how="left"
-        )
-        logger.info("재무 스냅샷: %d행", len(fin_with_mcap))
-
-        # 3b. TTM 파생 컬럼 계산 (trailing_ni, trailing_ocf)
-        # DART 데이터는 누적(thstrm_amount)이므로 단일 분기 값으로 변환 후 합산
-        ttm_df = pd.DataFrame()
-        if not financial_data.empty and {"ticker", "year", "quarter", "net_income", "operating_cf"}.issubset(
-            financial_data.columns
-        ):
-            fin_sorted = financial_data.sort_values(["ticker", "year", "quarter"])
-            ttm_rows: list[dict[str, Any]] = []
-            for ticker, grp in fin_sorted.groupby("ticker"):
-                # tail(5)로 5개 분기를 가져와 누적값을 역산
-                grp = grp.tail(5) if len(grp) >= 5 else grp.tail(len(grp))
-                if len(grp) < 4:
-                    continue
-                vals = grp[["net_income", "operating_cf"]].values.astype(float)
-                single_vals = vals.copy()
-                for i in range(1, len(vals)):
-                    single_vals[i] = vals[i] - vals[i - 1]
-                # 최근 4개 단일 분기값의 합 = TTM
-                last4 = single_vals[-4:]
-                ttm_rows.append({
-                    "ticker": ticker,
-                    "trailing_ni": float(last4.sum(axis=0)[0]),
-                    "trailing_ocf": float(last4.sum(axis=0)[1]),
-                })
-            if ttm_rows:
-                ttm_df = pd.DataFrame(ttm_rows)
-                fin_with_mcap = fin_with_mcap.merge(ttm_df, on="ticker", how="left")
-            else:
-                fin_with_mcap["trailing_ni"] = 0.0
-                fin_with_mcap["trailing_ocf"] = 0.0
-        else:
-            fin_with_mcap["trailing_ni"] = 0.0
-            fin_with_mcap["trailing_ocf"] = 0.0
-        # 유상증자 일정 반영 (최신 스냅샷 기준)
-        fin_with_mcap["share_change_5mo_ago"] = 0
-        fin_with_mcap["share_change_now"] = 0
-        for idx, row in fin_with_mcap.iterrows():
-            tkr = row["ticker"]
-            dts = capital_increases.get(tkr, [])
-            if dts:
-                end_dt = pd.to_datetime(config.END_DATE)
-                for dt in dts:
-                    dt_pd = pd.to_datetime(dt)
-                    diff = (end_dt - dt_pd).days
-                    if 0 <= diff <= 90:
-                        fin_with_mcap.at[idx, "share_change_now"] = 1
-                    if 120 <= diff <= 180:
-                        fin_with_mcap.at[idx, "share_change_5mo_ago"] = 1
-
-
-        # 3c. 횡단면 팩터 계산 (티커당 하나의 값)
-        pbr_df = PBRFactor().compute(fin_with_mcap)
-        mcap_df = MarketCapFactor().compute(fin_with_mcap)
-        gpa_df = GPAFactor().compute(fin_with_mcap)
-        fscore_df = NewFScoreFactor().compute(fin_with_mcap)
-
-        # 3c. 공급 팩터 (티커 × 날짜)
+        # 3e. 공급 팩터 (티커 × 날짜)
         if not retail_buy.empty:
             supply_df = RetailSupplyFactor(
                 supply_days=config.SUPPLY_SCORE_DAYS
@@ -258,25 +285,6 @@ def _cmd_run(args: argparse.Namespace) -> None:
         else:
             supply_df = pd.DataFrame(columns=["ticker", "supply_score", "supply_percentile"])
 
-        # 3d. 시장 타이밍 시그널
-        market_ma = KosdaqMAFactor().compute(index_data["close"])
-        market_signals = market_ma[["date", "buy_signal", "sell_signal"]].copy()
-
-        # 3e. factor_data: 티커 × 날짜 그리드 구성
-        # price_data의 모든 티커-날짜 쌍으로 시작
-        factor_data = price_data.reset_index()[["ticker", "date"]].copy()
-        factor_data["date"] = pd.to_datetime(factor_data["date"])
-
-        # 횡단면 팩터 병합 (티커당 동일 값)
-        for df in [pbr_df, mcap_df, gpa_df, fscore_df]:
-            if "ticker" in df.columns:
-                factor_data = factor_data.merge(df, on="ticker", how="left")
-
-        # TTM 값 병합 (trailing_ni, trailing_ocf — e_pass/f_pass 평가에 필요)
-        if not ttm_df.empty:
-            factor_data = factor_data.merge(ttm_df, on="ticker", how="left")
-
-        # 공급 팩터 병합 (티커 × 날짜)
         if not supply_df.empty:
             supply_merge = supply_df.rename(
                 columns={"supply_score": "supply_score", "supply_percentile": "supply_percentile"}
@@ -292,11 +300,13 @@ def _cmd_run(args: argparse.Namespace) -> None:
             factor_data["supply_score"] = 0.0
             factor_data["supply_percentile"] = 50.0
 
-        # 나머지 NaN은 합리한 기본값으로 채움
-        # 컬럼이 이미 존재하면 NaN만 채우고, 없으면 기본값으로 생성
+        # 3f. 시장 타이밍 시그널
+        market_ma = KosdaqMAFactor().compute(index_data["close"])
+        market_signals = market_ma[["date", "buy_signal", "sell_signal"]].copy()
+
+        # NaN 기본값 채움
         for col, default in [
             ("pbr_percentile", 50.0),
-            ("mcap_percentile", 50.0),
             ("gpa_percentile", 50.0),
             ("supply_percentile", 50.0),
             ("pbr", 1.0),
@@ -331,6 +341,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
             else:
                 factor_data[col] = 0.0
 
+        # 보조 컬럼 정리 (engine 전달 전에 제거)
+        factor_data = factor_data.drop(columns=["_epoch", "mcap"], errors="ignore")
 
         # 시장 타이밍 시그널을 날짜별로 병합
         if "buy_signal" in market_signals.columns:

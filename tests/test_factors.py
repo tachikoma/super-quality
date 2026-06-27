@@ -6,7 +6,7 @@ import pytest
 
 from super_quality.factors.base import Factor
 from super_quality.factors.market_timing import KosdaqMAFactor
-from super_quality.factors.quality import GPAFactor, NewFScoreFactor
+from super_quality.factors.quality import GPAFactor
 from super_quality.factors.supply import RetailSupplyFactor
 from super_quality.factors.value import MarketCapFactor, PBRFactor
 
@@ -180,62 +180,6 @@ class TestMarketCapFactor:
 
     def test_name_property(self):
         assert MarketCapFactor().name == "MarketCap"
-
-
-# ── NewFScoreFactor ──────────────────────────────────────────────────
-
-
-class TestNewFScoreFactor:
-    """신F-SCORE factor tests."""
-
-    @pytest.fixture
-    def sample_data(self):
-        return pd.DataFrame({
-            "ticker": ["A", "B", "C"],
-            "share_change_5mo_ago": [0, 1, 1],
-            "share_change_now": [0, 0, 1],
-            "trailing_ni": [100, 100, -100],
-            "trailing_ocf": [200, 200, -200],
-        })
-
-    def test_all_conditions_pass(self, sample_data):
-        """A: all 4 conditions pass → new_fscore_pass = True."""
-        factor = NewFScoreFactor()
-        result = factor.compute(sample_data)
-
-        row = result.loc[result["ticker"] == "A"].iloc[0]
-        assert row["c_pass"]
-        assert row["d_pass"]
-        assert row["e_pass"]
-        assert row["f_pass"]
-        assert row["new_fscore_pass"]
-
-    def test_c_fails(self, sample_data):
-        """B: C fails (share_change_5mo_ago != 0) → new_fscore_pass = False."""
-        factor = NewFScoreFactor()
-        result = factor.compute(sample_data)
-
-        row = result.loc[result["ticker"] == "B"].iloc[0]
-        assert not row["c_pass"]
-        assert row["d_pass"]
-        assert row["e_pass"]
-        assert row["f_pass"]
-        assert not row["new_fscore_pass"]
-
-    def test_all_fail(self, sample_data):
-        """C: all conditions fail → new_fscore_pass = False."""
-        factor = NewFScoreFactor()
-        result = factor.compute(sample_data)
-
-        row = result.loc[result["ticker"] == "C"].iloc[0]
-        assert not row["c_pass"]
-        assert not row["d_pass"]
-        assert not row["e_pass"]
-        assert not row["f_pass"]
-        assert not row["new_fscore_pass"]
-
-    def test_name_property(self):
-        assert NewFScoreFactor().name == "NewFScore"
 
 
 # ── KosdaqMAFactor ───────────────────────────────────────────────────
@@ -424,7 +368,6 @@ class TestFactorABC:
             PBRFactor(),
             MarketCapFactor(),
             GPAFactor(),
-            NewFScoreFactor(),
             KosdaqMAFactor(),
             RetailSupplyFactor(),
         ]

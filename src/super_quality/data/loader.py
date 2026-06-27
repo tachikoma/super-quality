@@ -1166,6 +1166,136 @@ def _get_available_quarters(
     return {q: codes[q] for q, d in deadlines.items() if as_of_date >= d}
 
 
+def date_to_financial_epoch(d: date) -> tuple[int, int]:
+    """해당 날짜 기준 가장 최근에 이용 가능한 (연도, 분기)를 반환합니다.
+
+    12월 결산 기업의 K-IFRS 제출 마감일을 기준으로 합니다:
+
+    ==================  =============  =============
+    As-of 날짜 범위       최신 분기       (year, quarter)
+    ==================  =============  =============
+    1/1 ~ 3/30          전년도 Q3      (y-1, 3)
+    3/31 ~ 5/14         전년도 연간    (y-1, 4)
+    5/15 ~ 8/14         당해 Q1        (y, 1)
+    8/15 ~ 11/14        당해 반기      (y, 2)
+    11/15 ~ 12/31       당해 Q3        (y, 3)
+    ==================  =============  =============
+    """
+    y = d.year
+    if d >= date(y, 11, 15):
+        return (y, 3)
+    if d >= date(y, 8, 15):
+        return (y, 2)
+    if d >= date(y, 5, 15):
+        return (y, 1)
+    if d >= date(y, 3, 31):
+        return (y - 1, 4)
+    return (y - 1, 3)
+
+
+def _get_available_year_quarter_set(
+    target_year: int,
+    as_of_date: date,
+) -> set[tuple[int, int]]:
+    """*as_of_date* 시점에 조회 가능한 (year, quarter) 셋을 반환합니다."""
+    quarters = _get_available_quarters(target_year, as_of_date)
+    return {(target_year, q) for q in quarters}
+
+
+def get_financial_snapshot(
+    financial_df: pd.DataFrame,
+    as_of_date: date,
+) -> pd.DataFrame:
+    """*as_of_date* 시점에 이용 가능한 최신 재무 데이터를 ticker별로 반환합니다.
+
+    Parameters
+    ----------
+    financial_df : pd.DataFrame
+        ``ticker``, ``year``, ``quarter`` 컬럼 포함.
+    as_of_date : date
+        평가 기준일.
+
+    Returns
+    -------
+    pd.DataFrame
+        각 ticker의 가장 최근 분기 데이터 (1행/ticker).
+        빈 입력이면 빈 DataFrame 반환.
+    """
+    if financial_df.empty:
+        return pd.DataFrame()
+
+    # 결정: as_of_date 기준 사용 가능한 분기들
+    available: set[tuple[int, int]] = set()
+    for y in range(as_of_date.year, as_of_date.year - 5, -1):
+        available.update(_get_available_year_quarter_set(y, as_of_date))
+
+    # 재무 데이터 필터링
+    mask = financial_df.apply(
+        lambda r: (int(r["year"]), int(r["quarter"])) in available,
+        axis=1,
+    )
+    eligible = financial_df[mask]
+    if eligible.empty:
+        return pd.DataFrame()
+
+    # ticker별 최신 분기
+    return (
+        eligible.sort_values(["ticker", "year", "quarter"])
+        .groupby("ticker")
+        .last()
+        .reset_index()
+    )
+
+
+def compute_ttm_snapshot(
+    financial_df: pd.DataFrame,
+    as_of_date: date,
+) -> pd.DataFrame:
+    """*as_of_date* 시점의 TTM (trailing_ni, trailing_ocf)를 ticker별로 계산합니다.
+
+    K-IFRS 누적 데이터에서 단일 분기 값을 역산한 후
+    최근 4개 단일 분기 값을 합산합니다.
+    """
+    if financial_df.empty:
+        return pd.DataFrame()
+
+    available: set[tuple[int, int]] = set()
+    for y in range(as_of_date.year, as_of_date.year - 5, -1):
+        available.update(_get_available_year_quarter_set(y, as_of_date))
+
+    mask = financial_df.apply(
+        lambda r: (int(r["year"]), int(r["quarter"])) in available,
+        axis=1,
+    )
+    eligible = financial_df[mask]
+    if eligible.empty:
+        return pd.DataFrame()
+
+    fin_sorted = eligible.sort_values(["ticker", "year", "quarter"])
+    ttm_rows: list[dict[str, Any]] = []
+
+    for ticker, grp in fin_sorted.groupby("ticker"):
+        grp = grp.tail(5) if len(grp) >= 5 else grp.tail(len(grp))
+        if len(grp) < 4:
+            continue
+
+        vals = grp[["net_income", "operating_cf"]].values.astype(float)
+        single_vals = vals.copy()
+        for i in range(1, len(vals)):
+            single_vals[i] = vals[i] - vals[i - 1]
+        last4 = single_vals[-4:]
+        ttm_rows.append({
+            "ticker": ticker,
+            "trailing_ni": float(last4.sum(axis=0)[0]),
+            "trailing_ocf": float(last4.sum(axis=0)[1]),
+        })
+
+    if not ttm_rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(ttm_rows)
+
+
 def get_available_lag(rebalance_date: date) -> date:
     """가장 최근에 이용 가능한 재무제표 기간 종료일을 반환합니다.
 

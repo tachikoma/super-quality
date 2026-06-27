@@ -70,8 +70,8 @@ class SuperQualityConfig(BaseSettings):
         description="증권사 수수료 (0.015%)",
     )
     TAX_RATE: float = Field(
-        default=0.0018,
-        description="거래세 (0.18%, 매도 시에만 부과)",
+        default=0.0020,
+        description="거래세 (0.20%, 매도 시에만 부과)",
     )
     SLIPPAGE: float = Field(
         default=0.001,
