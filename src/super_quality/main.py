@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from datetime import date, datetime
 
@@ -81,15 +80,17 @@ def _print_summary(metrics: dict[str, Any]) -> None:
 
 def _cmd_run(args: argparse.Namespace) -> None:
     """전체 백테스트 파이프라인을 실행합니다."""
-    # 1. 설정 — CLI 인자 우선, 없으면 환경 변수 사용
-    api_key = args.dart_api_key or os.environ.get("DART_API_KEY", "")
-    config = SuperQualityConfig(
-        DART_API_KEY=api_key,
-        START_DATE=_parse_date(args.start),
-        END_DATE=_parse_date(args.end) if args.end else date.today(),
-    )
+    # 1. 설정 — CLI 인자가 있으면 전달하고, 없으면 .env 파일에서 읽도록 둠
+    config_kwargs: dict[str, Any] = {
+        "START_DATE": _parse_date(args.start),
+        "END_DATE": _parse_date(args.end) if args.end else date.today(),
+    }
+    if args.dart_api_key:
+        config_kwargs["DART_API_KEY"] = args.dart_api_key
+    config = SuperQualityConfig(**config_kwargs)
     logger.info("설정이 로드되었습니다 (시작=%s, 종료=%s)", config.START_DATE, config.END_DATE)
-    if not config.DART_API_KEY:
+    api_key = config.DART_API_KEY
+    if not api_key:
         logger.warning(
             "DART_API_KEY가 설정되지 않았습니다. https://opendart.fss.or.kr 에서\n            API 키를 발급받아 --dart-api-key, DART_API_KEY 환경 변수 또는 .env 파일로 설정하십시오.\n        "
         )
@@ -102,23 +103,23 @@ def _cmd_run(args: argparse.Namespace) -> None:
     try:
         from super_quality.data.loader import (
             get_financial_data,
-            get_kosdaq_index,
             get_krx_listings,
+            get_market_index,
             get_price_data,
             get_retail_net_buy,
             get_paid_in_capital_increases,
         )
 
 
-        # 2a. 리스팅 → 코스닥(KOSDAQ) 필터링
+        # 2a. 리스팅 → KOSPI + KOSDAQ 필터링
         all_listings = get_krx_listings()
-        listings = all_listings[all_listings["market"] == "KOSDAQ"].copy()
+        listings = all_listings[all_listings["market"].isin(["KOSPI", "KOSDAQ"])].copy()
         tickers: list[str] = listings["ticker"].tolist()
-        logger.info("로드된 코스닥 티커 수: %d", len(tickers))
+        logger.info("로드된 티커 수: %d", len(tickers))
 
-        # 2b. 가격 데이터 + 코스닥 지수
+        # 2b. 가격 데이터 + 시장 지수
         price_data = get_price_data(tickers, config.START_DATE, config.END_DATE)
-        kosdaq_data = get_kosdaq_index(config.START_DATE, config.END_DATE)
+        index_data = get_market_index(config.MARKET_TIMING_TICKER, config.START_DATE, config.END_DATE)
 
         # 2c. 재무 데이터 (백테스트 기간의 연도 범위)
         from_date: date = _parse_date(args.start)
@@ -202,17 +203,20 @@ def _cmd_run(args: argparse.Namespace) -> None:
             fin_sorted = financial_data.sort_values(["ticker", "year", "quarter"])
             ttm_rows: list[dict[str, Any]] = []
             for ticker, grp in fin_sorted.groupby("ticker"):
-                grp = grp.tail(4)
+                # tail(5)로 5개 분기를 가져와 누적값을 역산
+                grp = grp.tail(5) if len(grp) >= 5 else grp.tail(len(grp))
                 if len(grp) < 4:
                     continue
                 vals = grp[["net_income", "operating_cf"]].values.astype(float)
                 single_vals = vals.copy()
                 for i in range(1, len(vals)):
                     single_vals[i] = vals[i] - vals[i - 1]
+                # 최근 4개 단일 분기값의 합 = TTM
+                last4 = single_vals[-4:]
                 ttm_rows.append({
                     "ticker": ticker,
-                    "trailing_ni": float(single_vals.sum(axis=0)[0]),
-                    "trailing_ocf": float(single_vals.sum(axis=0)[1]),
+                    "trailing_ni": float(last4.sum(axis=0)[0]),
+                    "trailing_ocf": float(last4.sum(axis=0)[1]),
                 })
             if ttm_rows:
                 ttm_df = pd.DataFrame(ttm_rows)
@@ -254,9 +258,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
         else:
             supply_df = pd.DataFrame(columns=["ticker", "supply_score", "supply_percentile"])
 
-        # 3d. 코스닥 타이밍 시그널
-        kosdaq_ma = KosdaqMAFactor().compute(kosdaq_data["close"])
-        kosdaq_signals = kosdaq_ma[["date", "buy_signal", "sell_signal"]].copy()
+        # 3d. 시장 타이밍 시그널
+        market_ma = KosdaqMAFactor().compute(index_data["close"])
+        market_signals = market_ma[["date", "buy_signal", "sell_signal"]].copy()
 
         # 3e. factor_data: 티커 × 날짜 그리드 구성
         # price_data의 모든 티커-날짜 쌍으로 시작
@@ -322,27 +326,60 @@ def _cmd_run(args: argparse.Namespace) -> None:
             factor_data.loc[dates[ago_mask].index, "share_change_5mo_ago"] = 1
 
         for col in ["trailing_ni", "trailing_ocf"]:
-            factor_data[col] = factor_data[col] if col in factor_data.columns else 0.0
+            if col in factor_data.columns:
+                factor_data[col] = factor_data[col].fillna(0.0)
+            else:
+                factor_data[col] = 0.0
 
 
-        # 코스닥 타이밍 시그널을 날짜별로 병합
-        if "buy_signal" in kosdaq_signals.columns:
-            kosdaq_merge = kosdaq_signals.copy()
-            kosdaq_merge["date"] = pd.to_datetime(kosdaq_merge["date"])
+        # 시장 타이밍 시그널을 날짜별로 병합
+        if "buy_signal" in market_signals.columns:
+            signal_merge = market_signals.copy()
+            signal_merge["date"] = pd.to_datetime(signal_merge["date"])
             factor_data = factor_data.merge(
-                kosdaq_merge[["date", "buy_signal", "sell_signal"]],
+                signal_merge[["date", "buy_signal", "sell_signal"]],
                 on="date",
                 how="left",
             )
-            factor_data["kosdaq_buy_signal"] = factor_data["buy_signal"].fillna(False)
-            factor_data["kosdaq_sell_signal"] = factor_data["sell_signal"].fillna(False)
-            factor_data.drop(columns=["buy_signal", "sell_signal"], inplace=True)
+            factor_data["buy_signal"] = factor_data["buy_signal"].fillna(False)
+            factor_data["sell_signal"] = factor_data["sell_signal"].fillna(False)
 
         logger.info(
             "팩터 데이터 생성 완료: %d행 × %d열",
             len(factor_data),
             len(factor_data.columns),
         )
+
+        # 진단: 조건별 통과 건수 출력
+        try:
+            from super_quality.strategies import SuperQualityStrategy
+            diag_strategy = SuperQualityStrategy(config)
+            diag = diag_strategy.evaluate_buy_conditions(factor_data)
+            diag["date"] = factor_data["date"].values
+            logger.info("=== 매수 조건 진단 ===")
+            for cond in ["a_pass", "b_pass", "c_pass", "d_pass", "e_pass", "f_pass", "g_pass", "h_pass"]:
+                cnt = int(diag[cond].sum())
+                logger.info("  %s: %d / %d (%.1f%%)", cond, cnt, len(diag), cnt / len(diag) * 100)
+            all_pass = int(diag["all_buy_conditions"].sum())
+            logger.info("  all_buy_conditions: %d / %d (%.1f%%)", all_pass, len(diag), all_pass / len(diag) * 100)
+            tickers_with_conditions = diag[diag["all_buy_conditions"]]["ticker"].nunique()
+            logger.info("  통과 티커 수: %d", tickers_with_conditions)
+            bs_dates = diag[diag["h_pass"]]["date"].nunique()
+            logger.info("  buy_signal True 일수: %d / %d", bs_dates, diag["date"].nunique())
+            # TTM 진단
+            ttm_ni_valid = int(factor_data["trailing_ni"].notna().sum()) if "trailing_ni" in factor_data.columns else 0
+            ttm_oc_valid = int(factor_data["trailing_ocf"].notna().sum()) if "trailing_ocf" in factor_data.columns else 0
+            logger.info("  trailing_ni 유효: %d / %d", ttm_ni_valid, len(factor_data))
+            logger.info("  trailing_ocf 유효: %d / %d", ttm_oc_valid, len(factor_data))
+            if ttm_ni_valid > 0:
+                ni_gt0 = int((factor_data["trailing_ni"] > 0).sum())
+                oc_gt0 = int((factor_data["trailing_ocf"] > 0).sum())
+                logger.info("  trailing_ni > 0: %d / %d", ni_gt0, ttm_ni_valid)
+                logger.info("  trailing_ocf > 0: %d / %d", oc_gt0, ttm_oc_valid)
+                logger.info("  trailing_ni 샘플: %s", factor_data.loc[factor_data["trailing_ni"] > 0, "trailing_ni"].head(3).tolist())
+                logger.info("  trailing_ocf 샘플: %s", factor_data.loc[factor_data["trailing_ocf"] > 0, "trailing_ocf"].head(3).tolist())
+        except Exception as diag_exc:
+            logger.warning("진단 중 오류: %s", diag_exc)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("팩터 계산 실패: %s", exc)
@@ -354,7 +391,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
     logger.info("백테스트 시뮬레이션을 실행 중입니다…")
     try:
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
     except Exception as exc:  # noqa: BLE001
         logger.error("백테스트 실패: %s", exc)
         import traceback

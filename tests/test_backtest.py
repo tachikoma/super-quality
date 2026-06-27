@@ -76,8 +76,8 @@ def _make_price_data(
     return df.set_index(["ticker", "date"]).sort_index()
 
 
-def _make_kosdaq_data(dates: list[date], close_prices: list[float] | None = None) -> pd.DataFrame:
-    """Create KOSDAQ index data with a rising trend (buy signal active)."""
+def _make_index_data(dates: list[date], close_prices: list[float] | None = None) -> pd.DataFrame:
+    """Create market index data with a rising trend (buy signal active)."""
     if close_prices is None:
         close_prices = [100.0 + i * 0.5 for i in range(len(dates))]
     df = pd.DataFrame({
@@ -153,12 +153,12 @@ class TestBacktestEngine:
         tickers = ["A", "B", "C"]
         dates = _make_dates(30)  # 30 trading days (KOSDAQ MA needs 10+ warmup)
         price_data = _make_price_data(tickers, dates)
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
         factor_data = _make_factor_data(tickers, dates, all_qualify=True)
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         # Portfolio snapshots should have one entry per date
         assert "portfolio_snapshots" in result
@@ -196,13 +196,13 @@ class TestBacktestEngine:
         tickers = ["A", "B"]
         dates = _make_dates(10)
         price_data = _make_price_data(tickers, dates)
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
         # Make all fail condition A (PBR percentile > 20%)
         factor_data = _make_factor_data(tickers, dates, all_qualify=False)
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         snapshots = result["portfolio_snapshots"]
         trade_log = result["trade_log"]
@@ -236,12 +236,12 @@ class TestBacktestEngine:
                 records.append(rec)
         price_data = pd.DataFrame(records).set_index(["ticker", "date"]).sort_index()
 
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
         factor_data = _make_factor_data(tickers, dates, all_qualify=True)
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         trade_log = result["trade_log"]
         if len(trade_log) > 0:
@@ -261,7 +261,7 @@ class TestBacktestEngine:
         tickers = [chr(ord("A") + i) for i in range(15)]  # 15 tickers
         dates = _make_dates(10)
         price_data = _make_price_data(tickers, dates)
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
 
         # All qualify but with varying priority scores
         records = []
@@ -284,7 +284,7 @@ class TestBacktestEngine:
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         # Total positions at any time should never exceed 10
         snapshots = result["portfolio_snapshots"]
@@ -302,12 +302,12 @@ class TestBacktestEngine:
         tickers = ["A"]
         dates = _make_dates(20)  # Enough dates for full round-trip
         price_data = _make_price_data(tickers, dates)
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
         factor_data = _make_factor_data(tickers, dates, all_qualify=True)
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         # Verify engine ran cleanly
         assert "trade_log" in result
@@ -317,7 +317,7 @@ class TestBacktestEngine:
         tickers = ["HIGH", "LOW"]
         dates = _make_dates(30)
         price_data = _make_price_data(tickers, dates)
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
 
         records = []
         for d in dates:
@@ -351,7 +351,7 @@ class TestBacktestEngine:
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         trade_log = result["trade_log"]
         # Both should have been bought (trades recorded)
@@ -366,12 +366,12 @@ class TestBacktestEngine:
         tickers = ["A"]
         dates = _make_dates(5)
         price_data = _make_price_data(tickers, dates)
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
         factor_data = _make_factor_data(tickers, dates)
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(zero_config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         snapshots = result["portfolio_snapshots"]
         assert snapshots["nav"].iloc[-1] == 0.0
@@ -382,12 +382,12 @@ class TestBacktestEngine:
         tickers = ["A"]
         dates = _make_dates(1)
         price_data = _make_price_data(tickers, dates)
-        kosdaq_data = _make_kosdaq_data(dates)
+        index_data = _make_index_data(dates)
         factor_data = _make_factor_data(tickers, dates)
         financial_data = _make_financial_data(tickers)
 
         engine = BacktestEngine(config)
-        result = engine.run(price_data, kosdaq_data, factor_data, financial_data)
+        result = engine.run(price_data, index_data, factor_data, financial_data)
 
         assert len(result["portfolio_snapshots"]) == 0
         assert len(result["trade_log"]) == 0
@@ -404,7 +404,7 @@ def test_empty_price_data(config: SuperQualityConfig) -> None:
     empty_price = pd.DataFrame(
         columns=["ticker", "date", "open", "high", "low", "close", "volume", "mcap"],
     ).set_index(["ticker", "date"])
-    kosdaq_data = _make_kosdaq_data(_make_dates(5))
+    index_data = _make_index_data(_make_dates(5))
     factor_data = pd.DataFrame(columns=[
         "ticker", "date", "pbr", "pbr_percentile", "mcap_percentile",
         "share_change_5mo_ago", "share_change_now",
@@ -413,7 +413,7 @@ def test_empty_price_data(config: SuperQualityConfig) -> None:
     ])
     financial_data = pd.DataFrame()
 
-    result = engine.run(empty_price, kosdaq_data, factor_data, financial_data)
+    result = engine.run(empty_price, index_data, factor_data, financial_data)
     assert len(result["portfolio_snapshots"]) == 0
     assert len(result["trade_log"]) == 0
 

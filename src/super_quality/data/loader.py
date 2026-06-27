@@ -262,6 +262,17 @@ def get_price_data(
                 shares_map[str(row["ticker"])] = float(row["Shares"])
             except (ValueError, TypeError, KeyError):
                 pass
+    # Shares 컬럼이 없으면 Marcap(시가총액 스냅샷)에서 역산
+    # (첫 번째 close가 있을 때 shhres로 변환)
+    shares_from_marcap: dict[str, float] = {}
+    if not shares_map and "Marcap" in listing.columns:
+        for _, row in listing.iterrows():
+            try:
+                val = float(row["Marcap"])
+                if val > 0:
+                    shares_from_marcap[str(row["ticker"])] = val
+            except (ValueError, TypeError, KeyError):
+                pass
 
     # ── 1. Discovery ──────────────────────────────────────────────
     years_needed = {str(y) for y in range(start_date.year, end_date.year + 1)}
@@ -363,19 +374,50 @@ def get_price_data(
         # Filter by requested range (cache may have wider data)
         result = result.loc[(slice(None), slice(start_date, end_date)), :]
 
+        # 캐시된 mcap이 모두 0이면 발행주식수 × 종가로 재계산
+        mcap_sum = int(result["mcap"].sum()) if "mcap" in result.columns else 0
+        if mcap_sum == 0:
+            if not shares_map and shares_from_marcap:
+                logger.info("Marcap → 발행주식수 역산 중…")
+                tickers_in_data = result.index.get_level_values("ticker").unique()
+                for tkr in tickers_in_data:
+                    tkr_str = str(tkr)
+                    marcap = shares_from_marcap.get(tkr_str)
+                    if marcap and marcap > 0:
+                        idx = pd.IndexSlice[tkr_str, :]
+                        closes = result.loc[idx, "close"].astype(float)
+                        first_close = closes[closes > 0]
+                        if not first_close.empty:
+                            shares_map[tkr_str] = marcap / float(first_close.iloc[0])
+                logger.info("  발행주식수 계산 완료: %d개 티커", len(shares_map))
+            if shares_map:
+                logger.info("mcap 재계산: close × 발행주식수")
+                tickers_in_data = result.index.get_level_values("ticker").unique()
+                updated = 0
+                for tkr in tickers_in_data:
+                    tkr_str = str(tkr)
+                    shares = shares_map.get(tkr_str, 0.0)
+                    if shares > 0:
+                        idx = pd.IndexSlice[tkr_str, :]
+                        result.loc[idx, "mcap"] = result.loc[idx, "close"].astype(float) * shares
+                        updated += 1
+                logger.info("mcap 재계산 완료: %d개 티커 업데이트", updated)
+
     return result
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 3.  KOSDAQ 지수
+# 3.  시장 지수
 # ═══════════════════════════════════════════════════════════════════
 
 
-def get_kosdaq_index(start: str | date, end: str | date) -> pd.DataFrame:
-    """KOSDAQ 지수 (``KQ11``) 종가를 다운로드합니다.
+def get_market_index(ticker: str, start: str | date, end: str | date) -> pd.DataFrame:
+    """지수 (``ticker``) 종가를 다운로드합니다.
 
     Parameters
     ----------
+    ticker : str
+        FinanceDataReader 지수 티커 (예: ``"KQ11"`` KOSDAQ, ``"KS11"`` KOSPI).
     start : str or date
         시작일.
     end : str or date
@@ -390,13 +432,13 @@ def get_kosdaq_index(start: str | date, end: str | date) -> pd.DataFrame:
 
     start_str = _to_str(start)
     end_str = _to_str(end)
-    cache_key = f"kosdaq_{start_str}_{end_str}"
+    cache_key = f"index_{ticker}_{start_str}_{end_str}"
 
     cached = _cache.get(cache_key)
     if cached is not None:
         return cached
 
-    raw = fdr.DataReader("KQ11", start_str, end_str)
+    raw = fdr.DataReader(ticker, start_str, end_str)
     if raw.empty:
         result = pd.DataFrame(columns=["close"])
     else:
@@ -426,6 +468,9 @@ def get_financial_data(
     api_key: str | None = None,
 ) -> pd.DataFrame:
     """OpenDartReader를 통해 연간 및 분기별 K-IFRS 재무 데이터를 가져옵니다.
+
+    티커별로 개별 캐싱하여 증분 다운로드를 지원합니다.
+    ``financial_meta.json``에 각 티커의 캐시된 연도를 기록합니다.
 
     Parameters
     ----------
@@ -461,155 +506,240 @@ def get_financial_data(
                 "file or environment variables."
             )
 
-    # 지연 임포트 — OpenDartReader는 실제로 사용될 때만 임포트
-    import OpenDartReader  # type: ignore[import-untyped]
+    requested_years = set(years)
 
-    dart = OpenDartReader.OpenDartReader(api_key)
-
-    cache_key = f"financial_{'_'.join(str(y) for y in years)}_{'_'.join(tickers)}"
-    cached = _cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    # 분기 → DART 보고서 코드 매핑
-    # 11013 = 1분기보고서 (Q1)
-    # 11012 = 반기보고서 (semi-annual)
-    # 11014 = 3분기보고서 (Q3)
-    # 11011 = 사업보고서 (annual)
-    report_codes: dict[int, str] = {
-        1: "11013",
-        2: "11012",
-        3: "11014",
-        4: "11011",
+    # 1. 메타데이터 로드 — 캐시된 티커/연도 확인
+    meta: dict[str, Any] = _cache.get_json("financial_meta") or {
+        "cache_version": 1,
+        "tickers": {},
     }
+    cached_tickers: dict[str, list[int]] = meta.get("tickers", {})
 
-    # K-IFRS 계정과목표 — 각 항목에 대해 여러 가능한 이름 시도
-    account_mapping: dict[str, list[str]] = {
-        "revenue": [
-            "ifrs-full_Revenue",
-            "ifrs_Revenue",
-            "매출액",
-        ],
-        "cogs": [
-            "ifrs-full_CostOfSales",
-            "ifrs_CostOfSales",
-            "매출원가",
-        ],
-        "net_income": [
-            "ifrs-full_ProfitLoss",
-            "ifrs_ProfitLoss",
-            "당기순이익",
-        ],
-        "operating_cf": [
-            "ifrs-full_CashFlowsFromOperatingActivities",
-            "ifrs_CashFlowsFromOperatingActivities",
-            "영업현금흐름",
-        ],
-        "total_assets": [
-            "ifrs-full_Assets",
-            "ifrs_Assets",
-            "자산총계",
-        ],
-        "total_equity": [
-            "ifrs-full_Equity",
-            "ifrs_Equity",
-            "자본총계",
-        ],
-    }
-
-    def _find_account(data: list[dict[str, Any]] | pd.DataFrame, possible_names: list[str]) -> float | None:
-        """*data*에서 첫 번째로 일치하는 계정명을 검색합니다."""
-        if isinstance(data, pd.DataFrame):
-            for _, row in data.iterrows():
-                name = str(row.get("account_nm", row.get("account_id", "")))
-                if name in possible_names:
-                    try:
-                        return float(row.get("amt", row.get("amount", 0)))
-                    except (ValueError, TypeError):
-                        return None
-        elif isinstance(data, list):
-            for item in data:
-                name = str(item.get("account_nm", item.get("account_id", "")))
-                if name in possible_names:
-                    try:
-                        return float(item.get("amt", item.get("amount", 0)))
-                    except (ValueError, TypeError):
-                        return None
-        elif isinstance(data, dict):
-            # 데이터가 계정명을 키로 직접 매핑되어 있을 수 있음
-            for name in possible_names:
-                if name in data:
-                    try:
-                        return float(data[name])
-                    except (ValueError, TypeError):
-                        return None
-        return None
-
-    def _get_shares_from_dart(
-        dart_client: Any, ticker: str, year: int
-    ) -> float | None:
-        """``ps_blsstu``를 통해 발행주식수를 조회합니다."""
-        try:
-            shares_data = dart_client.ps_blsstu(ticker, year)
-            time.sleep(0.5)  # rate limit
-            if isinstance(shares_data, pd.DataFrame) and not shares_data.empty:
-                # 발행주식수 관련 공통 컬럼명
-                for col in ("stk_cnt", "istc_totqy", "발행주식수"):
-                    if col in shares_data.columns:
-                        return float(shares_data[col].iloc[0])
-                # 대체: 첫 번째 숫자형 컬럼
-                for col in shares_data.columns:
-                    try:
-                        val = float(shares_data[col].iloc[0])
-                        if val > 0:
-                            return val
-                    except (ValueError, TypeError):
-                        continue
-            elif isinstance(shares_data, (list, dict)):
-                # 중첩된 구조에서 추출 시도
-                items = shares_data if isinstance(shares_data, list) else [shares_data]
-                for item in items:
-                    for key in ("stk_cnt", "istc_totqy", "발행주식수"):
-                        if key in item:
-                            return float(item[key])
-        except Exception:
-            pass
-        return None
-
-    records: list[dict[str, Any]] = []
+    # 2. 누락된 (티커, 연도) 결정
+    missing: dict[str, list[int]] = {}
     for ticker in tickers:
-        ticker_cache: dict[int, float | None] = {}  # 연도별 발행주식수 캐시
+        cached_years = set(cached_tickers.get(ticker, []))
+        need = requested_years - cached_years
+        if need:
+            missing[ticker] = sorted(need)
 
-        for year in years:
-            # 분기별로 (ticker, year) 당 발행주식수 캐시
-            if year not in ticker_cache:
-                ticker_cache[year] = _get_shares_from_dart(dart, ticker, year)
+    # 3. 누락된 데이터만 다운로드
+    if missing:
+        import OpenDartReader  # type: ignore[import-untyped]
 
-            for quarter, reprt_code in report_codes.items():
-                try:
-                    fin_data = dart.finance(ticker, year, reprt_code)
-                    time.sleep(0.5)  # rate limit
-                except Exception:
+        dart = OpenDartReader(api_key)
+
+        account_mapping: dict[str, list[str]] = {
+            "revenue": [
+                "ifrs-full_Revenue",
+                "ifrs_Revenue",
+                "매출액",
+            ],
+            "cogs": [
+                "ifrs-full_CostOfSales",
+                "ifrs_CostOfSales",
+                "매출원가",
+            ],
+            "net_income": [
+                "ifrs-full_ProfitLoss",
+                "ifrs_ProfitLoss",
+                "당기순이익",
+            ],
+            "operating_cf": [
+                "ifrs-full_CashFlowsFromOperatingActivities",
+                "ifrs_CashFlowsFromOperatingActivities",
+                "영업활동현금흐름",
+                "영업현금흐름",
+            ],
+            "total_assets": [
+                "ifrs-full_Assets",
+                "ifrs_Assets",
+                "자산총계",
+            ],
+            "total_equity": [
+                "ifrs-full_Equity",
+                "ifrs_Equity",
+                "자본총계",
+            ],
+        }
+
+        def _find_account(
+            data: list[dict[str, Any]] | pd.DataFrame,
+            possible_names: list[str],
+            column_name: str | None = None,
+        ) -> float | None:
+            def _get_name(item: Any) -> str:
+                return str(item.get("account_nm", item.get("account_id", "")))
+
+            def _get_val(item: Any) -> float | None:
+                for col in ("thstrm_amount", "amt", "amount"):
+                    val = item.get(col)
+                    if val is not None:
+                        try:
+                            return float(val)
+                        except (ValueError, TypeError):
+                            continue
+                return None
+
+            # Collect all rows
+            rows: list[dict[str, Any]] = []
+            if isinstance(data, pd.DataFrame):
+                for _, r in data.iterrows():
+                    rows.append(r.to_dict())
+            elif isinstance(data, list):
+                rows = list(data)
+            elif isinstance(data, dict):
+                for name in possible_names:
+                    if name in data:
+                        return _get_val(data)
+                return None
+            else:
+                return None
+
+            # Pass 1: exact match
+            for row in rows:
+                name = _get_name(row)
+                if name in possible_names:
+                    val = _get_val(row)
+                    if val is not None:
+                        return val
+
+            # Pass 2: containment match (possible name is substring of account name, or vice versa)
+            for row in rows:
+                name = _get_name(row)
+                for pn in possible_names:
+                    if pn in name or name in pn:
+                        val = _get_val(row)
+                        if val is not None:
+                            return val
+
+            # Pass 3: keyword-based fallback
+            if column_name == "net_income":
+                for row in rows:
+                    name = _get_name(row)
+                    if "순이익" in name and "주당" not in name and "희석" not in name:
+                        val = _get_val(row)
+                        if val is not None:
+                            return val
+            elif column_name == "operating_cf":
+                for row in rows:
+                    name = _get_name(row)
+                    if "영업" in name and "현금흐름" in name and "재무" not in name and "투자" not in name:
+                        val = _get_val(row)
+                        if val is not None:
+                            return val
+
+            return None
+
+        def _get_shares_from_dart(
+            dart_client: Any, ticker: str, year: int
+        ) -> float | None:
+            try:
+                shares_data = dart_client.ps_blsstu(ticker, year)
+                time.sleep(0.5)
+                if isinstance(shares_data, pd.DataFrame) and not shares_data.empty:
+                    for col in ("stk_cnt", "istc_totqy", "발행주식수"):
+                        if col in shares_data.columns:
+                            return float(shares_data[col].iloc[0])
+                    for col in shares_data.columns:
+                        try:
+                            val = float(shares_data[col].iloc[0])
+                            if val > 0:
+                                return val
+                        except (ValueError, TypeError):
+                            continue
+                elif isinstance(shares_data, (list, dict)):
+                    items = shares_data if isinstance(shares_data, list) else [shares_data]
+                    for item in items:
+                        for key in ("stk_cnt", "istc_totqy", "발행주식수"):
+                            if key in item:
+                                return float(item[key])
+            except Exception:
+                pass
+            return None
+
+        for ticker, need_years in missing.items():
+            existing = _cache.get(f"financial_{ticker}")
+            existing_records: list[dict[str, Any]] = []
+            if existing is not None and not existing.empty:
+                existing_records = existing.to_dict("records")
+
+            new_records: list[dict[str, Any]] = []
+            ticker_cache: dict[int, float | None] = {}
+
+            for year in need_years:
+                if year not in ticker_cache:
+                    ticker_cache[year] = _get_shares_from_dart(dart, ticker, year)
+
+                available = _get_available_quarters(year)
+                if not available:
+                    logger.debug("  연도 %d에 사용 가능한 분기 없음 (as_of=%s)", year, date.today())
                     continue
 
-                if fin_data is None or (
-                    isinstance(fin_data, pd.DataFrame) and fin_data.empty
-                ):
-                    continue
+                for quarter, reprt_code in available.items():
+                    fin_data = None
+                    for fs_div in ("CFS", "OFS"):
+                        try:
+                            fin_data = dart.finstate_all(ticker, year, reprt_code, fs_div=fs_div)
+                            time.sleep(0.5)
+                        except Exception:
+                            continue
 
-                record: dict[str, Any] = {
-                    "ticker": ticker,
-                    "year": year,
-                    "quarter": quarter,
-                    "shares_outstanding": ticker_cache[year],
-                }
+                        if fin_data is not None and (
+                            isinstance(fin_data, pd.DataFrame) and not fin_data.empty
+                        ):
+                            break
 
-                for col, names in account_mapping.items():
-                    record[col] = _find_account(fin_data, names)
+                    if fin_data is None or (
+                        isinstance(fin_data, pd.DataFrame) and fin_data.empty
+                    ):
+                        logger.debug(
+                            "  재무 데이터 없음: %s %d Q%d (CFS/OFS 모두 실패)",
+                            ticker, year, quarter,
+                        )
+                        continue
 
-                records.append(record)
+                    record: dict[str, Any] = {
+                        "ticker": ticker,
+                        "year": year,
+                        "quarter": quarter,
+                        "shares_outstanding": ticker_cache[year],
+                    }
+                    for col, names in account_mapping.items():
+                        record[col] = _find_account(fin_data, names, column_name=col)
+                    new_records.append(record)
 
-    if not records:
+            if new_records:
+                combined = pd.concat(
+                    [pd.DataFrame(existing_records), pd.DataFrame(new_records)],
+                    ignore_index=True,
+                )
+                combined = combined.sort_values(
+                    ["ticker", "year", "quarter"]
+                ).drop_duplicates(
+                    subset=["ticker", "year", "quarter"], keep="last"
+                ).reset_index(drop=True)
+                _cache.put(f"financial_{ticker}", combined)
+
+                # 메타데이터 업데이트 — 실제 데이터를 가져온 경우에만
+                cached_years_set = set(cached_tickers.get(ticker, []))
+                cached_years_set.update(need_years)
+                cached_tickers[ticker] = sorted(cached_years_set)
+
+        if any(cached_tickers.get(t) for t in tickers):
+            meta["tickers"] = cached_tickers
+            _cache.put_json("financial_meta", meta)
+
+    # 4. 요청된 티커/연도에 맞게 조합
+    frames: list[pd.DataFrame] = []
+    for ticker in tickers:
+        df = _cache.get(f"financial_{ticker}")
+        if df is not None and not df.empty:
+            subset = df[df["year"].isin(years)].copy()
+            if not subset.empty:
+                frames.append(subset)
+
+    if not frames:
         result = pd.DataFrame(
             columns=[
                 "ticker",
@@ -625,13 +755,18 @@ def get_financial_data(
             ],
         )
     else:
-        result = pd.DataFrame(records)
-        # 일관된 출력을 위해 정렬
-        result = result.sort_values(["ticker", "year", "quarter"]).reset_index(
-            drop=True
-        )
+        result = pd.concat(frames, ignore_index=True)
+        result = result.sort_values(["ticker", "year", "quarter"]).reset_index(drop=True)
 
-    _cache.put(cache_key, result)
+    if not result.empty:
+        key_cols = ["revenue", "net_income", "operating_cf", "total_assets", "total_equity"]
+        non_null_counts = {col: result[col].notna().sum() for col in key_cols if col in result.columns}
+        logger.info(
+            "재무 데이터 요약: %d행, 티커 %d개",
+            len(result), result["ticker"].nunique(),
+        )
+        logger.info("  NaN이 아닌 값: %s", non_null_counts)
+
     return result
 
 
@@ -724,6 +859,8 @@ def get_shares_outstanding(
     1. OpenDartReader ``ps_blsstu`` (연간 데이터, forward-filled)
     2. FinanceDataReader ``StockListing`` (현재 주식수, 상수)
 
+    티커별로 캐싱되어 증분 조회를 지원합니다 (``shares_{ticker}``).
+
     Parameters
     ----------
     ticker : str
@@ -742,43 +879,46 @@ def get_shares_outstanding(
         config = SuperQualityConfig()
         api_key = config.DART_API_KEY
 
-    # 모든 일자를 date 객체로 변환
     date_objs = sorted(_to_date(d) for d in dates)
+    years_needed = sorted({d.year for d in date_objs})
 
-    # 전략 1: OpenDartReader ps_blsstu
-    if api_key:
+    # 캐시 확인
+    cached_years: dict[int, float] = _cache.get_json(f"shares_{ticker}") or {}
+    missing_years = [y for y in years_needed if y not in cached_years]
+
+    # 전략 1: OpenDartReader ps_blsstu (캐시에 없는 연도만)
+    if missing_years and api_key:
         import OpenDartReader  # type: ignore[import-untyped]
 
-        dart = OpenDartReader.OpenDartReader(api_key)
-        years_needed = sorted({d.year for d in date_objs})
-        year_shares: dict[int, float] = {}
-
-        for yr in years_needed:
+        dart = OpenDartReader(api_key)
+        for yr in missing_years:
             try:
                 shares_data = dart.ps_blsstu(ticker, yr)
                 time.sleep(0.5)
                 if isinstance(shares_data, pd.DataFrame) and not shares_data.empty:
                     for col in ("stk_cnt", "istc_totqy", "발행주식수"):
                         if col in shares_data.columns:
-                            year_shares[yr] = float(shares_data[col].iloc[0])
+                            cached_years[yr] = float(shares_data[col].iloc[0])
                             break
             except Exception:
                 continue
 
-        if year_shares:
-            values = []
-            for d in date_objs:
-                # 해당 일자 이전(또는 당일)에 사용 가능한 가장 최근 연간 데이터 사용
-                applicable_year = max(
-                    (y for y in year_shares if y <= d.year),
-                    default=None,
-                )
-                if applicable_year is not None:
-                    values.append(year_shares[applicable_year])
-                else:
-                    values.append(float("nan"))
-            result = pd.Series(values, index=pd.DatetimeIndex(date_objs), name="shares_outstanding")
-            return result
+        if cached_years:
+            _cache.put_json(f"shares_{ticker}", cached_years)
+
+    if cached_years:
+        values = []
+        for d in date_objs:
+            applicable_year = max(
+                (y for y in cached_years if y <= d.year),
+                default=None,
+            )
+            if applicable_year is not None:
+                values.append(cached_years[applicable_year])
+            else:
+                values.append(float("nan"))
+        result = pd.Series(values, index=pd.DatetimeIndex(date_objs), name="shares_outstanding")
+        return result
 
     # 전략 2: FinanceDataReader StockListing (현재 발행주식수)
     listing = get_krx_listings()
@@ -799,6 +939,112 @@ def get_shares_outstanding(
         name="shares_outstanding",
     )
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 6.5  유상증자 일정
+# ═══════════════════════════════════════════════════════════════════
+
+
+def get_paid_in_capital_increases(
+    ticker: str,
+    years: list[int],
+    api_key: str | None = None,
+) -> list[date]:
+    """OpenDartReader ``report`` 키워드 검색을 통해 유상증자 일정을 조회합니다.
+
+    증권신고서(reprt_code=11011)에서 '유상증자' 키워드로 검색한 뒤,
+    증자 방식(``isu_dcrs_stle``)에 '유상'이 포함된 건의 일자를 반환합니다.
+
+    티커별로 캐싱되어 증분 조회를 지원합니다 (``paid_capital_{ticker}``).
+
+    Parameters
+    ----------
+    ticker : str
+        6자리 종목 코드.
+    years : list[int]
+        조회할 회계연도 리스트.
+    api_key : str or None
+        DART API 키. ``None``이면 환경 변수/설정에서 읽습니다.
+
+    Returns
+    -------
+    list[date]
+        유상증자 발생일 리스트. 조회 불가 또는 해당 건이 없으면 빈 리스트.
+    """
+    if not api_key:
+        from super_quality.config import SuperQualityConfig
+
+        config = SuperQualityConfig()
+        api_key = config.DART_API_KEY
+        if not api_key:
+            return []
+
+    requested_years = set(years)
+
+    # 캐시 확인
+    cached: dict[str, list[str]] = _cache.get_json(f"paid_capital_{ticker}") or {}
+    cached_years: set[int] = set(int(k) for k in cached)
+    missing_years = sorted(requested_years - cached_years)
+
+    if not missing_years:
+        # 캐시에서만 조합
+        result: list[date] = []
+        for y in sorted(years):
+            result.extend(
+                datetime.strptime(d, "%Y-%m-%d").date()
+                for d in cached.get(str(y), [])
+            )
+        return sorted(set(result))
+
+    import OpenDartReader  # type: ignore[import-untyped]
+
+    dart = OpenDartReader(api_key)
+
+    for year in missing_years:
+        dates_str: list[str] = []
+        try:
+            sd = dart.report(ticker, "증자", year, reprt_code="11011")
+            time.sleep(0.5)
+        except Exception:
+            continue
+        if sd is None or (isinstance(sd, pd.DataFrame) and sd.empty):
+            continue
+        if isinstance(sd, pd.DataFrame):
+            for _, row in sd.iterrows():
+                style = str(row.get("isu_dcrs_stle", ""))
+                if "유상" not in style:
+                    continue
+                raw = str(row.get("isu_dcrs_de", ""))
+                for fmt in ("%Y.%m.%d", "%Y-%m-%d", "%Y%m%d"):
+                    try:
+                        dates_str.append(datetime.strptime(raw, fmt).date().isoformat())
+                        break
+                    except ValueError:
+                        continue
+        elif isinstance(sd, dict):
+            style = str(sd.get("isu_dcrs_stle", ""))
+            if "유상" not in style:
+                continue
+            raw = str(sd.get("isu_dcrs_de", ""))
+            for fmt in ("%Y.%m.%d", "%Y-%m-%d", "%Y%m%d"):
+                try:
+                    dates_str.append(datetime.strptime(raw, fmt).date().isoformat())
+                    break
+                except ValueError:
+                    continue
+
+        cached[str(year)] = dates_str
+
+    _cache.put_json(f"paid_capital_{ticker}", cached)
+
+    result = []
+    for y in sorted(years):
+        result.extend(
+            datetime.strptime(d, "%Y-%m-%d").date()
+            for d in cached.get(str(y), [])
+        )
+    return sorted(set(result))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -889,6 +1135,35 @@ def calculate_ttm(
 # ═══════════════════════════════════════════════════════════════════
 # 8.  사용 가능한 재무 데이터 시차
 # ═══════════════════════════════════════════════════════════════════
+
+
+def _get_available_quarters(
+    target_year: int,
+    as_of_date: date | None = None,
+) -> dict[int, str]:
+    """*as_of_date* 시점에 조회 가능한 분기별 보고서 코드를 반환합니다.
+
+    12월 결산 기업 기준:
+    - Q1 (11013): 5월 15일 이후
+    - 반기 (11012): 8월 15일 이후
+    - Q3 (11014): 11월 15일 이후
+    - 연간 (11011): 다음 해 3월 31일 이후
+    """
+    as_of_date = as_of_date or date.today()
+
+    deadlines: dict[int, date] = {
+        1: date(target_year, 5, 15),
+        2: date(target_year, 8, 15),
+        3: date(target_year, 11, 15),
+        4: date(target_year + 1, 3, 31),
+    }
+    codes: dict[int, str] = {
+        1: "11013",
+        2: "11012",
+        3: "11014",
+        4: "11011",
+    }
+    return {q: codes[q] for q, d in deadlines.items() if as_of_date >= d}
 
 
 def get_available_lag(rebalance_date: date) -> date:

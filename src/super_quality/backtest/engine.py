@@ -42,7 +42,7 @@ class BacktestEngine:
     def run(
         self,
         price_data: pd.DataFrame,
-        kosdaq_data: pd.DataFrame,
+        index_data: pd.DataFrame,
         factor_data: pd.DataFrame,
         financial_data: pd.DataFrame,  # noqa: ARG002 — reserved for future pre-processing
     ) -> dict[str, Any]:
@@ -53,8 +53,8 @@ class BacktestEngine:
         price_data : pd.DataFrame
             MultiIndex ``(ticker, date)``이며 ``open``, ``high``,
             ``low``, ``close``, ``volume``, ``mcap`` 컬럼을 포함.
-        kosdaq_data : pd.DataFrame
-            ``date``를 index로 하고 ``close`` 컬럼을 가진 DataFrame (KOSDAQ 지수 종가).
+        index_data : pd.DataFrame
+            ``date``를 index로 하고 ``close`` 컬럼을 가진 DataFrame (시장 지수 종가).
         factor_data : pd.DataFrame
             ``ticker``, ``date`` 컬럼 및
             :meth:`SuperQualityStrategy.evaluate_buy_conditions`에 필요한
@@ -79,35 +79,35 @@ class BacktestEngine:
         """
         _ = financial_data  # 예약됨
 
-        # ── KOSDAQ 타이밍 신호 미리 계산 ────────────────────────
-        kosdaq_signals = self._compute_kosdaq_signals(kosdaq_data)
+        # ── 시장 타이밍 신호 미리 계산 ────────────────────────
+        index_signals = self._compute_index_signals(index_data)
 
-        # ── factor_data에 kosdaq_buy_signal 컬럼 추가 ──────────────────
-        factor_data = self._enrich_factor_data(factor_data, kosdaq_signals)
+        # ── factor_data에 buy_signal 컬럼 추가 ──────────────────
+        factor_data = self._enrich_factor_data(factor_data, index_signals)
 
         # ── 모든 ticker × date에 대해 매수 조건 미리 평가 ──
         condition_data = self.strategy.evaluate_buy_conditions(factor_data)
         condition_data["date"] = factor_data["date"].values
 
         # ── 일별 루프 실행 ───────────────────────────────────────
-        return self._run_daily_loop(price_data, condition_data, kosdaq_signals)
+        return self._run_daily_loop(price_data, condition_data, index_signals)
 
     # ═══════════════════════════════════════════════════════════════════
     # 내부 메서드
     # ═══════════════════════════════════════════════════════════════════
 
     @staticmethod
-    def _compute_kosdaq_signals(kosdaq_data: pd.DataFrame) -> pd.DataFrame:
-        """KOSDAQ 이동 평균 타이밍 신호를 계산합니다.
+    def _compute_index_signals(index_data: pd.DataFrame) -> pd.DataFrame:
+        """시장 지수 이동 평균 타이밍 신호를 계산합니다.
 
         ``buy_signal``과 ``sell_signal`` (모두 bool) 컬럼을 가진
         ``date``를 index로 하는 DataFrame을 반환합니다.
         """
         factor = KosdaqMAFactor()
         close_series: pd.Series = (
-            kosdaq_data["close"]
-            if "close" in kosdaq_data.columns
-            else kosdaq_data.iloc[:, 0]
+            index_data["close"]
+            if "close" in index_data.columns
+            else index_data.iloc[:, 0]
         )
         signals = factor.compute(close_series)
         signals = signals.set_index("date")
@@ -118,37 +118,37 @@ class BacktestEngine:
     @staticmethod
     def _enrich_factor_data(
         factor_data: pd.DataFrame,
-        kosdaq_signals: pd.DataFrame,
+        index_signals: pd.DataFrame,
     ) -> pd.DataFrame:
-        """``kosdaq_buy_signal`` 컬럼을 *factor_data*에 추가합니다.
+        """``buy_signal`` 컬럼을 *factor_data*에 추가합니다.
 
         각 행에 대해, 해당 행의 ``date``와 같거나 이전인 가장 최근
-        KOSDAQ 신호값이 사용됩니다 (룩어헤드 방지).
+        시장 신호값이 사용됩니다 (룩어헤드 방지).
         """
-        if "kosdaq_buy_signal" in factor_data.columns:
+        if "buy_signal" in factor_data.columns:
             return factor_data
 
         df = factor_data.copy()
         # asof 병합이 올바르게 작동하도록 정렬
-        kosdaq = kosdaq_signals[["buy_signal"]].copy()
-        kosdaq.index.name = "date"
-        kosdaq = kosdaq.reset_index()
+        sig = index_signals[["buy_signal"]].copy()
+        sig.index.name = "date"
+        sig = sig.reset_index()
 
         # 두 date 컬럼이 비교 가능한지 확인
         df["_date"] = pd.to_datetime(df["date"])
-        kosdaq["_date"] = pd.to_datetime(kosdaq["date"])
+        sig["_date"] = pd.to_datetime(sig["date"])
 
-        kosdaq = kosdaq.sort_values("_date")
+        sig = sig.sort_values("_date")
         df = df.sort_values("_date")
 
         # Forward-fill: 각 factor 행에 대해 해당 날짜 이전의
-        # 가장 최신 kosdaq 신호값을 가져옴
-        df["kosdaq_buy_signal"] = np.nan
+        # 가장 최신 시장 신호값을 가져옴
+        df["buy_signal"] = np.nan
         # 수동 asof 병합
-        kosdaq_sorted = kosdaq.set_index("_date")["buy_signal"]
-        df["kosdaq_buy_signal"] = (
+        sig_sorted = sig.set_index("_date")["buy_signal"]
+        df["buy_signal"] = (
             df.set_index("_date")[[]]
-            .join(kosdaq_sorted, how="left")
+            .join(sig_sorted, how="left")
             .ffill()["buy_signal"]
             .fillna(False)
             .values
@@ -163,7 +163,7 @@ class BacktestEngine:
         self,
         price_data: pd.DataFrame,
         condition_data: pd.DataFrame,
-        kosdaq_signals: pd.DataFrame,
+        index_signals: pd.DataFrame,
     ) -> dict[str, Any]:
         """반복 일별 백테스트를 실행합니다.
 
@@ -173,7 +173,7 @@ class BacktestEngine:
         2. **실행**: 전일 결정된 조건부(conditional) 매도 주문을 *당일* 시가로 정산
         3. **실행**: 전일 제출된 매수 주문 — *당일* 저가가 지정가(전일종가 × 0.99) 이하인지 확인
         4. **평가**: 보유 포지션의 매도 조건 평가 (*전일* 종가 데이터 사용)
-        5. **평가**: 신규 포지션의 매수 조건 평가 (*전일* 팩터 / KOSDAQ 데이터 사용)
+        5. **평가**: 신규 포지션의 매수 조건 평가 (*전일* 팩터 / 시장 데이터 사용)
         6. **기록**: 일별 포트폴리오 스냅샷 저장
         """
         config = self.config
@@ -191,19 +191,19 @@ class BacktestEngine:
             for _, row in grp.iterrows():
                 cond_lookup[d_key][str(row["ticker"])] = row.to_dict()
 
-        # ── KOSDAQ 신호 조회 ──
-        def _kosdaq_signal(d: date, col: str) -> bool:
-            """*d*보다 작거나 같은 가장 최근 날짜의 KOSDAQ 신호(*col*)를 반환합니다."""
+        # ── 시장 신호 조회 ──
+        def _index_signal(d: date, col: str) -> bool:
+            """*d*보다 작거나 같은 가장 최근 날짜의 시장 신호(*col*)를 반환합니다."""
             ts = pd.Timestamp(d)
-            mask = kosdaq_signals.index <= ts
+            mask = index_signals.index <= ts
             if not mask.any():
                 return False
-            latest = kosdaq_signals.loc[mask].iloc[-1]
+            latest = index_signals.loc[mask].iloc[-1]
             return bool(latest[col])
 
-        def _nearest_kosdaq_signal(prev: date, col: str) -> bool:
-            """_kosdaq_signal과 동일하지만 bool을 안전하게 반환합니다."""
-            return _kosdaq_signal(prev, col)
+        def _nearest_index_signal(prev: date, col: str) -> bool:
+            """_index_signal과 동일하지만 bool을 안전하게 반환합니다."""
+            return _index_signal(prev, col)
 
         # ── 상태 ────────────────────────────────────────────────────
         cash = float(config.INITIAL_CAPITAL)
@@ -339,7 +339,7 @@ class BacktestEngine:
             prev_date_obj = prev_date if isinstance(prev_date, date) else pd.Timestamp(prev_date).date()
 
             # 2a. 보유 포지션의 매도 조건 평가
-            kosdaq_sell = _nearest_kosdaq_signal(prev_date_obj, "sell_signal")
+            index_sell = _nearest_index_signal(prev_date_obj, "sell_signal")
 
             for ticker, pos in list(positions.items()):
                 prev_close = _price(ticker, prev_ts, "close")  # type: ignore[arg-type]
@@ -355,7 +355,7 @@ class BacktestEngine:
                     current_price=prev_close,
                     entry_price=pos["entry_price"],
                     hold_days=hold_days,
-                    kosdaq_sell_signal=kosdaq_sell,
+                    sell_signal=index_sell,
                 )
                 if reason is None:
                     continue
@@ -366,9 +366,9 @@ class BacktestEngine:
                     conditional_sell_queue.append((ticker, pos["shares"], reason))
 
             # 2b. 신규 포지션의 매수 조건 평가
-            kosdaq_buy = _nearest_kosdaq_signal(prev_date_obj, "buy_signal")
+            index_buy = _nearest_index_signal(prev_date_obj, "buy_signal")
 
-            if kosdaq_buy:
+            if index_buy:
                 # prev_date의 조건 데이터 가져오기
                 prev_cond = cond_lookup.get(prev_date_obj, {})
                 qualifying = [

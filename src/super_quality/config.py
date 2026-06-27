@@ -5,6 +5,7 @@ pydantic-settings를 사용하여 환경 변수와 .env 파일에서 설정을 �
 
 import os
 from datetime import date
+from pathlib import Path
 from warnings import warn
 
 from pydantic import Field
@@ -70,7 +71,7 @@ class SuperQualityConfig(BaseSettings):
     )
     TAX_RATE: float = Field(
         default=0.0018,
-        description="코스닥 거래세 (0.18%, 매도 시에만 부과)",
+        description="거래세 (0.18%, 매도 시에만 부과)",
     )
     SLIPPAGE: float = Field(
         default=0.001,
@@ -92,13 +93,13 @@ class SuperQualityConfig(BaseSettings):
     )
 
     # ── 시장 데이터 ──────────────────────────────────────────────────
-    KOSDAQ_TICKER: str = Field(
+    MARKET_TIMING_TICKER: str = Field(
         default="KQ11",
-        description="FinanceDataReader용 코스닥 지수 티커",
+        description="FinanceDataReader용 시장 타이밍 지수 티커 (KOSDAQ=KQ11)",
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parent.parent.parent / ".env",
         env_file_encoding="utf-8",
         validate_default=True,
     )
@@ -108,6 +109,8 @@ class SuperQualityConfig(BaseSettings):
         if self.KRX_ID and self.KRX_PW:
             os.environ.setdefault("KRX_ID", self.KRX_ID)
             os.environ.setdefault("KRX_PW", self.KRX_PW)
+        if self.DART_API_KEY:
+            os.environ.setdefault("DART_API_KEY", self.DART_API_KEY)
         if not self.DART_API_KEY:
             warn(
                 "DART_API_KEY가 비어 있습니다 — OpenDartReader를 통한 "

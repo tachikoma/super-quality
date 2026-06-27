@@ -12,7 +12,7 @@ src/super_quality/factors/
 ├── base.py          # Abstract base class for factors
 ├── value.py         # PBR and market‑cap percentile factor
 ├── quality.py       # GP/A, dividend‑free score factor
-├── market_timing.py # KOSDAQ moving‑average based entry/exit signals
+├── market_timing.py # Market timing via KOSDAQ index (KQ11) MA signals
 └── supply.py        # Net investor buying‑selling power factor
 ```
 

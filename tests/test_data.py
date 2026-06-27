@@ -245,7 +245,6 @@ class TestGetPaidInCapitalIncreases:
                     "isu_dcrs_qy": ["74700000", "58", "6818182"],
                 })
 
-        # Inject MockDartReader into sys.modules
         monkeypatch.setitem(sys.modules, "OpenDartReader", MockDartReader)
 
         dates = get_paid_in_capital_increases("079160", [2023], api_key="mock_key")

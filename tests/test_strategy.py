@@ -41,7 +41,7 @@ def _make_buy_df(**overrides: dict) -> pd.DataFrame:
         "trailing_ni": [100.0, 200.0, 300.0],            # E: > 0
         "trailing_ocf": [50.0, 60.0, 70.0],              # F: > 0
         "mcap_percentile": [25.0, 30.0, 20.0],           # G: ≤ 40
-        "kosdaq_buy_signal": [True, True, True],          # H: True
+        "buy_signal": [True, True, True],          # H: True
         "gpa_percentile": [80.0, 50.0, 90.0],
         "supply_percentile": [70.0, 60.0, 80.0],
     }
@@ -136,11 +136,11 @@ class TestEvaluateBuyConditions:
         assert list(result["g_pass"]) == [True, False, True]
         assert list(result["all_buy_conditions"]) == [True, False, True]
 
-    def test_condition_h_fails_no_kosdaq_buy(
+    def test_condition_h_fails_no_buy_signal(
         self, strategy: SuperQualityStrategy,
     ) -> None:
-        """kosdaq_buy_signal = False → H fails."""
-        df = _make_buy_df(kosdaq_buy_signal=[True, False, True])
+        """buy_signal = False → H fails."""
+        df = _make_buy_df(buy_signal=[True, False, True])
         result = strategy.evaluate_buy_conditions(df)
 
         assert list(result["h_pass"]) == [True, False, True]
@@ -216,7 +216,7 @@ class TestEvaluateSellConditions:
             current_price=9200.0,  # -8%
             entry_price=10000.0,
             hold_days=3,
-            kosdaq_sell_signal=False,
+            sell_signal=False,
         )
         assert result == "stop_loss"
 
@@ -227,7 +227,7 @@ class TestEvaluateSellConditions:
             current_price=9299.0,  # -7.01% (clearly <= -7%)
             entry_price=10000.0,
             hold_days=3,
-            kosdaq_sell_signal=False,
+            sell_signal=False,
         )
         assert result == "stop_loss"
 
@@ -238,18 +238,18 @@ class TestEvaluateSellConditions:
             current_price=9400.0,  # -6%
             entry_price=10000.0,
             hold_days=3,
-            kosdaq_sell_signal=False,
+            sell_signal=False,
         )
         assert result != "stop_loss"
 
     def test_market_timing_triggers(self, strategy: SuperQualityStrategy, position: dict) -> None:
-        """kosdaq_sell_signal = True → 'market_timing' (no stop-loss)."""
+        """sell_signal = True → 'market_timing' (no stop-loss)."""
         result = strategy.evaluate_sell_conditions(
             position=position,
             current_price=9800.0,  # -2% (no stop-loss)
             entry_price=10000.0,
             hold_days=2,
-            kosdaq_sell_signal=True,
+            sell_signal=True,
         )
         assert result == "market_timing"
 
@@ -260,7 +260,7 @@ class TestEvaluateSellConditions:
             current_price=10100.0,  # +1% (above stop-loss)
             entry_price=10000.0,
             hold_days=5,
-            kosdaq_sell_signal=False,
+            sell_signal=False,
         )
         assert result == "expiry"
 
@@ -271,7 +271,7 @@ class TestEvaluateSellConditions:
             current_price=10100.0,
             entry_price=10000.0,
             hold_days=4,
-            kosdaq_sell_signal=False,
+            sell_signal=False,
         )
         assert result is None
 
@@ -282,7 +282,7 @@ class TestEvaluateSellConditions:
             current_price=10500.0,  # +5%
             entry_price=10000.0,
             hold_days=2,
-            kosdaq_sell_signal=False,
+            sell_signal=False,
         )
         assert result is None
 
@@ -295,20 +295,20 @@ class TestEvaluateSellConditions:
             current_price=9200.0,  # -8%
             entry_price=10000.0,
             hold_days=5,
-            kosdaq_sell_signal=False,
+            sell_signal=False,
         )
         assert result == "stop_loss"
 
     def test_stop_loss_priority_over_market_timing(
         self, strategy: SuperQualityStrategy, position: dict,
     ) -> None:
-        """stop_loss (-8%) takes priority over kosdaq sell signal."""
+        """stop_loss (-8%) takes priority over market sell signal."""
         result = strategy.evaluate_sell_conditions(
             position=position,
             current_price=9200.0,  # -8%
             entry_price=10000.0,
             hold_days=2,
-            kosdaq_sell_signal=True,
+            sell_signal=True,
         )
         assert result == "stop_loss"
 
@@ -321,7 +321,7 @@ class TestEvaluateSellConditions:
             current_price=9800.0,  # -2% (no stop-loss)
             entry_price=10000.0,
             hold_days=5,
-            kosdaq_sell_signal=True,
+            sell_signal=True,
         )
         assert result == "market_timing"
 

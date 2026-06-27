@@ -23,7 +23,7 @@ class TestIntegration:
 
     @pytest.fixture
     def simulated_data(self):
-        """Generate 6 months of simulated data for 10 KOSDAQ tickers."""
+        """Generate 6 months of simulated data for 10 tickers."""
         # Create date range: 2023-01-01 to 2023-06-30, trading days only
         dates = pd.bdate_range("2023-01-01", "2023-06-30")
         tickers = [f"{i:06d}" for i in range(1, 11)]
@@ -50,14 +50,14 @@ class TestIntegration:
         price_data = pd.DataFrame(records)
         price_data = price_data.set_index(["ticker", "date"]).sort_index()
 
-        # KOSDAQ index data (rising trend so buy signals activate after warmup)
-        kosdaq_price = 800
-        kosdaq_records = []
+        # Market index data (rising trend so buy signals activate after warmup)
+        index_price = 800
+        index_records = []
         for d in dates:
             change = np.random.normal(0.0005, 0.015)
-            kosdaq_price = kosdaq_price * (1 + change)
-            kosdaq_records.append({"date": d, "close": kosdaq_price})
-        kosdaq_data = pd.DataFrame(kosdaq_records).set_index("date")
+            index_price = index_price * (1 + change)
+            index_records.append({"date": d, "close": index_price})
+        index_data = pd.DataFrame(index_records).set_index("date")
 
         # Factor data (pre-computed for each ticker on each date)
         # All tickers satisfy buy conditions except some edge cases
@@ -76,14 +76,14 @@ class TestIntegration:
                     "share_change_now": 0,  # No change (passes D)
                     "trailing_ni": 1000,  # Positive (passes E)
                     "trailing_ocf": 500,  # Positive (passes F)
-                    "kosdaq_buy_signal": True,  # Market timing OK
-                    "kosdaq_sell_signal": False,  # No sell signal
+                    "buy_signal": True,  # Market timing OK
+                    "sell_signal": False,  # No sell signal
                 })
         factor_data = pd.DataFrame(factor_rows)
 
         return {
             "price_data": price_data,
-            "kosdaq_data": kosdaq_data,
+            "index_data": index_data,
             "factor_data": factor_data,
             "financial_data": pd.DataFrame(),
             "dates": dates,
@@ -97,7 +97,7 @@ class TestIntegration:
         sd = simulated_data
         result = engine.run(
             price_data=sd["price_data"],
-            kosdaq_data=sd["kosdaq_data"],
+            index_data=sd["index_data"],
             factor_data=sd["factor_data"],
             financial_data=sd["financial_data"],
         )
@@ -139,7 +139,7 @@ class TestIntegration:
 
     def test_no_trades_with_failing_conditions(self):
         """If all conditions fail, no trades occur, metrics still work."""
-        # Create short data where KOSDAQ buy signal is False
+        # Create short data where buy signal is False
         dates = pd.bdate_range("2023-01-01", "2023-01-31")
         tickers = ["000001", "000002"]
 
@@ -164,10 +164,10 @@ class TestIntegration:
         )
 
         np.random.seed(42)
-        kosdaq_close = (800 * (1 + np.random.randn(len(dates)) * 0.01)).cumprod()
-        kosdaq_data = pd.DataFrame({"close": kosdaq_close}, index=dates)
+        index_close = (800 * (1 + np.random.randn(len(dates)) * 0.01)).cumprod()
+        index_data = pd.DataFrame({"close": index_close}, index=dates)
 
-        # All kosdaq_buy_signal = False (no buy allowed)
+        # All buy_signal = False (no buy allowed)
         factor_rows = []
         for t in tickers:
             for d in dates:
@@ -183,8 +183,8 @@ class TestIntegration:
                     "share_change_now": 0,
                     "trailing_ni": 100,
                     "trailing_ocf": 100,
-                    "kosdaq_buy_signal": False,
-                    "kosdaq_sell_signal": False,
+                    "buy_signal": False,
+                    "sell_signal": False,
                 })
         factor_data = pd.DataFrame(factor_rows)
 
@@ -192,7 +192,7 @@ class TestIntegration:
         engine = BacktestEngine(config)
         result = engine.run(
             price_data,
-            kosdaq_data,
+            index_data,
             factor_data,
             pd.DataFrame(),
         )
@@ -211,23 +211,23 @@ class TestIntegration:
         """
         sd = simulated_data
 
-        # Create a factor where kosdaq_buy_signal is True only on specific dates
+        # Create a factor where buy_signal is True only on specific dates
         factor_data = sd["factor_data"].copy()
         # Set buy signal to False for dates before March 1
         cutoff = pd.Timestamp("2023-03-01")
-        factor_data["kosdaq_buy_signal"] = factor_data["date"] >= cutoff
+        factor_data["buy_signal"] = factor_data["date"] >= cutoff
 
         config = SuperQualityConfig(DART_API_KEY="test")
         engine = BacktestEngine(config)
         result = engine.run(
             sd["price_data"],
-            sd["kosdaq_data"],
+            sd["index_data"],
             factor_data,
             sd["financial_data"],
         )
 
         # Check that no trades happen before March 1
-        # (since kosdaq_buy_signal was False before cutoff)
+        # (since buy_signal was False before cutoff)
         if len(result["trade_log"]) > 0:
             first_trade_date = result["trade_log"]["entry_date"].min()
             # entry_date might be a Timestamp; compare date part

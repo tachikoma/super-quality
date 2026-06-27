@@ -10,12 +10,12 @@ from super_quality.data.loader import (
     calculate_ttm,
     get_available_lag,
     get_financial_data,
-    get_kosdaq_index,
     get_krx_listings,
+    get_market_index,
+    get_paid_in_capital_increases,
     get_price_data,
     get_retail_net_buy,
     get_shares_outstanding,
-    get_paid_in_capital_increases,
 )
 
 __all__ = [
@@ -23,7 +23,7 @@ __all__ = [
     "calculate_ttm",
     "get_available_lag",
     "get_financial_data",
-    "get_kosdaq_index",
+    "get_market_index",
     "get_krx_listings",
     "get_price_data",
     "get_retail_net_buy",

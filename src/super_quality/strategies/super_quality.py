@@ -40,7 +40,7 @@ class SuperQualityStrategy:
             - ``share_change_now``         (조건 D)
             - ``trailing_ni``              (조건 E)
             - ``trailing_ocf``             (조건 F)
-            - ``kosdaq_buy_signal``        (조건 H)
+            - ``buy_signal``               (조건 H)
             - ``gpa_percentile``           (우선순위 점수)
             - ``supply_percentile``        (우선순위 점수)
 
@@ -75,8 +75,8 @@ class SuperQualityStrategy:
         # G: 시가총액 ≤ 임계값 백분위 (소형주)
         result["g_pass"] = df["mcap_percentile"] <= self.config.MCAP_PERCENTILE * 100.0
 
-        # H: KOSDAQ 매수 타이밍 신호 (종가 > MA3, MA5, MA10 중 하나)
-        result["h_pass"] = df["kosdaq_buy_signal"].astype(bool)
+        # H: 시장 매수 타이밍 신호 (종가 > MA3, MA5, MA10 중 하나)
+        result["h_pass"] = df["buy_signal"].astype(bool)
 
         # 8가지 조건 모두 통과해야 함
         condition_cols = [
@@ -102,13 +102,13 @@ class SuperQualityStrategy:
         current_price: float,
         entry_price: float,
         hold_days: int,
-        kosdaq_sell_signal: bool,
+        sell_signal: bool,
     ) -> str | None:
         """단일 포지션의 매도 조건을 평가합니다.
 
         우선순위 (첫 번째 매치 승리):
         1. ``stop_loss``     — 수익률 ≤ ``config.STOP_LOSS`` (-7 %)
-        2. ``market_timing`` — KOSDAQ 매도 신호가 ``True``
+        2. ``market_timing`` — 시장 매도 신호가 ``True``
         3. ``expiry``        — ``hold_days ≥ config.MAX_HOLD_DAYS`` (5)
 
         Parameters
@@ -122,8 +122,8 @@ class SuperQualityStrategy:
             포지션 진입 가격.
         hold_days : int
             포지션 보유 거래일 수.
-        kosdaq_sell_signal : bool
-            KOSDAQ 지수가 매도 신호를 트리거했는지 여부.
+        sell_signal : bool
+            시장 지수가 매도 신호를 트리거했는지 여부.
 
         Returns
         -------
@@ -137,8 +137,8 @@ class SuperQualityStrategy:
         if ret <= self.config.STOP_LOSS:
             return "stop_loss"
 
-        # 2. 시장 타이밍 — KOSDAQ 매도 신호
-        if kosdaq_sell_signal:
+        # 2. 시장 타이밍 — 매도 신호
+        if sell_signal:
             return "market_timing"
 
         # 3. 만기 — 최대 보유 기간 도달

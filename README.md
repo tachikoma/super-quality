@@ -4,7 +4,7 @@
 
 ## 전략 개요
 
-Super Quality 2.0은 여덟 가지 조건(A-H)으로 KOSDAQ 종목을 스크리닝합니다:
+Super Quality 2.0은 여덟 가지 조건(A-H)으로 KOSPI 및 KOSDAQ 종목을 스크리닝합니다:
 
 - **가치 (Value)**
   - **A**: PBR 하위 20% (저평가)
@@ -15,7 +15,7 @@ Super Quality 2.0은 여덟 가지 조건(A-H)으로 KOSDAQ 종목을 스크리�
   - **E**: 최근 당기순이익 양수
   - **F**: 최근 영업현금흐름 양수
 - **소형주**: **G** — 시가총액 하위 40%
-- **시장 타이밍**: **H** — KOSDAQ 지수가 3/5/10일 이동평균 중 하나 이상보다 높음
+- **시장 타이밍**: **H** — KOSDAQ 지수(KQ11)가 3/5/10일 이동평균 중 하나 이상보다 높음 (전체 시장 공통)
 
 **우선순위 점수**: GP/A 백분위 + 개인 순매수 공급 백분위 (내림차순). 8개 조건(A-H)을 모두 통과한 종목만 대상.
 
@@ -23,7 +23,7 @@ Super Quality 2.0은 여덟 가지 조건(A-H)으로 KOSDAQ 종목을 스크리�
 
 **매도 조건** (매일 확인, 첫 매치 우선):
 1. 손절: 진입가 대비 -7%
-2. 시장 타이밍 이탈: KOSDAQ < 3MA AND < 5MA
+2. 시장 타이밍 이탈: KOSDAQ 지수 < 3MA AND < 5MA
 3. 만기: 5거래일 도달
 
 ## 설치
@@ -95,7 +95,7 @@ src/super_quality/
 │   ├── base.py             # 추상 팩터 기본 클래스
 │   ├── value.py            # PBR, 시가총액 백분위 팩터
 │   ├── quality.py          # GP/A, 신F-Score 팩터
-│   ├── market_timing.py    # KOSDAQ 이동평균 기반 매수/매도 신호
+│   ├── market_timing.py    # KOSDAQ 지수(KQ11) 이동평균 기반 매수/매도 신호
 │   └── supply.py           # 개인 투자자 순매수 공급 점수
 ├── strategies/
 │   └── super_quality.py    # 전략: 조건 A-H 평가, 매도 로직
@@ -111,12 +111,12 @@ src/super_quality/
 
 | 데이터 | 소스 | API 키 필요 |
 |--------|------|:---:|
-| KOSDAQ 종목 리스트 | FinanceDataReader | 아니요 |
+| KOSPI / KOSDAQ 종목 리스트 | FinanceDataReader | 아니요 |
 | 일별 OHLCV 가격 | FinanceDataReader | 아니요 |
 | 시가총액 | FinanceDataReader | 아니요 |
 | 재무제표 (K-IFRS) | OpenDartReader | 예 |
 | 개인 투자자 순매수 | pykrx | 아니요 |
-| KOSDAQ 지수 | FinanceDataReader | 아니요 |
+| KOSDAQ 지수 (시장 타이밍) | FinanceDataReader | 아니요 |
 
 ## DART API 키
 

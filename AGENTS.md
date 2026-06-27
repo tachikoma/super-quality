@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-26
+**Generated:** 2026-06-27
 **Branch:** main
 
 ## OVERVIEW
@@ -64,3 +64,19 @@ ruff check
 - The `.env` file must contain `DART_API_KEY` for financial data access.
 - All output files are written to the `outputs/` directory unless overridden.
 - The internal `.omo/` directory stores agent plans and should be ignored by production code.
+- **Price data mcap**: Cached mcap may be 0 when `Shares` column is missing from KRX listing. The loader now falls back to computing shares from the `Marcap` column (total market cap snapshot divided by first close).
+- **Financial data quarters**: `_get_available_quarters()` filters quarters whose DART submission deadlines have passed, avoiding `'013'` errors for future quarters.
+- **Account matching**: `_find_account()` uses three-pass matching (exact → containment → keyword) because DART API returns company-specific account names.
+- **OFS fallback**: CFS (연결) financial data is tried first; if empty, OFS (별도) is used as fallback.
+
+## TASK LOG — 2026-06-27
+- Fixed DART financial data loading: added `_get_available_quarters()`, OFS fallback, keyword-based account matching in `loader.py`.
+- Fixed TTM de-cumulation: changed `tail(4)` to `tail(5)` + `last4` for proper single-quarter extraction (`main.py:206-215`).
+- Fixed `trailing_ni`/`trailing_ocf` fillna bug (`main.py:328-332`).
+- **Root cause of 0 trades**: All `mcap` values in cached price data were 0 because `Shares` column was missing from the KRX stock listing. Fixed by computing shares from `Marcap / first_close` in `get_price_data()` (`loader.py:186-197`). After fix: 54 trades, -4.28% return for 2025-01-01 backtest on tickers[:50].
+- Key diagnostics: a_pass (PBR < 20%) = 0.3%, g_pass (MCAP < 40%) = 0.7%, trailing_ni > 0 = 33/49 tickers, trailing_ocf > 0 = 26/49 tickers.
+
+## KNOWN ISSUES
+- `006400` (Samsung SDI): 0/5 quarters have `net_income` parsed — DART returns data but account name variant not caught by keyword fallback.
+- `096770` (SK Innovation): 4/5 quarters — 1 NaN in `net_income` corrupts the entire TTM sum via NaN propagation.
+- `revenue` coverage (185/245 = 75.5%) is lower than other fields — may impact future strategies.
