@@ -186,6 +186,9 @@ class BacktestEngine:
         if len(all_dates) < 2:
             return self._empty_result()
 
+        # ── 날짜 → 순서 인덱스 (O(1) 보유기간 계산용) ──────────────
+        date_ordinal = {d: i for i, d in enumerate(all_dates)}
+
         # ── 조건 조회 테이블 미리 계산: (date, ticker) → row ───────
         cond_lookup: dict[date, dict[str, dict[str, Any]]] = {}
         for d, grp in condition_data.groupby("date"):
@@ -271,7 +274,7 @@ class BacktestEngine:
                     "sell_price": sell_price,
                     "shares": shares,
                     "return_pct": ret,
-                    "hold_days": pos["entry_date"],
+                    "hold_days": date_ordinal[current_date] - date_ordinal[pos["entry_date"]],
                     "exit_reason": "expiry",
                 })
                 del positions[ticker]
@@ -296,7 +299,7 @@ class BacktestEngine:
                     "sell_price": sell_price,
                     "shares": shares,
                     "return_pct": ret,
-                    "hold_days": pos["entry_date"],
+                    "hold_days": date_ordinal[current_date] - date_ordinal[pos["entry_date"]],
                     "exit_reason": reason,
                 })
                 del positions[ticker]
@@ -347,9 +350,7 @@ class BacktestEngine:
                 if prev_close is None:
                     continue
 
-                hold_days = sum(
-                    1 for dd in all_dates if pos["entry_date"] < dd <= prev_date
-                )
+                hold_days = date_ordinal[prev_date] - date_ordinal[pos["entry_date"]]
 
                 reason = self.strategy.evaluate_sell_conditions(
                     position=pos,
@@ -432,17 +433,6 @@ class BacktestEngine:
             daily_returns = pd.Series(dtype=float)
 
         trade_log_df = pd.DataFrame(trade_log)
-        if not trade_log_df.empty:
-            # 완료된 거래의 hold_days 수정 (entry_date 임시값 대체)
-            for idx, row in trade_log_df.iterrows():
-                if row["exit_date"] is not None and row["hold_days"] is not None:
-                    # hold_days는 entry_date 임시 저장소로 사용됨 — 수정
-                    entry_dt = row["hold_days"]
-                    if isinstance(entry_dt, (pd.Timestamp, date)):
-                        hold = sum(
-                            1 for dd in all_dates if entry_dt < dd <= row["exit_date"]
-                        )
-                        trade_log_df.at[idx, "hold_days"] = hold
 
         return {
             "portfolio_snapshots": snapshots_df,
