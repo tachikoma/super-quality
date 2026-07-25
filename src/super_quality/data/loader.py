@@ -422,6 +422,21 @@ def get_price_data(
                         updated += 1
                 logger.info("mcap 재계산 완료: %d개 티커 업데이트", updated)
 
+            # 수정된 mcap을 연도별 캐시에 영속화
+            logger.info("수정된 mcap을 캐시에 영속화 중…")
+            for y_str in sorted(years_needed):
+                y_cache_key = f"price_{y_str}"
+                y_df = _cache.get(y_cache_key)
+                if y_df is None or y_df.empty:
+                    continue
+                y_df["date"] = pd.to_datetime(y_df["date"])
+                y_df = y_df.set_index(["ticker", "date"])
+                common = y_df.index.intersection(result.index)
+                if len(common) > 0:
+                    y_df.loc[common, "mcap"] = result.loc[common, "mcap"]
+                _cache.put(y_cache_key, y_df.reset_index())
+            logger.info("mcap 캐시 영속화 완료")
+
     return result
 
 

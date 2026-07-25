@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import sys
 from datetime import date, datetime
@@ -21,7 +22,10 @@ from typing import Any
 from super_quality.analysis.metrics import PerformanceMetrics
 from super_quality.backtest.engine import BacktestEngine
 from super_quality.config import SuperQualityConfig
+from super_quality.data.cache import DataCache
 from super_quality.reporting.report import ReportGenerator
+
+_cache = DataCache()
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +80,27 @@ def _print_summary(metrics: dict[str, Any]) -> None:
 
 
 # ── 서브 커맨드: run ─────────────────────────────────────────────────
+
+
+def _factor_cache_key(
+    tickers: list[str],
+    start_date: date,
+    end_date: date,
+    config: SuperQualityConfig,
+) -> str:
+    """팩터 데이터 캐시 키를 생성합니다.
+
+    티커 목록, 날짜 범위, 전략 파라미터를 해시하여 동일한 입력에 대해
+    항상 동일한 키를 반환합니다.
+    """
+    ticker_str = "|".join(sorted(str(t) for t in tickers))
+    params = (
+        f"{ticker_str}|{start_date}|{end_date}"
+        f"|{config.SUPPLY_SCORE_DAYS}|{config.PBR_PERCENTILE}"
+        f"|{config.MCAP_PERCENTILE}|{config.RELAXED_ENTRY_MODE}"
+        f"|{config.MARKET_TIMING_TICKER}"
+    )
+    return f"factor_{hashlib.md5(params.encode()).hexdigest()[:16]}"
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
@@ -152,41 +177,69 @@ def _cmd_run(args: argparse.Namespace) -> None:
         financial_data = get_financial_data(fin_tickers, years, api_key=api_key)
         logger.info("로드된 재무 데이터: %d행", len(financial_data))
 
-        # 2d. 개인 순매수 (티커별)
+        # 2d. 개인 순매수 (티커별) — 캐시된 어셈블리 사용
         supply_tickers = fin_tickers
-        retail_frames: list[pd.DataFrame] = []
-        for i, ticker in enumerate(supply_tickers):
-            try:
-                df = get_retail_net_buy(ticker, config.START_DATE, config.END_DATE)
-                if not df.empty:
-                    df["ticker"] = ticker
-                    retail_frames.append(df)
-                    logger.info("  개인 매수 데이터: %s (%d/%d)", ticker, i + 1, len(supply_tickers))
-            except Exception:  # noqa: BLE001
-                continue
-        retail_buy = pd.concat(retail_frames, ignore_index=False) if retail_frames else pd.DataFrame()
-        if not retail_buy.empty and "date" not in retail_buy.columns:
-            retail_buy = retail_buy.reset_index()
-        logger.info("로드된 개인 순매수 데이터: %d행", len(retail_buy))
+        retail_ticker_hash = hashlib.md5(
+            "|".join(sorted(supply_tickers)).encode()
+        ).hexdigest()[:16]
+        retail_asm_key = f"retail_asm_{retail_ticker_hash}_{config.START_DATE}_{config.END_DATE}"
+        cached_retail = _cache.get(retail_asm_key) if not args.no_cache else None
 
-        # 2e. 유상증자 일정 조회 (DART API)
-        capital_increases: dict[str, list[date]] = {}
-        logger.info("유상증자 일정을 조회 중입니다…")
-        rate_limited = False
-        for i, ticker in enumerate(fin_tickers):
-            if rate_limited:
-                continue
-            try:
-                dts = get_paid_in_capital_increases(ticker, years, api_key=api_key)
-                capital_increases[ticker] = dts
-                if dts:
-                    logger.info("  유상증자 데이터: %s (일정 %d건)", ticker, len(dts))
-            except Exception as e:
-                if "020" in str(e):
-                    logger.warning("  DART 사용한도 초과 — 유상증자 조회를 중단합니다")
-                    rate_limited = True
-                else:
-                    logger.debug("  유상증자 조회 실패: %s (%s)", ticker, e)
+        if cached_retail is not None:
+            retail_buy = cached_retail
+            logger.info("개인 순매수 어셈블리 캐시 적중: %d행", len(retail_buy))
+        else:
+            retail_frames: list[pd.DataFrame] = []
+            for i, ticker in enumerate(supply_tickers):
+                try:
+                    df = get_retail_net_buy(ticker, config.START_DATE, config.END_DATE)
+                    if not df.empty:
+                        df["ticker"] = ticker
+                        retail_frames.append(df)
+                        logger.info("  개인 매수 데이터: %s (%d/%d)", ticker, i + 1, len(supply_tickers))
+                except Exception:  # noqa: BLE001
+                    continue
+            retail_buy = pd.concat(retail_frames, ignore_index=False) if retail_frames else pd.DataFrame()
+            if not retail_buy.empty and "date" not in retail_buy.columns:
+                retail_buy = retail_buy.reset_index()
+            if not retail_buy.empty:
+                _cache.put(retail_asm_key, retail_buy)
+            logger.info("로드된 개인 순매수 데이터: %d행", len(retail_buy))
+
+        # 2e. 유상증자 일정 조회 (DART API) — 캐시된 어셈블리 사용
+        capital_years_str = "_".join(str(y) for y in years)
+        cap_asm_key = f"cap_asm_{retail_ticker_hash}_{capital_years_str}"
+        cached_capital = _cache.get_json(cap_asm_key) if not args.no_cache else None
+
+        if cached_capital is not None:
+            capital_increases = {
+                k: [datetime.strptime(d, "%Y-%m-%d").date() for d in v]
+                for k, v in cached_capital.items()
+            }
+            logger.info("유상증자 어셈블리 캐시 적중: %d개 티커", len(capital_increases))
+        else:
+            capital_increases_raw: dict[str, list[str]] = {}
+            logger.info("유상증자 일정을 조회 중입니다…")
+            rate_limited = False
+            for i, ticker in enumerate(fin_tickers):
+                if rate_limited:
+                    continue
+                try:
+                    dts = get_paid_in_capital_increases(ticker, years, api_key=api_key)
+                    capital_increases_raw[ticker] = [d.isoformat() for d in dts]
+                    if dts:
+                        logger.info("  유상증자 데이터: %s (일정 %d건)", ticker, len(dts))
+                except Exception as e:
+                    if "020" in str(e):
+                        logger.warning("  DART 사용한도 초과 — 유상증자 조회를 중단합니다")
+                        rate_limited = True
+                    else:
+                        logger.debug("  유상증자 조회 실패: %s (%s)", ticker, e)
+            capital_increases = {
+                k: [datetime.strptime(d, "%Y-%m-%d").date() for d in v]
+                for k, v in capital_increases_raw.items()
+            }
+            _cache.put_json(cap_asm_key, capital_increases_raw)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("데이터 수집 실패: %s", exc)
@@ -196,190 +249,196 @@ def _cmd_run(args: argparse.Namespace) -> None:
     # 3. 팩터 계산
     logger.info("팩터를 계산 중입니다…")
     try:
-        from super_quality.factors.market_timing import KosdaqMAFactor
-        from super_quality.factors.quality import GPAFactor
-        from super_quality.factors.supply import RetailSupplyFactor
-        from super_quality.factors.value import PBRFactor
+        factor_cache_key = _factor_cache_key(tickers, from_date, to_date, config)
+        cached_factor = _cache.get(factor_cache_key) if not args.no_cache else None
 
-        from super_quality.data.loader import (
-            date_to_financial_epoch,
-            get_financial_snapshot,
-            compute_ttm_snapshot,
-        )
-
-        # 3a. factor_data: 티커 × 날짜 그리드
-        factor_data = price_data.reset_index()[["ticker", "date"]].copy()
-        factor_data["date"] = pd.to_datetime(factor_data["date"])
-
-        # 3b. 날짜 → 재무 에포크 매핑
-        all_epoch_dates = sorted(factor_data["date"].unique())
-        date_epoch_map: dict = {}
-        for d in all_epoch_dates:
-            d_date = d.date() if hasattr(d, "date") else pd.Timestamp(d).date()
-            ey, eq = date_to_financial_epoch(d_date)
-            date_epoch_map[d] = ey * 10 + eq
-        factor_data["_epoch"] = factor_data["date"].map(date_epoch_map)
-
-        # 3c. 에포크별 횡단면 팩터 계산
-        unique_epochs = sorted(factor_data["_epoch"].unique())
-        epoch_factor_frames: list[pd.DataFrame] = []
-
-        for epoch_key in unique_epochs:
-            epoch_year, epoch_quarter = divmod(epoch_key, 10)
-
-            # epoch 첫째 날을 as_of_date로 사용
-            epoch_dates = factor_data.loc[
-                factor_data["_epoch"] == epoch_key, "date"
-            ]
-            as_of_ts = epoch_dates.min()
-            as_of_date = as_of_ts.date() if hasattr(as_of_ts, "date") else pd.Timestamp(as_of_ts).date()
-
-            # 재무 스냅샷 (as_of_date 기준) — 데이터가 없으면 epoch 건너뜀
-            fin_snap = get_financial_snapshot(financial_data, as_of_date)
-            if fin_snap.empty:
-                logger.warning("에포크 %d (%s): 재무 스냅샷 없음, 건너뜀", epoch_key, as_of_date)
-                continue
-
-            # epoch 첫째 날의 mcap을 스냅샷에 병합
-            mcap_at_epoch = (
-                price_data.xs(as_of_ts, level="date")["mcap"]
-                .reset_index()
-                .rename(columns={"mcap": "mcap_epoch"})
-            )
-            fin_snap = fin_snap.merge(mcap_at_epoch, on="ticker", how="left")
-
-            # 횡단면 팩터 계산 (에포크별 1회)
-            pbr_df = PBRFactor().compute(
-                fin_snap.rename(columns={"mcap_epoch": "mcap"})
-            )
-            gpa_df = GPAFactor().compute(fin_snap)
-
-            # TTM 계산 (as_of_date 기준)
-            ttm_df = compute_ttm_snapshot(financial_data, as_of_date)
-
-            # 하나로 합치기 (mcap_percentile은 일별 재계산하므로 epoch 단위 미포함)
-            epoch_df = pbr_df.merge(gpa_df, on="ticker", how="left")
-            if not ttm_df.empty:
-                epoch_df = epoch_df.merge(ttm_df, on="ticker", how="left")
-            else:
-                epoch_df["trailing_ni"] = 0.0
-                epoch_df["trailing_ocf"] = 0.0
-
-            epoch_df["_epoch"] = epoch_key
-            epoch_factor_frames.append(epoch_df)
-
-        if epoch_factor_frames:
-            epoch_factors_all = pd.concat(epoch_factor_frames, ignore_index=True)
-            factor_data = factor_data.merge(
-                epoch_factors_all, on=["ticker", "_epoch"], how="left"
-            )
-            # 티커별로 최신 epoch 값을 이후 날짜로 forward-fill
-            factor_data = factor_data.sort_values(["ticker", "date"])
-            for ck in ["pbr_percentile", "gpa_percentile", "trailing_ni", "trailing_ocf"]:
-                if ck in factor_data.columns:
-                    factor_data[ck] = factor_data.groupby("ticker")[ck].ffill()
-
-
-
-        # MCAP 백분위 거래일별 재계산 (시총은 매일 변하므로)
-        # price_data의 전체 티커를 대상으로 percentile 계산 (factor_data에
-        # 재무 데이터가 없는 티커도 price_data에는 존재하므로 정확한 전일 대비 순위 산출)
-        daily_mcap = price_data["mcap"].reset_index()
-        daily_mcap["date"] = pd.to_datetime(daily_mcap["date"])
-        factor_data = factor_data.merge(
-            daily_mcap[["ticker", "date", "mcap"]], on=["ticker", "date"], how="left"
-        )
-        factor_data["mcap_percentile"] = (
-            factor_data.groupby("date")["mcap"]
-            .rank(pct=True, ascending=True)
-            .fillna(50.0)
-            * 100.0
-        )
-
-        # 3e. 공급 팩터 (티커 × 날짜)
-        if not retail_buy.empty:
-            supply_df = RetailSupplyFactor(
-                supply_days=config.SUPPLY_SCORE_DAYS
-            ).compute(retail_buy)
+        if cached_factor is not None:
+            factor_data = cached_factor
+            logger.info("팩터 데이터 캐시 적중: %d행 × %d열", len(factor_data), len(factor_data.columns))
         else:
-            supply_df = pd.DataFrame(columns=["ticker", "supply_score", "supply_percentile"])
+            from super_quality.factors.market_timing import KosdaqMAFactor
+            from super_quality.factors.quality import GPAFactor
+            from super_quality.factors.supply import RetailSupplyFactor
+            from super_quality.factors.value import PBRFactor
 
-        if not supply_df.empty:
-            supply_merge = supply_df.rename(
-                columns={"supply_score": "supply_score", "supply_percentile": "supply_percentile"}
+            from super_quality.data.loader import (
+                date_to_financial_epoch,
+                get_financial_snapshot,
+                compute_ttm_snapshot,
             )
-            supply_merge["ticker"] = supply_merge["ticker"].astype(str)
-            factor_data["ticker"] = factor_data["ticker"].astype(str)
+
+            # 3a. factor_data: 티커 × 날짜 그리드
+            factor_data = price_data.reset_index()[["ticker", "date"]].copy()
+            factor_data["date"] = pd.to_datetime(factor_data["date"])
+
+            # 3b. 날짜 → 재무 에포크 매핑
+            all_epoch_dates = sorted(factor_data["date"].unique())
+            date_epoch_map: dict = {}
+            for d in all_epoch_dates:
+                d_date = d.date() if hasattr(d, "date") else pd.Timestamp(d).date()
+                ey, eq = date_to_financial_epoch(d_date)
+                date_epoch_map[d] = ey * 10 + eq
+            factor_data["_epoch"] = factor_data["date"].map(date_epoch_map)
+
+            # 3c. 에포크별 횡단면 팩터 계산
+            unique_epochs = sorted(factor_data["_epoch"].unique())
+            epoch_factor_frames: list[pd.DataFrame] = []
+
+            for epoch_key in unique_epochs:
+                epoch_year, epoch_quarter = divmod(epoch_key, 10)
+
+                # epoch 첫째 날을 as_of_date로 사용
+                epoch_dates = factor_data.loc[
+                    factor_data["_epoch"] == epoch_key, "date"
+                ]
+                as_of_ts = epoch_dates.min()
+                as_of_date = as_of_ts.date() if hasattr(as_of_ts, "date") else pd.Timestamp(as_of_ts).date()
+
+                # 재무 스냅샷 (as_of_date 기준) — 데이터가 없으면 epoch 건너뜀
+                fin_snap = get_financial_snapshot(financial_data, as_of_date)
+                if fin_snap.empty:
+                    logger.warning("에포크 %d (%s): 재무 스냅샷 없음, 건너뜀", epoch_key, as_of_date)
+                    continue
+
+                # epoch 첫째 날의 mcap을 스냅샷에 병합
+                mcap_at_epoch = (
+                    price_data.xs(as_of_ts, level="date")["mcap"]
+                    .reset_index()
+                    .rename(columns={"mcap": "mcap_epoch"})
+                )
+                fin_snap = fin_snap.merge(mcap_at_epoch, on="ticker", how="left")
+
+                # 횡단면 팩터 계산 (에포크별 1회)
+                pbr_df = PBRFactor().compute(
+                    fin_snap.rename(columns={"mcap_epoch": "mcap"})
+                )
+                gpa_df = GPAFactor().compute(fin_snap)
+
+                # TTM 계산 (as_of_date 기준)
+                ttm_df = compute_ttm_snapshot(financial_data, as_of_date)
+
+                # 하나로 합치기 (mcap_percentile은 일별 재계산하므로 epoch 단위 미포함)
+                epoch_df = pbr_df.merge(gpa_df, on="ticker", how="left")
+                if not ttm_df.empty:
+                    epoch_df = epoch_df.merge(ttm_df, on="ticker", how="left")
+                else:
+                    epoch_df["trailing_ni"] = 0.0
+                    epoch_df["trailing_ocf"] = 0.0
+
+                epoch_df["_epoch"] = epoch_key
+                epoch_factor_frames.append(epoch_df)
+
+            if epoch_factor_frames:
+                epoch_factors_all = pd.concat(epoch_factor_frames, ignore_index=True)
+                factor_data = factor_data.merge(
+                    epoch_factors_all, on=["ticker", "_epoch"], how="left"
+                )
+                # 티커별로 최신 epoch 값을 이후 날짜로 forward-fill
+                factor_data = factor_data.sort_values(["ticker", "date"])
+                for ck in ["pbr_percentile", "gpa_percentile", "trailing_ni", "trailing_ocf"]:
+                    if ck in factor_data.columns:
+                        factor_data[ck] = factor_data.groupby("ticker")[ck].ffill()
+
+            # MCAP 백분위 거래일별 재계산 (시총은 매일 변하므로)
+            daily_mcap = price_data["mcap"].reset_index()
+            daily_mcap["date"] = pd.to_datetime(daily_mcap["date"])
             factor_data = factor_data.merge(
-                supply_merge[["ticker", "supply_score", "supply_percentile"]],
-                on="ticker",
-                how="left",
+                daily_mcap[["ticker", "date", "mcap"]], on=["ticker", "date"], how="left"
             )
-        else:
-            factor_data["supply_score"] = 0.0
-            factor_data["supply_percentile"] = 50.0
+            factor_data["mcap_percentile"] = (
+                factor_data.groupby("date")["mcap"]
+                .rank(pct=True, ascending=True)
+                .fillna(50.0)
+                * 100.0
+            )
 
-        # 3f. 시장 타이밍 시그널
-        market_ma = KosdaqMAFactor().compute(index_data["close"])
-        market_signals = market_ma[["date", "buy_signal", "sell_signal"]].copy()
-
-        # NaN 기본값 채움
-        for col, default in [
-            ("pbr_percentile", 50.0),
-            ("gpa_percentile", 50.0),
-            ("supply_percentile", 50.0),
-            ("pbr", 1.0),
-        ]:
-            factor_data[col] = factor_data[col].fillna(default) if col in factor_data.columns else default
-
-        # 유상증자 일정 반영 (티커 × 날짜별 동적 계산)
-        factor_data["share_change_now"] = 0
-        factor_data["share_change_5mo_ago"] = 0
-        for tkr, dts in capital_increases.items():
-            if not dts:
-                continue
-            mask = factor_data["ticker"] == tkr
-            if not mask.any():
-                continue
-            dates = factor_data.loc[mask, "date"]
-            dt_series = pd.to_datetime(dts)
-
-            now_mask = pd.Series(False, index=dates.index)
-            ago_mask = pd.Series(False, index=dates.index)
-            for dt in dt_series:
-                diff = (dates - dt).dt.days
-                now_mask |= (diff >= 0) & (diff <= 90)
-                ago_mask |= (diff >= 120) & (diff <= 180)
-
-            factor_data.loc[dates[now_mask].index, "share_change_now"] = 1
-            factor_data.loc[dates[ago_mask].index, "share_change_5mo_ago"] = 1
-
-        for col in ["trailing_ni", "trailing_ocf"]:
-            if col in factor_data.columns:
-                factor_data[col] = factor_data[col].fillna(0.0)
+            # 3e. 공급 팩터 (티커 × 날짜)
+            if not retail_buy.empty:
+                supply_df = RetailSupplyFactor(
+                    supply_days=config.SUPPLY_SCORE_DAYS
+                ).compute(retail_buy)
             else:
-                factor_data[col] = 0.0
+                supply_df = pd.DataFrame(columns=["ticker", "supply_score", "supply_percentile"])
 
-        # 보조 컬럼 정리 (engine 전달 전에 제거)
-        factor_data = factor_data.drop(columns=["_epoch", "mcap"], errors="ignore")
+            if not supply_df.empty:
+                supply_merge = supply_df.rename(
+                    columns={"supply_score": "supply_score", "supply_percentile": "supply_percentile"}
+                )
+                supply_merge["ticker"] = supply_merge["ticker"].astype(str)
+                factor_data["ticker"] = factor_data["ticker"].astype(str)
+                factor_data = factor_data.merge(
+                    supply_merge[["ticker", "supply_score", "supply_percentile"]],
+                    on="ticker",
+                    how="left",
+                )
+            else:
+                factor_data["supply_score"] = 0.0
+                factor_data["supply_percentile"] = 50.0
 
-        # 시장 타이밍 시그널을 날짜별로 병합
-        if "buy_signal" in market_signals.columns:
-            signal_merge = market_signals.copy()
-            signal_merge["date"] = pd.to_datetime(signal_merge["date"])
-            factor_data = factor_data.merge(
-                signal_merge[["date", "buy_signal", "sell_signal"]],
-                on="date",
-                how="left",
+            # 3f. 시장 타이밍 시그널
+            market_ma = KosdaqMAFactor().compute(index_data["close"])
+            market_signals = market_ma[["date", "buy_signal", "sell_signal"]].copy()
+
+            # NaN 기본값 채움
+            for col, default in [
+                ("pbr_percentile", 50.0),
+                ("gpa_percentile", 50.0),
+                ("supply_percentile", 50.0),
+                ("pbr", 1.0),
+            ]:
+                factor_data[col] = factor_data[col].fillna(default) if col in factor_data.columns else default
+
+            # 유상증자 일정 반영 (티커 × 날짜별 동적 계산)
+            factor_data["share_change_now"] = 0
+            factor_data["share_change_5mo_ago"] = 0
+            for tkr, dts in capital_increases.items():
+                if not dts:
+                    continue
+                mask = factor_data["ticker"] == tkr
+                if not mask.any():
+                    continue
+                dates = factor_data.loc[mask, "date"]
+                dt_series = pd.to_datetime(dts)
+
+                now_mask = pd.Series(False, index=dates.index)
+                ago_mask = pd.Series(False, index=dates.index)
+                for dt in dt_series:
+                    diff = (dates - dt).dt.days
+                    now_mask |= (diff >= 0) & (diff <= 90)
+                    ago_mask |= (diff >= 120) & (diff <= 180)
+
+                factor_data.loc[dates[now_mask].index, "share_change_now"] = 1
+                factor_data.loc[dates[ago_mask].index, "share_change_5mo_ago"] = 1
+
+            for col in ["trailing_ni", "trailing_ocf"]:
+                if col in factor_data.columns:
+                    factor_data[col] = factor_data[col].fillna(0.0)
+                else:
+                    factor_data[col] = 0.0
+
+            # 보조 컬럼 정리 (engine 전달 전에 제거)
+            factor_data = factor_data.drop(columns=["_epoch", "mcap"], errors="ignore")
+
+            # 시장 타이밍 시그널을 날짜별로 병합
+            if "buy_signal" in market_signals.columns:
+                signal_merge = market_signals.copy()
+                signal_merge["date"] = pd.to_datetime(signal_merge["date"])
+                factor_data = factor_data.merge(
+                    signal_merge[["date", "buy_signal", "sell_signal"]],
+                    on="date",
+                    how="left",
+                )
+                factor_data["buy_signal"] = factor_data["buy_signal"].fillna(False)
+                factor_data["sell_signal"] = factor_data["sell_signal"].fillna(False)
+
+            logger.info(
+                "팩터 데이터 생성 완료: %d행 × %d열",
+                len(factor_data),
+                len(factor_data.columns),
             )
-            factor_data["buy_signal"] = factor_data["buy_signal"].fillna(False)
-            factor_data["sell_signal"] = factor_data["sell_signal"].fillna(False)
 
-        logger.info(
-            "팩터 데이터 생성 완료: %d행 × %d열",
-            len(factor_data),
-            len(factor_data.columns),
-        )
+            _cache.put(factor_cache_key, factor_data)
+            logger.info("팩터 데이터 캐시 저장: %s", factor_cache_key)
 
         # 진단: 조건별 통과 건수 출력
         try:
@@ -502,6 +561,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--exclude-conditions",
         default="",
         help="제외할 조건 (쉼표 구분, 예: --exclude-conditions g,ef)",
+    )
+    run_parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        default=False,
+        help="팩터/개인 순매수 캐시를 건너뛰고 재계산",
     )
 
     return parser
