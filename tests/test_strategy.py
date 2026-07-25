@@ -89,8 +89,12 @@ class TestEvaluateBuyConditions:
     def test_condition_c_fails_share_change(
         self, strategy: SuperQualityStrategy,
     ) -> None:
-        """share_change_5mo_ago != 0 → C fails."""
-        df = _make_buy_df(share_change_5mo_ago=[1, 0, -1])
+        """share_change_5mo_ago != 0 → C fails. With 2+ secondary failures, all_buy=False."""
+        df = _make_buy_df(
+            share_change_5mo_ago=[1, 0, -1],
+            mcap_percentile=[50.0, 30.0, 50.0],
+            buy_signal=[False, True, False],
+        )
         result = strategy.evaluate_buy_conditions(df)
 
         assert list(result["c_pass"]) == [False, True, False]
@@ -99,8 +103,12 @@ class TestEvaluateBuyConditions:
     def test_condition_d_fails_share_change_now(
         self, strategy: SuperQualityStrategy,
     ) -> None:
-        """share_change_now != 0 → D fails."""
-        df = _make_buy_df(share_change_now=[0, 1, 0])
+        """share_change_now != 0 → D fails. With 2+ secondary failures, all_buy=False."""
+        df = _make_buy_df(
+            share_change_now=[0, 1, 0],
+            mcap_percentile=[25.0, 50.0, 50.0],
+            buy_signal=[True, False, True],
+        )
         result = strategy.evaluate_buy_conditions(df)
 
         assert list(result["d_pass"]) == [True, False, True]
@@ -129,8 +137,12 @@ class TestEvaluateBuyConditions:
     def test_condition_g_fails_high_mcap(
         self, strategy: SuperQualityStrategy,
     ) -> None:
-        """mcap_percentile > 40% → G fails."""
-        df = _make_buy_df(mcap_percentile=[25.0, 50.0, 35.0])
+        """mcap_percentile > 40% → G fails. With 2+ secondary failures, all_buy=False."""
+        df = _make_buy_df(
+            mcap_percentile=[25.0, 50.0, 35.0],
+            share_change_5mo_ago=[0, 1, 1],
+            share_change_now=[0, 1, 1],
+        )
         result = strategy.evaluate_buy_conditions(df)
 
         assert list(result["g_pass"]) == [True, False, True]
@@ -139,8 +151,12 @@ class TestEvaluateBuyConditions:
     def test_condition_h_fails_no_buy_signal(
         self, strategy: SuperQualityStrategy,
     ) -> None:
-        """buy_signal = False → H fails."""
-        df = _make_buy_df(buy_signal=[True, False, True])
+        """buy_signal = False → H fails. With 2+ secondary failures, all_buy=False."""
+        df = _make_buy_df(
+            buy_signal=[True, False, True],
+            share_change_5mo_ago=[0, 1, 0],
+            share_change_now=[0, 1, 0],
+        )
         result = strategy.evaluate_buy_conditions(df)
 
         assert list(result["h_pass"]) == [True, False, True]

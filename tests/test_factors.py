@@ -186,23 +186,34 @@ class TestMarketCapFactor:
 
 
 class TestKosdaqMAFactor:
-    """KOSDAQ moving-average timing signal tests.
+    """KOSDAQ moving-average timing signal tests (MA20 trend filter).
 
-    Price sequence used:
+    Price sequence used (26 rows):
         [100, 102, 104, 106, 108, 106, 104, 102, 100, 98,
-          96,  94,  92,  94,  96,  93]
+          96,  94,  92,  94,  96,  93,
+          95,  97,  99, 101, 103, 105, 107, 100,  95,  90]
 
-    * Index 13 (close=94):  close > MA3 (93.33)  → buy_signal=True
-                            close < MA5 (94.8)   → sell_signal=False
-    * Index 15 (close=93):  close < MA3 (94.33)  → sell_signal=True
-                            close < MA5 (93.8)   → sell_signal=True
+    * Index 22 (close=107): close > MA20 (~100.5) → buy_signal=True
+    * Index 25 (close=90):  close < MA3 & MA5     → sell_signal=True
     """
 
     @pytest.fixture
     def close_series(self):
+        """26 rows: steady rise (indices 0-22), sharp drop (indices 23-25).
+
+        Preserves original 16 values for backward-compatible MA checks at indices 2, 13.
+        After 20-row warmup:
+          - Index 22 (close=107): above MA20 → buy_signal=True
+          - Index 25 (close=90):  below MA3 & MA5 → sell_signal=True
+        """
         return pd.Series([
-            100, 102, 104, 106, 108, 106, 104, 102, 100, 98,
-            96,  94,  92,  94,  96,  93,
+            100, 102, 104, 106, 108,  # 0-4
+            106, 104, 102, 100,  98,  # 5-9
+            96,  94,  92,  94,  96,   # 10-14
+            93,                       # 15
+            95,  97,  99, 101,        # 16-19: gradual recovery (warmup)
+            103, 105, 107,            # 20-22: above MA20
+            100,  95,  90,            # 23-25: sharp drop → sell
         ])
 
     def test_output_columns(self, close_series):
@@ -210,50 +221,45 @@ class TestKosdaqMAFactor:
         factor = KosdaqMAFactor()
         result = factor.compute(close_series)
 
-        expected = ["date", "ma3", "ma5", "ma10", "buy_signal", "sell_signal"]
+        expected = ["date", "ma3", "ma5", "ma10", "ma20", "buy_signal", "sell_signal"]
         assert list(result.columns) == expected
 
-    def test_first_10_rows_signals_false(self, close_series):
-        """First 10 rows should have both signals forced to False."""
+    def test_first_20_rows_signals_false(self, close_series):
+        """First 20 rows should have both signals forced to False (MA20 warmup)."""
         factor = KosdaqMAFactor()
         result = factor.compute(close_series)
 
-        assert list(result["buy_signal"].iloc[:10]) == [False] * 10
-        assert list(result["sell_signal"].iloc[:10]) == [False] * 10
+        assert list(result["buy_signal"].iloc[:20]) == [False] * 20
+        assert list(result["sell_signal"].iloc[:20]) == [False] * 20
 
-    def test_buy_signal_or_condition(self, close_series):
-        """close > MA3 (even if < MA5 and < MA10) → buy_signal = True.
+    def test_buy_signal_ma20_condition(self, close_series):
+        """close > MA20 after warmup → buy_signal = True.
 
-        At index 13: close=94 > MA3=93.33 → buy_signal=True.
+        At index 22: close=107 > MA20 (~100.5) → buy_signal=True.
         """
         factor = KosdaqMAFactor()
         result = factor.compute(close_series)
 
-        # Index 13: close=94, MA3≈93.33, MA5=94.8 → buy=True, sell=False
-        assert result["buy_signal"].iloc[13]
-        assert not result["sell_signal"].iloc[13]
+        assert result["buy_signal"].iloc[22]
+        assert not result["sell_signal"].iloc[22]
 
     def test_sell_signal_and_condition(self, close_series):
-        """close < MA3 AND close < MA5 → sell_signal = True.
+        """close < MA3 AND close < MA5 after warmup → sell_signal = True.
 
-        At index 15: close=93 < MA3=94.33 AND close=93 < MA5=93.8.
+        At index 25: close=90 < MA3=95 AND close=90 < MA5=97.4.
         """
         factor = KosdaqMAFactor()
         result = factor.compute(close_series)
 
-        # Index 15: close=93, MA3≈94.33, MA5=93.8 → sell=True
-        assert result["sell_signal"].iloc[15]
-        # Buy should be False (close < all MAs)
-        assert not result["buy_signal"].iloc[15]
+        assert result["sell_signal"].iloc[25]
+        assert not result["buy_signal"].iloc[25]
 
     def test_sell_signal_excludes_ma10(self, close_series):
         """MA10 is NOT part of the sell condition."""
         factor = KosdaqMAFactor()
         result = factor.compute(close_series)
 
-        # Index 15: close=93 < MA10(96.9) even though MA10 is excluded
-        # We just verify sell_signal logic works without checking MA10
-        assert result["sell_signal"].iloc[15]
+        assert result["sell_signal"].iloc[25]
 
     def test_ma_values(self, close_series):
         """Spot-check known MA values."""

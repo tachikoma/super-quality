@@ -91,6 +91,10 @@ class SuperQualityConfig(BaseSettings):
         default=0.40,
         description="시가총액 하위 퍼센타일 기준값 (40%)",
     )
+    RELAXED_ENTRY_MODE: bool = Field(
+        default=True,
+        description="True: 6/8 조건 (핵심 A,B,E,F 모두 + 보조 C,D,G,H 중 ≥2). False: 8개 모두 AND",
+    )
 
     # ── 시장 데이터 ──────────────────────────────────────────────────
     MARKET_TIMING_TICKER: str = Field(

@@ -167,7 +167,7 @@ class TestIntegration:
         index_close = (800 * (1 + np.random.randn(len(dates)) * 0.01)).cumprod()
         index_data = pd.DataFrame({"close": index_close}, index=dates)
 
-        # All buy_signal = False (no buy allowed)
+        # All buy conditions fail (3 of 4 secondary fail, so < 2)
         factor_rows = []
         for t in tickers:
             for d in dates:
@@ -179,11 +179,11 @@ class TestIntegration:
                     "mcap_percentile": 0.2,
                     "gpa_percentile": 50,
                     "supply_percentile": 50,
-                    "share_change_5mo_ago": 0,
-                    "share_change_now": 0,
+                    "share_change_5mo_ago": 1,  # C: fail
+                    "share_change_now": 1,       # D: fail
                     "trailing_ni": 100,
                     "trailing_ocf": 100,
-                    "buy_signal": False,
+                    "buy_signal": False,         # H: fail (3 of 4 secondary fail)
                     "sell_signal": False,
                 })
         factor_data = pd.DataFrame(factor_rows)
@@ -211,11 +211,14 @@ class TestIntegration:
         """
         sd = simulated_data
 
-        # Create a factor where buy_signal is True only on specific dates
+        # Create a factor where buy conditions are False before March 1
         factor_data = sd["factor_data"].copy()
-        # Set buy signal to False for dates before March 1
         cutoff = pd.Timestamp("2023-03-01")
+        before = factor_data["date"] < cutoff
+        # Make 3 of 4 secondary conditions fail before cutoff
         factor_data["buy_signal"] = factor_data["date"] >= cutoff
+        factor_data["share_change_5mo_ago"] = before.astype(int)  # C: fail before cutoff
+        factor_data["share_change_now"] = before.astype(int)       # D: fail before cutoff
 
         config = SuperQualityConfig(DART_API_KEY="test")
         engine = BacktestEngine(config)

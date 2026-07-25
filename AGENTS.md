@@ -19,7 +19,7 @@ Super Quality 2.0 is a Python‑based quantitative backtesting system for Korean
 | Task | Location | Notes |
 |------|----------|-------|
 | CLI entry point | `src/super_quality/main.py` | Uses `argparse` for sub‑commands |
-| Configuration | `pyproject.toml` | Defines dependencies, scripts, Ruff linting |
+| Configuration | `src/super_quality/config.py` | Pydantic‑Settings, includes `RELAXED_ENTRY_MODE` |
 | Factor implementations | `src/super_quality/factors/` | Value, quality, market‑timing, supply |
 | Strategy logic | `src/super_quality/strategies/` | `super_quality.py` applies A‑H conditions |
 | Backtest engine | `src/super_quality/backtest/engine.py` |
@@ -60,16 +60,6 @@ pytest -v
 ruff check
 ```
 
-## NOTES
-- The `.env` file must contain `DART_API_KEY` for financial data access.
-- All output files are written to the `outputs/` directory unless overridden.
-- The internal `.omo/` directory stores agent plans and should be ignored by production code.
-- **Price data mcap**: Cached mcap may be 0 when `Shares` column is missing from KRX listing. The loader now falls back to computing shares from the `Marcap` column (total market cap snapshot divided by first close).
-- **Financial data quarters**: `_get_available_quarters()` filters quarters whose DART submission deadlines have passed, avoiding `'013'` errors for future quarters.
-- **Account matching**: `_find_account()` uses three-pass matching (exact → containment → keyword) because DART API returns company-specific account names.
-- **OFS fallback**: CFS (연결) financial data is tried first; if empty, OFS (별도) is used as fallback.
-- **파라미터 최적화 결과 (2026-07-02)**: MAX_HOLD_DAYS=20, STOP_LOSS=-20%가 최적. SL=-20%는 무손절보다 5pp 낫다 (최악의 거래를 차단). HOLD=30은 거래 급감으로 수익 악화.
-
 ## TASK LOG — 2026-06-27
 - Fixed DART financial data loading: added `_get_available_quarters()`, OFS fallback, keyword-based account matching in `loader.py`.
 - Fixed TTM de-cumulation: changed `tail(4)` to `tail(5)` + `last4` for proper single-quarter extraction (`main.py:206-215`).
@@ -88,6 +78,23 @@ ruff check
 - **sell_signal 재도입 포기**: KOSDAQ close < MA3 & MA5 기반 — 79% 거래에서 조기 매도 → 평균 -2.65% 손실 → 코드 원복
 - **DART rate limit 탐지**: `_consecutive_empty` 카운터 + `_check_dart_rate_limited()` / `_set_dart_rate_limited()` 구현 (`loader.py`)
 - **유상증자 루프 최적화**: 연도별 호출 시 020 패턴 감지 → 캐시에 빈 결과 저장
+
+## NOTES
+- The `.env` file must contain `DART_API_KEY` for financial data access.
+- All output files are written to the `outputs/` directory unless overridden.
+- The internal `.omo/` directory stores agent plans and should be ignored by production code.
+- **Price data mcap**: Cached mcap may be 0 when `Shares` column is missing from KRX listing. The loader now falls back to computing shares from the `Marcap` column (total market cap snapshot divided by first close).
+- **Financial data quarters**: `_get_available_quarters()` filters quarters whose DART submission deadlines have passed, avoiding `'013'` errors for future quarters.
+- **Account matching**: `_find_account()` uses three-pass matching (exact → containment → keyword) because DART API returns company-specific account names.
+- **OFS fallback**: CFS (연결) financial data is tried first; if empty, OFS (별도) is used as fallback.
+- **파라미터 최적화 결과 (2026-07-02)**: MAX_HOLD_DAYS=20, STOP_LOSS=-20%가 최적. SL=-20%는 무손절보다 5pp 낫다 (최악의 거래를 차단). HOLD=30은 거래 급감으로 수익 악화.
+- **Market timing**: buy_signal = KOSDAQ close > MA20 (was OR(MA3, MA5, MA10)). MA20 reduces noise and allows faster re-entry after downturns.
+- **RELAXED_ENTRY_MODE**: When True (default), requires ALL of A,B,E,F + ≥2 of C,D,G,H. When False, requires all 8 (strict AND).
+
+## TASK LOG — 2026-07-25
+- **Market timing buy_signal 변경**: OR(MA3, MA5, MA10) → MA20 단일 조건. KOSDAQ 하락장에서 과도한 매수 차단 완화 (`market_timing.py`).
+- **TTM NaN 전파 수정**: `np.nansum` 도입으로 `trailing_ni`/`trailing_ocf` 중 하나라도 NaN이면 전체 TTM이 붕괴되던 문제 해결 (`loader.py:1366-1367`).
+- **매수 조건 완화 (6/8)**: `RELAXED_ENTRY_MODE=True` 도입. 핵심(A,B,E,F) + 보조(C,D,G,H) 중 ≥2. 기존 strict AND로는 통과율 1.3%로 거래 부족 (`super_quality.py`, `config.py`).
 
 ## KNOWN ISSUES
 - `006400` (Samsung SDI): 0/5 quarters have `net_income` parsed — DART returns data but account name variant not caught by keyword fallback.

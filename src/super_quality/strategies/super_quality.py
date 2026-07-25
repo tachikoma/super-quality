@@ -112,12 +112,18 @@ class SuperQualityStrategy:
         else:
             result["h_pass"] = True
 
-        # 모든 조건 통과해야 함
-        condition_cols = [
-            "a_pass", "b_pass", "c_pass", "d_pass",
-            "e_pass", "f_pass", "g_pass", "h_pass",
-        ]
-        result["all_buy_conditions"] = result[condition_cols].all(axis=1)
+        # 매수 조건 집계
+        core_cols = ["a_pass", "b_pass", "e_pass", "f_pass"]
+        secondary_cols = ["c_pass", "d_pass", "g_pass", "h_pass"]
+
+        if self.config.RELAXED_ENTRY_MODE:
+            # 6/8 relaxed: 핵심 4개는 모두 + 보조 4개 중 ≥2
+            core_pass = result[core_cols].all(axis=1)
+            secondary_count = result[secondary_cols].sum(axis=1)
+            result["all_buy_conditions"] = core_pass & (secondary_count >= 2)
+        else:
+            # Strict AND: 8개 모두 통과
+            result["all_buy_conditions"] = result[core_cols + secondary_cols].all(axis=1)
 
         # 우선순위 점수 = GP/A 백분위 + 공급 백분위 (내림차순 정렬)
         result["priority_score"] = 0.0

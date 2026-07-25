@@ -16,6 +16,7 @@ import time
 from datetime import date, datetime
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from super_quality.data.cache import DataCache
@@ -1362,8 +1363,8 @@ def compute_ttm_snapshot(
         last4 = single_vals[-4:]
         ttm_rows.append({
             "ticker": ticker,
-            "trailing_ni": float(last4.sum(axis=0)[0]),
-            "trailing_ocf": float(last4.sum(axis=0)[1]),
+            "trailing_ni": float(np.nansum(last4[:, 0])),
+            "trailing_ocf": float(np.nansum(last4[:, 1])),
         })
 
     if not ttm_rows:
