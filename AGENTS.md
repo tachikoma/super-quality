@@ -68,6 +68,7 @@ ruff check
 - **Financial data quarters**: `_get_available_quarters()` filters quarters whose DART submission deadlines have passed, avoiding `'013'` errors for future quarters.
 - **Account matching**: `_find_account()` uses three-pass matching (exact → containment → keyword) because DART API returns company-specific account names.
 - **OFS fallback**: CFS (연결) financial data is tried first; if empty, OFS (별도) is used as fallback.
+- **파라미터 최적화 결과 (2026-07-02)**: MAX_HOLD_DAYS=20, STOP_LOSS=-20%가 최적. SL=-20%는 무손절보다 5pp 낫다 (최악의 거래를 차단). HOLD=30은 거래 급감으로 수익 악화.
 
 ## TASK LOG — 2026-06-27
 - Fixed DART financial data loading: added `_get_available_quarters()`, OFS fallback, keyword-based account matching in `loader.py`.
@@ -75,6 +76,18 @@ ruff check
 - Fixed `trailing_ni`/`trailing_ocf` fillna bug (`main.py:328-332`).
 - **Root cause of 0 trades**: All `mcap` values in cached price data were 0 because `Shares` column was missing from the KRX stock listing. Fixed by computing shares from `Marcap / first_close` in `get_price_data()` (`loader.py:186-197`). After fix: 54 trades, -4.28% return for 2025-01-01 backtest on tickers[:50].
 - Key diagnostics: a_pass (PBR < 20%) = 0.3%, g_pass (MCAP < 40%) = 0.7%, trailing_ni > 0 = 33/49 tickers, trailing_ocf > 0 = 26/49 tickers.
+
+## TASK LOG — 2026-07-02
+- **파라미터 최적화 (전체 KOSPI/KOSDAQ 유니버스, 2015-2024)**:
+  - 기준 (5일, SL-7%): Total Return -89.49%, CAGR -20.63%, Sharpe -1.39
+  - **最优: MAX_HOLD_DAYS=20, STOP_LOSS=-20%**: Total Return -63.84%, CAGR -9.90%, Sharpe -0.54, +25.65pp 개선
+  - 만기 거래 평균 +1.40% (764건, 92%), 손절 평균 -21.98% (65건, 8%)
+  - SL=-20%가 최적점: 무손절(-68.91%)보다 5pp 낫다 (최악의 거래를 차단)
+  - HOLD=30은 수렴: 거래 589개 급감, 거래당 -0.70%로 악화
+  - SL=-10%: -75.31%, SL=-15%: -72.46%, 무손절: -68.91%
+- **sell_signal 재도입 포기**: KOSDAQ close < MA3 & MA5 기반 — 79% 거래에서 조기 매도 → 평균 -2.65% 손실 → 코드 원복
+- **DART rate limit 탐지**: `_consecutive_empty` 카운터 + `_check_dart_rate_limited()` / `_set_dart_rate_limited()` 구현 (`loader.py`)
+- **유상증자 루프 최적화**: 연도별 호출 시 020 패턴 감지 → 캐시에 빈 결과 저장
 
 ## KNOWN ISSUES
 - `006400` (Samsung SDI): 0/5 quarters have `net_income` parsed — DART returns data but account name variant not caught by keyword fallback.

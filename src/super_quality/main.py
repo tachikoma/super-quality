@@ -111,11 +111,35 @@ def _cmd_run(args: argparse.Namespace) -> None:
         )
 
 
-        # 2a. 리스팅 → KOSPI + KOSDAQ 필터링
+        # 2a. 리스팅 → KOSPI + KOSDAQ 필터링 (시총 내림차순 정렬)
         all_listings = get_krx_listings()
         listings = all_listings[all_listings["market"].isin(["KOSPI", "KOSDAQ"])].copy()
+        if "Marcap" in listings.columns:
+            listings = listings.sort_values("Marcap", ascending=False)
         tickers: list[str] = listings["ticker"].tolist()
         logger.info("로드된 티커 수: %d", len(tickers))
+
+        # 2a-2. DART 유효 티커 필터링 (우선주/ETF 제외)
+        if api_key:
+            try:
+                import OpenDartReader  # type: ignore[import-untyped]
+                dart = OpenDartReader(api_key)
+                corp_codes = dart.corp_codes
+                valid_stock_codes = set(
+                    corp_codes.loc[
+                        corp_codes["stock_code"].str.strip() != "", "stock_code"
+                    ].tolist()
+                )
+                tickers = [t for t in tickers if t in valid_stock_codes]
+                logger.info("DART 유효 티커로 필터링: %d개", len(tickers))
+            except Exception as exc:
+                logger.warning("DART 티커 필터링 실패 (%s), 전체 유니버스 사용", exc)
+        else:
+            logger.warning("DART API 키 없음 — 유효성 필터링 생략")
+
+        # 재무/리테일/유증 분석 대상: 전체 유효 티커
+        fin_tickers: list[str] = tickers
+        logger.info("재무 데이터 대상: 유효 KOSPI/KOSDAQ (%d개)", len(fin_tickers))
 
         # 2b. 가격 데이터 + 시장 지수
         price_data = get_price_data(tickers, config.START_DATE, config.END_DATE)
@@ -125,11 +149,11 @@ def _cmd_run(args: argparse.Namespace) -> None:
         from_date: date = _parse_date(args.start)
         to_date: date = _parse_date(args.end) if args.end else date.today()
         years = list(range(from_date.year - 2, to_date.year + 1))
-        financial_data = get_financial_data(tickers[:200], years, api_key=api_key)  # API 속도 제한을 위해 일부 티커만 사용
+        financial_data = get_financial_data(fin_tickers, years, api_key=api_key)
         logger.info("로드된 재무 데이터: %d행", len(financial_data))
 
         # 2d. 개인 순매수 (티커별)
-        supply_tickers = tickers[:200]
+        supply_tickers = fin_tickers
         retail_frames: list[pd.DataFrame] = []
         for i, ticker in enumerate(supply_tickers):
             try:
@@ -148,14 +172,21 @@ def _cmd_run(args: argparse.Namespace) -> None:
         # 2e. 유상증자 일정 조회 (DART API)
         capital_increases: dict[str, list[date]] = {}
         logger.info("유상증자 일정을 조회 중입니다…")
-        for i, ticker in enumerate(tickers[:200]):
+        rate_limited = False
+        for i, ticker in enumerate(fin_tickers):
+            if rate_limited:
+                continue
             try:
                 dts = get_paid_in_capital_increases(ticker, years, api_key=api_key)
                 capital_increases[ticker] = dts
                 if dts:
                     logger.info("  유상증자 데이터: %s (일정 %d건)", ticker, len(dts))
             except Exception as e:
-                logger.warning("  유상증자 조회 실패: %s (%s)", ticker, e)
+                if "020" in str(e):
+                    logger.warning("  DART 사용한도 초과 — 유상증자 조회를 중단합니다")
+                    rate_limited = True
+                else:
+                    logger.debug("  유상증자 조회 실패: %s (%s)", ticker, e)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("데이터 수집 실패: %s", exc)
@@ -250,9 +281,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 
 
-        # 3d. MCAP 백분위 거래일별 재계산 (시총은 매일 변하므로)
-        # MCAP 백분위는 재무 데이터가 있는 티커들만 대상으로 계산하여,
-        # 전략이 분석 대상 티커 집단 내에서의 상대적 시총을 평가하도록 함.
+        # MCAP 백분위 거래일별 재계산 (시총은 매일 변하므로)
+        # price_data의 전체 티커를 대상으로 percentile 계산 (factor_data에
+        # 재무 데이터가 없는 티커도 price_data에는 존재하므로 정확한 전일 대비 순위 산출)
         daily_mcap = price_data["mcap"].reset_index()
         daily_mcap["date"] = pd.to_datetime(daily_mcap["date"])
         factor_data = factor_data.merge(
@@ -264,18 +295,6 @@ def _cmd_run(args: argparse.Namespace) -> None:
             .fillna(50.0)
             * 100.0
         )
-        # ticker × date 수준이 아닌 전체 일간 percentile이므로,
-        # 재무 데이터가 없는 티커는 percentile이 full-universe 기준임.
-        # 전략 컨텍스트에 맞게 재무 데이터 존재 티커만의 percentile로 대체.
-        fin_tickers = set(factor_data.loc[factor_data["pbr_percentile"].notna(), "ticker"])
-        if fin_tickers:
-            fin_mask = factor_data["ticker"].isin(fin_tickers)
-            factor_data.loc[fin_mask, "mcap_percentile"] = (
-                factor_data.loc[fin_mask].groupby("date")["mcap"]
-                .rank(pct=True, ascending=True)
-                .fillna(50.0)
-                * 100.0
-            )
 
         # 3e. 공급 팩터 (티커 × 날짜)
         if not retail_buy.empty:
@@ -403,6 +422,18 @@ def _cmd_run(args: argparse.Namespace) -> None:
     logger.info("백테스트 시뮬레이션을 실행 중입니다…")
     try:
         engine = BacktestEngine(config)
+        if args.exclude_conditions:
+            all_conds = {"a", "b", "c", "d", "e", "f", "g", "h"}
+            exclude_set: set[str] = set()
+            for token in args.exclude_conditions.replace(" ", "").split(","):
+                if token == "ef":
+                    exclude_set.update(["e", "f"])
+                else:
+                    exclude_set.add(token)
+            active = all_conds - exclude_set
+            logger.info("  활성 조건: %s (제외: %s)", ",".join(sorted(active)), args.exclude_conditions)
+            strategy = SuperQualityStrategy(config, active_conditions=active)
+            engine.set_strategy(strategy)
         result = engine.run(price_data, index_data, factor_data, financial_data)
     except Exception as exc:  # noqa: BLE001
         logger.error("백테스트 실패: %s", exc)
@@ -466,6 +497,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output", "-o",
         default="outputs",
         help="보고서 출력 디렉토리 (기본값: outputs)",
+    )
+    run_parser.add_argument(
+        "--exclude-conditions",
+        default="",
+        help="제외할 조건 (쉼표 구분, 예: --exclude-conditions g,ef)",
     )
 
     return parser

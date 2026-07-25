@@ -56,12 +56,12 @@ class SuperQualityConfig(BaseSettings):
         description="매수 가격 = 전일 종가 × 오프셋 (-1%)",
     )
     MAX_HOLD_DAYS: int = Field(
-        default=5,
+        default=20,
         description="최대 보유 기간 (거래일 기준)",
     )
     STOP_LOSS: float = Field(
-        default=-0.07,
-        description="손절 기준 (-7%)",
+        default=-0.20,
+        description="손절 기준 (-20%)",
     )
 
     # ── 비용 ─────────────────────────────────────────────────────────

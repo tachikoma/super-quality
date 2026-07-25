@@ -210,68 +210,52 @@ class TestEvaluateSellConditions:
         }
 
     def test_stop_loss_triggers(self, strategy: SuperQualityStrategy, position: dict) -> None:
-        """Return <= -7% → 'stop_loss'."""
+        """Return <= -20% → 'stop_loss'."""
         result = strategy.evaluate_sell_conditions(
             position=position,
-            current_price=9200.0,  # -8%
+            current_price=7900.0,  # -21%
             entry_price=10000.0,
             hold_days=3,
-            sell_signal=False,
         )
         assert result == "stop_loss"
 
     def test_stop_loss_edge(self, strategy: SuperQualityStrategy, position: dict) -> None:
-        """Below -7% → 'stop_loss' (<= threshold)."""
+        """Below -20% → 'stop_loss' (<= threshold)."""
         result = strategy.evaluate_sell_conditions(
             position=position,
-            current_price=9299.0,  # -7.01% (clearly <= -7%)
+            current_price=7999.0,  # -20.01% (clearly <= -20%)
             entry_price=10000.0,
             hold_days=3,
-            sell_signal=False,
         )
         assert result == "stop_loss"
 
     def test_stop_loss_not_triggered(self, strategy: SuperQualityStrategy, position: dict) -> None:
-        """Return -6% → stop-loss NOT triggered (above -7%)."""
+        """Return -19% → stop-loss NOT triggered (above -20%)."""
         result = strategy.evaluate_sell_conditions(
             position=position,
-            current_price=9400.0,  # -6%
+            current_price=8100.0,  # -19%
             entry_price=10000.0,
             hold_days=3,
-            sell_signal=False,
         )
         assert result != "stop_loss"
 
-    def test_market_timing_triggers(self, strategy: SuperQualityStrategy, position: dict) -> None:
-        """sell_signal = True → 'market_timing' (no stop-loss)."""
-        result = strategy.evaluate_sell_conditions(
-            position=position,
-            current_price=9800.0,  # -2% (no stop-loss)
-            entry_price=10000.0,
-            hold_days=2,
-            sell_signal=True,
-        )
-        assert result == "market_timing"
-
     def test_expiry_triggers(self, strategy: SuperQualityStrategy, position: dict) -> None:
-        """hold_days >= 5 → 'expiry'."""
+        """hold_days >= 20 → 'expiry'."""
         result = strategy.evaluate_sell_conditions(
             position=position,
             current_price=10100.0,  # +1% (above stop-loss)
             entry_price=10000.0,
-            hold_days=5,
-            sell_signal=False,
+            hold_days=20,
         )
         assert result == "expiry"
 
     def test_expiry_edge(self, strategy: SuperQualityStrategy, position: dict) -> None:
-        """hold_days = 4 → NOT yet expiry."""
+        """hold_days = 19 → NOT yet expiry."""
         result = strategy.evaluate_sell_conditions(
             position=position,
             current_price=10100.0,
             entry_price=10000.0,
-            hold_days=4,
-            sell_signal=False,
+            hold_days=19,
         )
         assert result is None
 
@@ -282,48 +266,20 @@ class TestEvaluateSellConditions:
             current_price=10500.0,  # +5%
             entry_price=10000.0,
             hold_days=2,
-            sell_signal=False,
         )
         assert result is None
 
     def test_stop_loss_priority_over_expiry(
         self, strategy: SuperQualityStrategy, position: dict,
     ) -> None:
-        """stop_loss (-8%) takes priority over expiry (hold_days=5)."""
+        """stop_loss (-21%) takes priority over expiry (hold_days=20)."""
         result = strategy.evaluate_sell_conditions(
             position=position,
-            current_price=9200.0,  # -8%
+            current_price=7900.0,  # -21%
             entry_price=10000.0,
-            hold_days=5,
-            sell_signal=False,
+            hold_days=20,
         )
         assert result == "stop_loss"
-
-    def test_stop_loss_priority_over_market_timing(
-        self, strategy: SuperQualityStrategy, position: dict,
-    ) -> None:
-        """stop_loss (-8%) takes priority over market sell signal."""
-        result = strategy.evaluate_sell_conditions(
-            position=position,
-            current_price=9200.0,  # -8%
-            entry_price=10000.0,
-            hold_days=2,
-            sell_signal=True,
-        )
-        assert result == "stop_loss"
-
-    def test_market_timing_priority_over_expiry(
-        self, strategy: SuperQualityStrategy, position: dict,
-    ) -> None:
-        """market_timing takes priority over expiry when both apply."""
-        result = strategy.evaluate_sell_conditions(
-            position=position,
-            current_price=9800.0,  # -2% (no stop-loss)
-            entry_price=10000.0,
-            hold_days=5,
-            sell_signal=True,
-        )
-        assert result == "market_timing"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -337,4 +293,4 @@ def test_strategy_importable() -> None:
     st = SuperQualityStrategy(cfg)
     assert isinstance(st, SuperQualityStrategy)
     assert st.config.PBR_PERCENTILE == 0.20
-    assert st.config.MAX_HOLD_DAYS == 5
+    assert st.config.MAX_HOLD_DAYS == 20

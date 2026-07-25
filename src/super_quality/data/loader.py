@@ -25,6 +25,24 @@ logger = logging.getLogger(__name__)
 # ── 모든 로더 함수에서 공유하는 전역 캐시 인스턴스 ──────────────────
 _cache = DataCache()
 
+# ── DART 호출 제한 (일일 약 25,000회 후 020, 캐시로 영속화) ──────
+_DART_RATE_LIMITED: bool = False
+
+def _check_dart_rate_limited() -> bool:
+    global _DART_RATE_LIMITED
+    if _DART_RATE_LIMITED:
+        return True
+    _DART_RATE_LIMITED = _cache.get_json("_dart_rate_limited", default=False)
+    return _DART_RATE_LIMITED
+
+def _set_dart_rate_limited() -> None:
+    global _DART_RATE_LIMITED
+    _DART_RATE_LIMITED = True
+    _cache.put_json("_dart_rate_limited", True)
+
+# 연속 빈 응답 탐지 (020 감지용)
+_consecutive_empty: list[int] = [0]
+
 # ── 헬퍼 함수 ─────────────────────────────────────────────────────
 
 
@@ -525,6 +543,14 @@ def get_financial_data(
 
     # 3. 누락된 데이터만 다운로드
     if missing:
+        # 3a. 이미 알려진 배드 티커 제외
+        known_bad: set[str] = set(_cache.get_json("financial_bad_tickers") or [])
+        bad_in_missing = known_bad & set(missing.keys())
+        if bad_in_missing:
+            for t in bad_in_missing:
+                del missing[t]
+            logger.info("알려진 배드 티커 제외: %d개", len(bad_in_missing))
+
         import OpenDartReader  # type: ignore[import-untyped]
 
         dart = OpenDartReader(api_key)
@@ -636,7 +662,7 @@ def get_financial_data(
         ) -> float | None:
             try:
                 shares_data = dart_client.ps_blsstu(ticker, year)
-                time.sleep(0.5)
+                time.sleep(0.15)
                 if isinstance(shares_data, pd.DataFrame) and not shares_data.empty:
                     for col in ("stk_cnt", "istc_totqy", "발행주식수"):
                         if col in shares_data.columns:
@@ -657,6 +683,35 @@ def get_financial_data(
             except Exception:
                 pass
             return None
+
+        # Pre-screen: skip tickers with no DART financial data
+        skip_tickers_raw: set[str] = set()
+        for ticker in list(missing.keys()):
+            need_years = missing[ticker]
+            # 3b. find_corp_code 검증 (ValueError 방지)
+            try:
+                corp_code = dart.find_corp_code(ticker)
+            except Exception:
+                corp_code = None
+            if not corp_code:
+                skip_tickers_raw.add(ticker)
+                del missing[ticker]
+                logger.info("  DART corp_code 없음: %s — 건너뜀", ticker)
+                continue
+            # 3c. 1회 테스트 호출 ('013' 방지 — REIT 등)
+            try:
+                test = dart.finstate_all(ticker, max(need_years), "11011", fs_div="CFS")
+                time.sleep(0.15)
+            except Exception:
+                test = None
+            if test is None or (isinstance(test, pd.DataFrame) and test.empty):
+                skip_tickers_raw.add(ticker)
+                del missing[ticker]
+                logger.info("  DART 재무 데이터 없음: %s — 건너뜀", ticker)
+                continue
+        if skip_tickers_raw:
+            _cache.put_json("financial_bad_tickers", sorted(skip_tickers_raw))
+            logger.info("스킵된 티커 저장: %d개", len(skip_tickers_raw))
 
         for ticker, need_years in missing.items():
             existing = _cache.get(f"financial_{ticker}")
@@ -681,7 +736,7 @@ def get_financial_data(
                     for fs_div in ("CFS", "OFS"):
                         try:
                             fin_data = dart.finstate_all(ticker, year, reprt_code, fs_div=fs_div)
-                            time.sleep(0.5)
+                            time.sleep(0.15)
                         except Exception:
                             continue
 
@@ -726,7 +781,7 @@ def get_financial_data(
                 cached_years_set.update(need_years)
                 cached_tickers[ticker] = sorted(cached_years_set)
 
-        if any(cached_tickers.get(t) for t in tickers):
+            # 각 티커 완료 시 즉시 메타 저장 (중단 시 재시작 가능)
             meta["tickers"] = cached_tickers
             _cache.put_json("financial_meta", meta)
 
@@ -808,7 +863,7 @@ def get_retail_net_buy(
         return cached
 
     df = stock.get_market_trading_value_by_date(start_str, end_str, ticker)
-    time.sleep(0.5)
+    time.sleep(0.15)
 
     if df.empty:
         result = pd.DataFrame(columns=["retail_net_buy"])
@@ -894,7 +949,7 @@ def get_shares_outstanding(
         for yr in missing_years:
             try:
                 shares_data = dart.ps_blsstu(ticker, yr)
-                time.sleep(0.5)
+                time.sleep(0.15)
                 if isinstance(shares_data, pd.DataFrame) and not shares_data.empty:
                     for col in ("stk_cnt", "istc_totqy", "발행주식수"):
                         if col in shares_data.columns:
@@ -997,6 +1052,10 @@ def get_paid_in_capital_increases(
             )
         return sorted(set(result))
 
+    if _check_dart_rate_limited():
+        logger.warning("  DART 020 — 유상증자 캐시 skip: %s", ticker)
+        return []
+
     import OpenDartReader  # type: ignore[import-untyped]
 
     dart = OpenDartReader(api_key)
@@ -1005,10 +1064,16 @@ def get_paid_in_capital_increases(
         dates_str: list[str] = []
         try:
             sd = dart.report(ticker, "증자", year, reprt_code="11011")
-            time.sleep(0.5)
+            time.sleep(0.15)
         except Exception:
             continue
         if sd is None or (isinstance(sd, pd.DataFrame) and sd.empty):
+            _consecutive_empty[0] += 1
+            if _consecutive_empty[0] >= 50:
+                _set_dart_rate_limited()
+                cached[str(year)] = []
+                _cache.put_json(f"paid_capital_{ticker}", cached)
+                raise RuntimeError("020")
             continue
         if isinstance(sd, pd.DataFrame):
             for _, row in sd.iterrows():
@@ -1034,6 +1099,7 @@ def get_paid_in_capital_increases(
                 except ValueError:
                     continue
 
+        _consecutive_empty[0] = 0
         cached[str(year)] = dates_str
 
     _cache.put_json(f"paid_capital_{ticker}", cached)
@@ -1137,6 +1203,10 @@ def calculate_ttm(
 # ═══════════════════════════════════════════════════════════════════
 
 
+DART_MIN_YEAR = 2015
+"""OpenDartReader ``finstate_all``는 2015년 이후 데이터만 제공합니다."""
+
+
 def _get_available_quarters(
     target_year: int,
     as_of_date: date | None = None,
@@ -1148,7 +1218,13 @@ def _get_available_quarters(
     - 반기 (11012): 8월 15일 이후
     - Q3 (11014): 11월 15일 이후
     - 연간 (11011): 다음 해 3월 31일 이후
+
+    DART API는 2015년 이후 데이터만 제공하므로,
+    ``target_year``가 2015 미만이면 빈 딕셔너리를 반환합니다.
     """
+    if target_year < DART_MIN_YEAR:
+        return {}
+
     as_of_date = as_of_date or date.today()
 
     deadlines: dict[int, date] = {

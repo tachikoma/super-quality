@@ -35,6 +35,9 @@ class BacktestEngine:
         self.config = config
         self.strategy = SuperQualityStrategy(config)
 
+    def set_strategy(self, strategy: SuperQualityStrategy) -> None:
+        self.strategy = strategy
+
     # ═══════════════════════════════════════════════════════════════════
     # Public API
     # ═══════════════════════════════════════════════════════════════════
@@ -339,8 +342,6 @@ class BacktestEngine:
             prev_date_obj = prev_date if isinstance(prev_date, date) else pd.Timestamp(prev_date).date()
 
             # 2a. 보유 포지션의 매도 조건 평가
-            index_sell = _nearest_index_signal(prev_date_obj, "sell_signal")
-
             for ticker, pos in list(positions.items()):
                 prev_close = _price(ticker, prev_ts, "close")  # type: ignore[arg-type]
                 if prev_close is None:
@@ -355,7 +356,6 @@ class BacktestEngine:
                     current_price=prev_close,
                     entry_price=pos["entry_price"],
                     hold_days=hold_days,
-                    sell_signal=index_sell,
                 )
                 if reason is None:
                     continue
