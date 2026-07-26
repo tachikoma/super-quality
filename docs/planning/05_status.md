@@ -9,7 +9,7 @@
 ## Phase 0: 준비
 - [x] `.omo/` 폴더 삭제 (2026-07-26)
 - [x] `outputs_2023_2024/` 삭제 (2026-07-26)
-- [x] 레거시 태깅: 필요 (`git tag v2.0-abandoned` — 아직 실행 안 함)
+- [x] 레거시 태깅: `git tag v2.0-abandoned` 생성됨 ✓
 - [x] `docs/planning/` 디렉토리 생성
 - [x] `01_strategy_pivot.md` 작성
 - [x] `02_architecture.md` 작성
