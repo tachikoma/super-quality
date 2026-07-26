@@ -183,3 +183,14 @@ ruff check
 | **전체 (첫 실행)** | **~5-6시간** | **~1시간** | **83%** |
 
 캐시된 데이터를 사용하면 전체 파이프라인이 수분 이내에 완료됩니다.
+
+## 문서
+
+| 문서 | 설명 |
+|------|------|
+| [README_K200MQ.md](README_K200MQ.md) | KOSPI 200 Momentum + Quality 전략 상세 가이드 |
+| [docs/planning/01_strategy_pivot.md](docs/planning/01_strategy_pivot.md) | 전략 전환 이유 및 폐기/유지 매핑 |
+| [docs/planning/02_architecture.md](docs/planning/02_architecture.md) | KOSPI 200 MQ 패키지 구조 및 팩터 설계 |
+| [docs/planning/03_implementation_plan.md](docs/planning/03_implementation_plan.md) | 5단계 구현 계획 |
+| [docs/planning/04_backtest_spec.md](docs/planning/04_backtest_spec.md) | 워크포워드 CV, 비용 모델, 스트레스 테스트 |
+| [docs/planning/05_status.md](docs/planning/05_status.md) | 실시간 진행 상황 |

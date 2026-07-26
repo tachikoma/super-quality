@@ -2,7 +2,7 @@
 
 ## 마지막 업데이트: 2026-07-26
 
-## 프로젝트 상태: Phase 2 완료, Phase 3 (통합/검증) 대기
+## 프로젝트 상태: Phase 0-3 완료, Phase 4 통합/검증 진행 중
 
 ---
 
@@ -15,48 +15,43 @@
 - [x] `02_architecture.md` 작성
 - [x] `03_implementation_plan.md` 작성
 - [x] `04_backtest_spec.md` 작성
-- [ ] `05_status.md` ← 현재 파일 (이 문서)
-- [ ] `src/k200_mq/` 패키지 구조 생성
-- [ ] `src/k200_mq/core/` 공통 인프라 추출
-- [ ] 레거시 `src/super_quality/` frozen (수정 불가)
+- [x] `05_status.md` ← 현재 파일 (이 문서)
+- [x] `src/k200_mq/` 패키지 구조 생성
+- [x] `src/k200_mq/core/` 공통 인프라 추출
+- [x] 레거시 `src/super_quality/` frozen (수정 불가)
 
 ---
 
 ## Phase 1: 데이터 & 유니버스
-이 단계 진행 시 갱신
-
-- [ ] KOSPI 200 종속 이력 소스 확인 (KRX API vs 프록시)
-- [ ] `universe.py` 구현
-- [ ] `loader.py` 확장 (252d pre-fetch, ADV)
-- [ ] KPI200/KS11 index data 지원
-- [ ] 종속 이력 검증
+- [x] KOSPI 200 종속 이력 소스 확인 (프록시: mcap top 200 from KRX listings)
+- [x] `universe.py` 구현 (get_kospi200_constituents, point-in-time caching)
+- [x] `loader.py` 확장 (get_price_data_with_lookback, compute_adv, get_kospi200_price_data)
+- [x] KOSPI 200 (KS11) + KOSPI 51 (KOSPI200) index data 지원
+- [x] 종속 이력 검증 (프록시 fallback 구현)
 
 ---
 
 ## Phase 2: 팩터 모듈
-이 단계 진행 시 갱신
-
-- [ ] `momentum.py` (12-7 month, 52-week high backup)
-- [ ] `quality.py` (ROE, DE, OpMargin, CashConv)
-- [ ] `regime.py` (MA200 + 20d return filter)
-- [ ] Unit tests (모든 팩터)
+- [x] `momentum.py` (12-7개월, 52주 고점 백업)
+- [x] `quality.py` (ROE, DE, OpMargin, CashConv, 복합 z-score)
+- [x] `regime.py` (MA200 + 20d return filter)
+- [x] Unit tests (모든 팩터)
 
 ---
 
 ## Phase 3: 전략 & 엔진
-이 단계 진행 시 갱신
-
-- [ ] `momentum_quality.py` (cross-sectional scoring)
-- [ ] `portfolio_engine.py` (rebalance loop, stop-loss, cost model)
-- [ ] Unit tests
-- [ ] 기존 `engine.py` 수정 금지 확인
+- [x] `momentum_quality.py` (cross-sectional scoring, TOP-N, KOSPI50 제외, 섹션 캡)
+- [x] `portfolio_engine.py` (리밸런싱 루프, stop-loss, 매수/매도 실행)
+- [x] `main.py` CLI skeleton (`k200-mq run`)
+- [x] Unit tests (모든 팩터, 전략, 엔진)
+- [x] 기존 `engine.py` 수정 금지 확인
 
 ---
 
 ## Phase 4: 통합 & 검증
-이 단계 진행 시 갱신
+진행 중 — `_run_pipeline()` 완성, 워크포워드 검증, 회귀 분석
 
-- [ ] `main.py` 새 CLI (`k200-mq run`)
+- [ ] `main.py` 새 CLI (`k200-mq run`) — 데이터 파이프라인 연결
 - [ ] Walk-forward CV (5-fold expanding)
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
@@ -67,10 +62,9 @@
 ---
 
 ## Phase 5: 마무리
-이 단계 진행 시 갱신
-
-- [ ] README.md (새 전략 문서)
-- [ ] AGENTS.md 업데이트
+- [x] README_K200MQ.md (새 전략 문서)
+- [x] AGENTS.md 업데이트
+- [ ] README.md (새 전략 docs 섹션) — 진행 중
 - [ ] Test 보강 (118 → 200+)
 - [ ] 최종 백테스트 (2015-2024)
 - [ ] 코드 리뷰
@@ -110,4 +104,4 @@
 
 ## 다음 단계
 
-**즉시 실행**: `git tag v2.0-abandoned` → Phase 0 시작 (새 패키지 생성)
+**즉시 실행**: Phase 4 — `_run_pipeline()` 구현 (실제 팩터 계산 + 포트폴리오 엔진 실행 → 백테스트 루프)
