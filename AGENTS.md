@@ -83,13 +83,16 @@ ruff check
 - The `.env` file must contain `DART_API_KEY` for financial data access.
 - All output files are written to the `outputs/` directory unless overridden.
 - The internal `.omo/` directory stores agent plans and should be ignored by production code.
-- **Price data mcap**: Cached mcap may be 0 when `Shares` column is missing from KRX listing. The loader now falls back to computing shares from the `Marcap` column (total market cap snapshot divided by first close).
+- **Price data mcap**: Cached mcap may be 0 when `Shares` column is missing from KRX listing. The loader falls back to computing shares from the `Marcap` column (total market cap snapshot divided by first close).
 - **Financial data quarters**: `_get_available_quarters()` filters quarters whose DART submission deadlines have passed, avoiding `'013'` errors for future quarters.
 - **Account matching**: `_find_account()` uses three-pass matching (exact → containment → keyword) because DART API returns company-specific account names.
 - **OFS fallback**: CFS (연결) financial data is tried first; if empty, OFS (별도) is used as fallback.
-- **파라미터 최적화 결과 (2026-07-02)**: MAX_HOLD_DAYS=20, STOP_LOSS=-20%가 최적. SL=-20%는 무손절보다 5pp 낫다 (최악의 거래를 차단). HOLD=30은 거래 급감으로 수익 악화.
-- **Market timing**: buy_signal = KOSDAQ close > MA20 (was OR(MA3, MA5, MA10)). MA20 reduces noise and allows faster re-entry after downturns.
+- **Market timing**: buy_signal = KOSDAQ close > MA20. sell_signal (close < MA3 & MA5) is computed but NOT used in sell conditions.
 - **RELAXED_ENTRY_MODE**: When True (default), requires ALL of A,B,E,F + ≥2 of C,D,G,H. When False, requires all 8 (strict AND).
+- **take_profit**: `config.TAKE_PROFIT = 0.30` added. Exit priority: stop_loss > take_profit > expiry.
+- **Position sizing**: `nav / MAX_HOLDINGS` (dynamic, 5% per position when MAX_HOLDINGS=20). Replaces former `POSITION_SIZE = 0.10` (fixed 10%).
+- **TTM NaN handling**: `compute_ttm_snapshot()` requires all 4 trailing quarters valid; returns NaN otherwise. `main.py` no longer fills trailing_ni/ocf NaN with 0.0.
+- **Supply factor**: Now returns daily time-series (ticker × date) instead of a static value per ticker.
 
 ## TASK LOG — 2026-07-25
 - **Market timing buy_signal 변경**: OR(MA3, MA5, MA10) → MA20 단일 조건. KOSDAQ 하락장에서 과도한 매수 차단 완화 (`market_timing.py`).
@@ -103,7 +106,35 @@ ruff check
   - **유상증자 조회 병렬화**: `main.py` 유상증자 루프를 `ThreadPoolExecutor(max_workers=4)`로 병렬 처리. DART rate limit 대비 4 workers로 보수적 설정.
   - **전체 성능**: 첫 실행 기준 ~5-6시간 → ~1시간으로 단축 (캐시 재사용 시 수분).
 
+## TASK LOG — 2026-08-01
+- **버그 수정 3건 (Phase 0)**:
+  - Supply factor 일일 시계열화: `supply.py`의 `.last()` 제거 → `ticker + date` 기준 일별 횡단면 백분위 반환. `main.py` merge 키를 `on=["ticker", "date"]`로 변경. (`supply.py`, `main.py`)
+  - TTM NaN 보수 처리: `compute_ttm_snapshot()`에서 4분기 미달 시 `np.nansum` 대신 NaN 반환. (`loader.py:1457-1458`)
+  - trailing_ni/ocf fillna(0) 제거: `main.py`에서 `trailing_ni`/`trailing_ocf` NaN을 0.0으로 채우던 것을 제거. NaN이 `> 0` 비교에서 자연히 False 반환하도록 보수적 처리. (`main.py:428-432`)
+- **매도 로직 (Phase 1a)**:
+  - 이익실현 트리거: `TAKE_PROFIT = 0.30` 추가. `evaluate_sell_conditions()`에 `take_profit` 조건 삽입 (우선순위: stop_loss > take_profit > expiry). (`config.py`, `strategy.py`)
+- **포지션 사이징 (Phase 1b)**:
+  - 포지션 크기: `nav * POSITION_SIZE` (고정 10%) → `nav / MAX_HOLDINGS` (동적 분산). `engine.py` 위치 선정 로직 수정. (`engine.py`)
+  - MAX_HOLDINGS 진입 제한 반영: `qualiying[:10]` → `qualiying[:remaining_slots]`. (`engine.py`)
+- **sell_signal revert**: 시장 타이밍 sell_signal(KOSDAQ < MA3 & MA5)을 매도 조건에 연결하려 했으나, 매도 신호가 과도하게 발동하여 총 수익률이 -63.84%에서 -99.96%로 악화되므로 원복. (`strategy.py`, `engine.py`)
+- **테스트 보강**: `test_factors.py`에 Supply factor 일일 시계열 테스트 4개 추가. `test_strategy.py`에 take_profit 테스트 4개 추가. (118 passed)
+- **문서**: 전략 폐기 결정. KOSPI 200 Momentum + Quality 패러다임으로 전환 권고. Oracle 분석 참조.
+
 ## KNOWN ISSUES
+- Strategy is **Abandoned** — see Strategy Status below.
 - `006400` (Samsung SDI): 0/5 quarters have `net_income` parsed — DART returns data but account name variant not caught by keyword fallback.
-- `096770` (SK Innovation): 4/5 quarters — 1 NaN in `net_income` corrupts the entire TTM sum via NaN propagation.
+- `096770` (SK Innovation): 4/5 quarters — 1 NaN in `net_income` results in NaN TTM (conservative handling).
 - `revenue` coverage (185/245 = 75.5%) is lower than other fields — may impact future strategies.
+
+## STRATEGY STATUS — ABANDONED
+
+Super Quality 2.0 strategy has been abandoned following 10-year backtest results. No configuration produced positive returns:
+
+| Period | Result | Notes |
+|--------|--------|-------|
+| 2015-2024 (baseline, 5d/SL-7%) | **-89.49%** | Original |
+| 2015-2024 (optimized, 20d/SL-20%) | **-63.84%** | Best parameters |
+| 2015-2024 (current build) | **-71.55%** | After all fixes & improvements |
+
+Root cause: small-cap value trap filter on KOSDAQ. The A-H pipeline has not generated positive alpha.
+Pivot direction: KOSPI 200 Momentum + Quality framework. Data infrastructure and factor framework are fully reusable.

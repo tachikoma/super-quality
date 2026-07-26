@@ -26,7 +26,7 @@ class RetailSupplyFactor(Factor):
         return "RetailSupply"
 
     def compute(self, data: pd.DataFrame) -> pd.DataFrame:
-        """롤링 공급 점수 및 백분위를 계산합니다.
+        """일별 롤링 공급 점수 및 일별 횡단면 백분위를 계산합니다.
 
         Parameters
         ----------
@@ -36,8 +36,8 @@ class RetailSupplyFactor(Factor):
         Returns
         -------
         pd.DataFrame
-            컬럼: ``ticker``, ``supply_score``, ``supply_percentile``.
-            최소 ``supply_days`` 이상의 데이터가 있는 ticker만 반환됨.
+            컬럼: ``ticker``, ``date``, ``supply_score``, ``supply_percentile``.
+            티커×날짜 전체 행을 반환합니다.
         """
         df = data[["ticker", "date", "retail_net_buy"]].copy()
         df = df.sort_values(["ticker", "date"])
@@ -48,17 +48,11 @@ class RetailSupplyFactor(Factor):
             .transform(lambda x: x.rolling(self.supply_days, min_periods=self.supply_days).sum())
         )
 
-        # 점수가 전체 윈도우 데이터를 가진 ticker별 가장 최근 날짜만 유지
-        latest = (
-            df.loc[df["supply_score"].notna()]
-            .groupby("ticker")
-            .last()
-            .reset_index()
+        # 날짜별 횡단면 백분위 (같은 날짜 내에서 상대 순위)
+        df["supply_percentile"] = (
+            df.groupby("date")["supply_score"]
+            .rank(pct=True, ascending=True)
+            * 100.0
         )
 
-        # 오름차순 백분위 (높은 순매수 → 높은 백분위)
-        latest["supply_percentile"] = (
-            latest["supply_score"].rank(pct=True, ascending=True) * 100.0
-        )
-
-        return latest[["ticker", "supply_score", "supply_percentile"]]
+        return df[["ticker", "date", "supply_score", "supply_percentile"]]

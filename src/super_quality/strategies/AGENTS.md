@@ -18,8 +18,10 @@ src/super_quality/strategies/
 | Strategy logic | `super_quality.py` | Combines factor outputs, applies filters, generates trade signals |
 
 ## CONVENTIONS
-- Exposes `run_strategy()` returning a pandas DataFrame of trades.
+- Exposes `evaluate_buy_conditions(df)` and `evaluate_sell_conditions(position, current_price, entry_price, hold_days, market_sell=False)`.
 - Relies on factor modules under `../factors/`.
+- Exit priority: stop_loss > take_profit > expiry > (none).
+- `market_sell` is passed but currently unused (KOSDAQ MA3 & MA5 breakdown was found too aggressive).
 
 ## COMMANDS
 ```bash

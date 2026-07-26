@@ -275,6 +275,50 @@ class TestEvaluateSellConditions:
         )
         assert result is None
 
+    def test_take_profit_triggers(self, strategy: SuperQualityStrategy, position: dict) -> None:
+        """Return >= +30% → 'take_profit'."""
+        result = strategy.evaluate_sell_conditions(
+            position=position,
+            current_price=13000.0,  # +30%
+            entry_price=10000.0,
+            hold_days=3,
+        )
+        assert result == "take_profit"
+
+    def test_take_profit_not_triggered(self, strategy: SuperQualityStrategy, position: dict) -> None:
+        """Return +29% → take_profit NOT triggered (below +30%)."""
+        result = strategy.evaluate_sell_conditions(
+            position=position,
+            current_price=12900.0,  # +29%
+            entry_price=10000.0,
+            hold_days=3,
+        )
+        assert result != "take_profit"
+
+    def test_stop_loss_priority_over_take_profit(
+        self, strategy: SuperQualityStrategy, position: dict,
+    ) -> None:
+        """stop_loss (-21%) takes priority over take_profit (+30%)."""
+        result = strategy.evaluate_sell_conditions(
+            position=position,
+            current_price=7900.0,  # -21%
+            entry_price=10000.0,
+            hold_days=3,
+        )
+        assert result == "stop_loss"
+
+    def test_take_profit_priority_over_expiry(
+        self, strategy: SuperQualityStrategy, position: dict,
+    ) -> None:
+        """take_profit (+30%) takes priority over expiry (hold_days=20)."""
+        result = strategy.evaluate_sell_conditions(
+            position=position,
+            current_price=13000.0,  # +30%
+            entry_price=10000.0,
+            hold_days=20,
+        )
+        assert result == "take_profit"
+
     def test_no_sell_signal(self, strategy: SuperQualityStrategy, position: dict) -> None:
         """No conditions met → None."""
         result = strategy.evaluate_sell_conditions(

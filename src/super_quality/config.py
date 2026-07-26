@@ -63,6 +63,10 @@ class SuperQualityConfig(BaseSettings):
         default=-0.20,
         description="손절 기준 (-20%)",
     )
+    TAKE_PROFIT: float = Field(
+        default=0.30,
+        description="이익실현 기준 (+30%)",
+    )
 
     # ── 비용 ─────────────────────────────────────────────────────────
     COMMISSION_RATE: float = Field(

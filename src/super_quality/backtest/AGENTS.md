@@ -19,7 +19,9 @@ src/super_quality/backtest/
 
 ## CONVENTIONS
 - Uses `pandas` for OHLCV manipulation.
+- Position sizing is dynamic: `nav / MAX_HOLDINGS` (5% per position when MAX_HOLDINGS=20).
 - Reports metrics via `analysis/metrics.py`.
+- `evaluate_sell_conditions()` supports `market_sell` parameter (currently unused — was too aggressive).
 
 ## COMMANDS
 ```bash

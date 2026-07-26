@@ -1452,10 +1452,17 @@ def compute_ttm_snapshot(
         for i in range(1, len(vals)):
             single_vals[i] = vals[i] - vals[i - 1]
         last4 = single_vals[-4:]
+        ni_ttm = float(np.nansum(last4[:, 0]))
+        ocf_ttm = float(np.nansum(last4[:, 1]))
+        # 4분기 미만 유효하면 NaN으로 반환 (과대평가 방지)
+        if np.isnan(last4[:, 0]).sum() > 0:
+            ni_ttm = float("nan")
+        if np.isnan(last4[:, 1]).sum() > 0:
+            ocf_ttm = float("nan")
         ttm_rows.append({
             "ticker": ticker,
-            "trailing_ni": float(np.nansum(last4[:, 0])),
-            "trailing_ocf": float(np.nansum(last4[:, 1])),
+            "trailing_ni": ni_ttm,
+            "trailing_ocf": ocf_ttm,
         })
 
     if not ttm_rows:

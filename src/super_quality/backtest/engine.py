@@ -382,8 +382,9 @@ class BacktestEngine:
                     # priority_score 내림차순 정렬
                     qualifying.sort(key=lambda r: -r.get("priority_score", 0.0))
 
-                    # 최대 10개 신규 포지션
-                    selected = qualifying[:10]
+                    # 최대 config.MAX_HOLDINGS개 신규 포지션
+                    remaining_slots = config.MAX_HOLDINGS - len(positions)
+                    selected = qualifying[:remaining_slots] if remaining_slots > 0 else []
 
                     # 현재 NAV (전일 종가 사용)
                     nav = cash
@@ -400,7 +401,7 @@ class BacktestEngine:
                         limit_price = round(prev_close * config.BUY_PRICE_OFFSET)
                         if limit_price <= 0:
                             continue
-                        target_value = nav * config.POSITION_SIZE
+                        target_value = nav / config.MAX_HOLDINGS
                         target_shares = int(target_value / limit_price)
                         if target_shares <= 0:
                             continue

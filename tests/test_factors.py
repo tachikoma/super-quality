@@ -307,22 +307,35 @@ class TestRetailSupplyFactor:
         assert "supply_percentile" in result.columns
 
     def test_supply_score_values(self, sample_data):
-        """Verify rolling 5-day sum for each ticker."""
+        """Verify rolling 5-day sum for each ticker on the last available date."""
         factor = RetailSupplyFactor(supply_days=5)
         result = factor.compute(sample_data)
 
         # A: last 5 days = 20 + 30 + 40 + 50 + 60 = 200
         # B: last 5 days = 200 + 300 + 400 + 500 + 600 = 2000
-        assert result.loc[result["ticker"] == "A", "supply_score"].iloc[0] == 200
-        assert result.loc[result["ticker"] == "B", "supply_score"].iloc[0] == 2000
+        # 전체 행을 반환하므로 마지막 날짜 기준으로 검증
+        last_date = result["date"].max()
+        a_score = result.loc[
+            (result["ticker"] == "A") & (result["date"] == last_date), "supply_score"
+        ].iloc[0]
+        b_score = result.loc[
+            (result["ticker"] == "B") & (result["date"] == last_date), "supply_score"
+        ].iloc[0]
+        assert a_score == 200
+        assert b_score == 2000
 
     def test_percentile_ranking_ascending(self, sample_data):
-        """Higher supply score → higher percentile (ascending rank)."""
+        """Higher supply score → higher percentile (ascending rank) on same date."""
         factor = RetailSupplyFactor(supply_days=5)
         result = factor.compute(sample_data)
 
-        a_pct = result.loc[result["ticker"] == "A", "supply_percentile"].iloc[0]
-        b_pct = result.loc[result["ticker"] == "B", "supply_percentile"].iloc[0]
+        last_date = result["date"].max()
+        a_pct = result.loc[
+            (result["ticker"] == "A") & (result["date"] == last_date), "supply_percentile"
+        ].iloc[0]
+        b_pct = result.loc[
+            (result["ticker"] == "B") & (result["date"] == last_date), "supply_percentile"
+        ].iloc[0]
 
         # B (2000) > A (200) → B percentile > A percentile
         assert b_pct > a_pct
@@ -330,7 +343,7 @@ class TestRetailSupplyFactor:
         assert 0 <= b_pct <= 100
 
     def test_insufficient_data_excluded(self):
-        """Tickers with fewer than supply_days of data are excluded."""
+        """Tickers with fewer than supply_days of data still returned but with NaN scores."""
         dates = pd.date_range("2024-01-01", periods=3, freq="D")
         data = pd.DataFrame({
             "ticker": ["A"] * 3,
@@ -340,18 +353,27 @@ class TestRetailSupplyFactor:
         factor = RetailSupplyFactor(supply_days=5)
         result = factor.compute(data)
 
-        assert len(result) == 0  # no ticker has 5 days of data
+        # min_periods 미달 → supply_score는 NaN (전체 행은 반환됨)
+        assert len(result) == 3
+        assert result["supply_score"].isna().all()
 
     def test_configurable_window(self, sample_data):
         """Supply window should be configurable via constructor."""
         factor = RetailSupplyFactor(supply_days=3)
         result = factor.compute(sample_data)
 
+        last_date = result["date"].max()
         # A: last 3 days = 40 + 50 + 60 = 150
-        assert result.loc[result["ticker"] == "A", "supply_score"].iloc[0] == 150
+        a_score = result.loc[
+            (result["ticker"] == "A") & (result["date"] == last_date), "supply_score"
+        ].iloc[0]
+        assert a_score == 150
 
         # B: last 3 days = 400 + 500 + 600 = 1500
-        assert result.loc[result["ticker"] == "B", "supply_score"].iloc[0] == 1500
+        b_score = result.loc[
+            (result["ticker"] == "B") & (result["date"] == last_date), "supply_score"
+        ].iloc[0]
+        assert b_score == 1500
 
     def test_name_property(self):
         assert RetailSupplyFactor().name == "RetailSupply"

@@ -173,7 +173,11 @@ class SuperQualityStrategy:
         if ret <= self.config.STOP_LOSS:
             return "stop_loss"
 
-        # 2. 만기 — 최대 보유 기간 도달
+        # 2. 이익실현
+        if ret >= self.config.TAKE_PROFIT:
+            return "take_profit"
+
+        # 3. 만기 — 최대 보유 기간 도달
         if hold_days >= self.config.MAX_HOLD_DAYS:
             return "expiry"
 

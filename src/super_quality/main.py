@@ -15,6 +15,7 @@ import logging
 import sys
 from datetime import date, datetime
 
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Any
@@ -131,7 +132,6 @@ def _cmd_run(args: argparse.Namespace) -> None:
             get_krx_listings,
             get_market_index,
             get_price_data,
-            get_retail_net_buy,
             get_retail_net_buy_batch,
             get_paid_in_capital_increases,
         )
@@ -378,14 +378,13 @@ def _cmd_run(args: argparse.Namespace) -> None:
                 supply_df = pd.DataFrame(columns=["ticker", "supply_score", "supply_percentile"])
 
             if not supply_df.empty:
-                supply_merge = supply_df.rename(
-                    columns={"supply_score": "supply_score", "supply_percentile": "supply_percentile"}
-                )
+                supply_merge = supply_df.copy()
                 supply_merge["ticker"] = supply_merge["ticker"].astype(str)
+                supply_merge["date"] = pd.to_datetime(supply_merge["date"])
                 factor_data["ticker"] = factor_data["ticker"].astype(str)
                 factor_data = factor_data.merge(
-                    supply_merge[["ticker", "supply_score", "supply_percentile"]],
-                    on="ticker",
+                    supply_merge[["ticker", "date", "supply_score", "supply_percentile"]],
+                    on=["ticker", "date"],
                     how="left",
                 )
             else:
@@ -428,10 +427,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
                 factor_data.loc[dates[ago_mask].index, "share_change_5mo_ago"] = 1
 
             for col in ["trailing_ni", "trailing_ocf"]:
-                if col in factor_data.columns:
-                    factor_data[col] = factor_data[col].fillna(0.0)
-                else:
-                    factor_data[col] = 0.0
+                if col not in factor_data.columns:
+                    factor_data[col] = np.nan
 
             # 보조 컬럼 정리 (engine 전달 전에 제거)
             factor_data = factor_data.drop(columns=["_epoch", "mcap"], errors="ignore")
