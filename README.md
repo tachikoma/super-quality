@@ -109,14 +109,15 @@ src/super_quality/
 
 ## 데이터 소스
 
-| 데이터 | 소스 | API 키 필요 |
-|--------|------|:---:|
-| KOSPI / KOSDAQ 종목 리스트 | FinanceDataReader | 아니요 |
-| 일별 OHLCV 가격 | FinanceDataReader | 아니요 |
-| 시가총액 | FinanceDataReader | 아니요 |
-| 재무제표 (K-IFRS) | OpenDartReader | 예 |
-| 개인 투자자 순매수 | pykrx | 아니요 |
-| KOSDAQ 지수 (시장 타이밍) | FinanceDataReader | 아니요 |
+| 데이터 | 소스 | API 키 필요 | 병렬 처리 |
+|--------|------|:---:|:---:|
+| KOSPI / KOSDAQ 종목 리스트 | FinanceDataReader | 아니요 | - |
+| 일별 OHLCV 가격 | FinanceDataReader | 아니요 | - |
+| 시가총액 | FinanceDataReader | 아니요 | - |
+| 재무제표 (K-IFRS) | OpenDartReader | 예 | 프리스크리닝 6 workers |
+| 개인 투자자 순매수 | pykrx | 아니요 | 8 workers |
+| 유상증자 일정 | OpenDartReader | 예 | 4 workers |
+| KOSDAQ 지수 (시장 타이밍) | FinanceDataReader | 아니요 | - |
 
 ## DART API 키
 
@@ -153,3 +154,16 @@ pytest tests/test_integration.py -v
 # 린터 실행
 ruff check
 ```
+
+## 성능
+
+데이터 수집 파이프라인은 병렬 처리를 통해 대폭 가속됩니다:
+
+| 단계 | 순차 처리 | 병렬 처리 | 절감율 |
+|------|-----------|-----------|--------|
+| 개인 순매수 (2,605개 티커) | ~4.3시간 | ~26분 | 90% |
+| DART 프리스크리닝 | ~39분 | ~5분 | 87% |
+| 유상증자 조회 | ~1-2시간 | ~20-40분 | 67% |
+| **전체 (첫 실행)** | **~5-6시간** | **~1시간** | **83%** |
+
+캐시된 데이터를 사용하면 전체 파이프라인이 수분 이내에 완료됩니다.

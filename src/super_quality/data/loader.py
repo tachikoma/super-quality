@@ -7,6 +7,7 @@
 - **OpenDartReader**: 재무제표 (K-IFRS)
 
 모든 네트워크 기반 함수는 :class:`DataCache`를 통해 적극적으로 캐싱합니다.
+대량 데이터 수집 시 ``ThreadPoolExecutor``를 활용한 병렬 처리를 지원합니다.
 """
 
 from __future__ import annotations
@@ -700,31 +701,45 @@ def get_financial_data(
                 pass
             return None
 
-        # Pre-screen: skip tickers with no DART financial data
-        skip_tickers_raw: set[str] = set()
-        for ticker in list(missing.keys()):
-            need_years = missing[ticker]
-            # 3b. find_corp_code 검증 (ValueError 방지)
+        def _prescreen_ticker(
+            ticker: str,
+            need_years: list[int],
+        ) -> tuple[str, bool]:
+            """단일 티커의 DART 재무 데이터 존재 여부를 확인합니다."""
             try:
                 corp_code = dart.find_corp_code(ticker)
             except Exception:
-                corp_code = None
+                return (ticker, False)
             if not corp_code:
-                skip_tickers_raw.add(ticker)
-                del missing[ticker]
-                logger.info("  DART corp_code 없음: %s — 건너뜀", ticker)
-                continue
-            # 3c. 1회 테스트 호출 ('013' 방지 — REIT 등)
+                return (ticker, False)
             try:
                 test = dart.finstate_all(ticker, max(need_years), "11011", fs_div="CFS")
                 time.sleep(0.15)
             except Exception:
-                test = None
+                return (ticker, False)
             if test is None or (isinstance(test, pd.DataFrame) and test.empty):
-                skip_tickers_raw.add(ticker)
-                del missing[ticker]
-                logger.info("  DART 재무 데이터 없음: %s — 건너뜀", ticker)
-                continue
+                return (ticker, False)
+            return (ticker, True)
+
+        # Pre-screen: 병렬로 DART 재무 데이터 존재 여부 확인
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        skip_tickers_raw: set[str] = set()
+        prescreen_tickers = list(missing.keys())
+        logger.info("DART 프리스크리닝 병렬 시작: %d개 티커, workers=6", len(prescreen_tickers))
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_to_ticker = {
+                executor.submit(_prescreen_ticker, t, missing[t]): t
+                for t in prescreen_tickers
+            }
+            for future in as_completed(future_to_ticker):
+                ticker, is_valid = future.result()
+                if not is_valid:
+                    skip_tickers_raw.add(ticker)
+                    del missing[ticker]
+                    logger.info("  DART 재무 데이터 없음: %s — 건너뜀", ticker)
+
         if skip_tickers_raw:
             _cache.put_json("financial_bad_tickers", sorted(skip_tickers_raw))
             logger.info("스킵된 티커 저장: %d개", len(skip_tickers_raw))
@@ -911,6 +926,67 @@ def get_retail_net_buy(
     result.index.name = "date"
     _cache.put(cache_key, result)
     return result
+
+
+def get_retail_net_buy_batch(
+    tickers: list[str],
+    start: str | date,
+    end: str | date,
+    max_workers: int = 8,
+) -> dict[str, pd.DataFrame]:
+    """여러 ticker의 개인 순매수를 병렬로 가져옵니다.
+
+    Parameters
+    ----------
+    tickers : list[str]
+        6자리 종목 코드 리스트.
+    start : str or date
+        시작일.
+    end : str or date
+        종료일.
+    max_workers : int
+        동시 스레드 수 (기본값 8).
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        ticker → 개인 순매수 DataFrame 매핑.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: dict[str, pd.DataFrame] = {}
+    total = len(tickers)
+    completed = 0
+    errors = 0
+
+    logger.info("개인 순매수 병렬 다운로드 시작: %d개 티커, workers=%d", total, max_workers)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_ticker = {
+            executor.submit(get_retail_net_buy, ticker, start, end): ticker
+            for ticker in tickers
+        }
+        for future in as_completed(future_to_ticker):
+            ticker = future_to_ticker[future]
+            completed += 1
+            try:
+                df = future.result()
+                if df is not None and not df.empty:
+                    results[ticker] = df
+            except Exception:
+                errors += 1
+
+            if completed % 100 == 0 or completed == total:
+                logger.info(
+                    "  개인 순매수 진행: %d/%d (성공 %d, 오류 %d)",
+                    completed, total, completed - errors, errors,
+                )
+
+    logger.info(
+        "개인 순매수 병렬 다운로드 완료: %d개 성공, %d개 오류",
+        len(results), errors,
+    )
+    return results
 
 
 # ═══════════════════════════════════════════════════════════════════

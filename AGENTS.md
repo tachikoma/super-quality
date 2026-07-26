@@ -96,6 +96,13 @@ ruff check
 - **TTM NaN 전파 수정**: `np.nansum` 도입으로 `trailing_ni`/`trailing_ocf` 중 하나라도 NaN이면 전체 TTM이 붕괴되던 문제 해결 (`loader.py:1366-1367`).
 - **매수 조건 완화 (6/8)**: `RELAXED_ENTRY_MODE=True` 도입. 핵심(A,B,E,F) + 보조(C,D,G,H) 중 ≥2. 기존 strict AND로는 통과율 1.3%로 거래 부족 (`super_quality.py`, `config.py`).
 
+## TASK LOG — 2026-07-26
+- **데이터 수집 병렬화 (전체 파이프라인 가속)**:
+  - **개인 순매수 병렬 다운로드**: `get_retail_net_buy_batch()` 추가 (`loader.py:916-974`). `ThreadPoolExecutor(max_workers=8)`로 pykrx API 호출 병렬화. 2,605개 티커 기준 4.3시간 → 26분으로 단축 (90% 절감).
+  - **DART 프리스크리닝 병렬화**: `get_financial_data()` 내 프리스크리닝 루프를 `ThreadPoolExecutor(max_workers=6)`로 병렬 처리 (`loader.py:703-744`). 기존 순차 대비 ~34분 절감.
+  - **유상증자 조회 병렬화**: `main.py` 유상증자 루프를 `ThreadPoolExecutor(max_workers=4)`로 병렬 처리. DART rate limit 대비 4 workers로 보수적 설정.
+  - **전체 성능**: 첫 실행 기준 ~5-6시간 → ~1시간으로 단축 (캐시 재사용 시 수분).
+
 ## KNOWN ISSUES
 - `006400` (Samsung SDI): 0/5 quarters have `net_income` parsed — DART returns data but account name variant not caught by keyword fallback.
 - `096770` (SK Innovation): 4/5 quarters — 1 NaN in `net_income` corrupts the entire TTM sum via NaN propagation.

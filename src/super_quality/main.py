@@ -132,6 +132,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             get_market_index,
             get_price_data,
             get_retail_net_buy,
+            get_retail_net_buy_batch,
             get_paid_in_capital_increases,
         )
 
@@ -189,16 +190,16 @@ def _cmd_run(args: argparse.Namespace) -> None:
             retail_buy = cached_retail
             logger.info("개인 순매수 어셈블리 캐시 적중: %d행", len(retail_buy))
         else:
+            # 배치 병렬 다운로드 (8 workers)
+            retail_data = get_retail_net_buy_batch(
+                supply_tickers, config.START_DATE, config.END_DATE, max_workers=8,
+            )
             retail_frames: list[pd.DataFrame] = []
-            for i, ticker in enumerate(supply_tickers):
-                try:
-                    df = get_retail_net_buy(ticker, config.START_DATE, config.END_DATE)
-                    if not df.empty:
-                        df["ticker"] = ticker
-                        retail_frames.append(df)
-                        logger.info("  개인 매수 데이터: %s (%d/%d)", ticker, i + 1, len(supply_tickers))
-                except Exception:  # noqa: BLE001
-                    continue
+            for ticker, df in retail_data.items():
+                if not df.empty:
+                    df["ticker"] = ticker
+                    retail_frames.append(df)
+
             retail_buy = pd.concat(retail_frames, ignore_index=False) if retail_frames else pd.DataFrame()
             if not retail_buy.empty and "date" not in retail_buy.columns:
                 retail_buy = retail_buy.reset_index()
@@ -219,22 +220,38 @@ def _cmd_run(args: argparse.Namespace) -> None:
             logger.info("유상증자 어셈블리 캐시 적중: %d개 티커", len(capital_increases))
         else:
             capital_increases_raw: dict[str, list[str]] = {}
-            logger.info("유상증자 일정을 조회 중입니다…")
-            rate_limited = False
-            for i, ticker in enumerate(fin_tickers):
-                if rate_limited:
-                    continue
+            logger.info("유상증자 일정을 병렬 조회 중입니다 (workers=4)…")
+
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _fetch_capital(ticker: str) -> tuple[str, list[str]]:
                 try:
                     dts = get_paid_in_capital_increases(ticker, years, api_key=api_key)
-                    capital_increases_raw[ticker] = [d.isoformat() for d in dts]
-                    if dts:
-                        logger.info("  유상증자 데이터: %s (일정 %d건)", ticker, len(dts))
+                    return (ticker, [d.isoformat() for d in dts])
                 except Exception as e:
                     if "020" in str(e):
-                        logger.warning("  DART 사용한도 초과 — 유상증자 조회를 중단합니다")
-                        rate_limited = True
-                    else:
-                        logger.debug("  유상증자 조회 실패: %s (%s)", ticker, e)
+                        raise RuntimeError("020")
+                    return (ticker, [])
+
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(_fetch_capital, t): t
+                    for t in fin_tickers
+                }
+                for future in as_completed(futures):
+                    ticker = futures[future]
+                    try:
+                        tkr, dts = future.result()
+                        if dts:
+                            capital_increases_raw[tkr] = dts
+                            logger.info("  유상증자 데이터: %s (일정 %d건)", tkr, len(dts))
+                    except RuntimeError as e:
+                        if "020" in str(e):
+                            logger.warning("  DART 사용한도 초과 — 유상증자 조회를 중단합니다")
+                            for f in futures:
+                                f.cancel()
+                            break
+
             capital_increases = {
                 k: [datetime.strptime(d, "%Y-%m-%d").date() for d in v]
                 for k, v in capital_increases_raw.items()
