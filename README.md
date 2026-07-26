@@ -1,6 +1,13 @@
-# Super Quality 2.0
+# Super Quality / KOSPI 200 Momentum + Quality
 
-강환국 스타일 Super Quality 2.0 전략을 구현한 한국 주식 퀀트 백테스팅 시스템 (Python 벡터화 기반).
+| 전략 | 상태 | 태그 |
+|------|------|------|
+| Super Quality 2.0 (KOSDAQ 소형주 밸류+품질) | **ABANDONED** | `v2.0-abandoned` |
+| KOSPI 200 Momentum + Quality | 개발 중 (WIP) | — |
+
+**Super Quality 2.0**은 강환국 스타일의 한국 주식 퀀트 백테스팅 시스템입니다. 10년(2015-2024) 백테스트 결과 어떤 파라미터 조합으로도 양수 수익을 달성하지 못해 2026-07-25에 전략을 폐기했습니다.
+
+**KOSPI 200 Momentum + Quality**는 폐기된 전략의 인프라(data pipeline, backtest engine, factor framework, reporting)를 재사용하여 KOSPI 200 대형주 중심의 모멘텀+품질 전략으로 새 출발하는 프로젝트입니다.
 
 ## 전략 개요
 
@@ -49,7 +56,7 @@ echo 'DART_API_KEY=your_key_here' > .env
 
 ## 사용법
 
-### 전체 백테스트 실행
+### Super Quality 2.0 (LEGACY — deprecated)
 
 ```bash
 # .env 파일에서 DART_API_KEY 읽기
@@ -57,15 +64,19 @@ uv run super-quality run
 
 # 날짜 범위와 API 키 명시적 지정
 uv run super-quality run --start 2015-01-01 --end 2024-12-31 --dart-api-key YOUR_KEY
-
-# 사용자 정의 출력 디렉토리
-uv run super-quality run --output my_results
 ```
 
-또는 Python으로 직접 실행:
+### KOSPI 200 Momentum + Quality (WIP)
 
 ```bash
-python -m super_quality.main run --dart-api-key YOUR_KEY
+# 전체 백테스트 실행
+uv run python -m k200_mq.main run
+
+# 날짜 범위와 파라미터 지정
+uv run python -m k200_mq.main run \
+    --start 2015-01-01 --end 2024-12-31 \
+    --top-n 20 --rebalance-freq M \
+    --weight-momentum 0.50 --weight-quality 0.50
 ```
 
 ### 출력 파일
@@ -84,40 +95,45 @@ python -m super_quality.main run --dart-api-key YOUR_KEY
 ## 프로젝트 구조
 
 ```
-src/super_quality/
-├── __init__.py
-├── main.py                 # CLI 진입점 (argparse)
-├── config.py               # pydantic-settings 설정 (DART_API_KEY 등)
-├── data/
-│   ├── cache.py            # Parquet 기반 데이터 캐시 레이어
-│   └── loader.py           # 데이터 수집 (FinanceDataReader, pykrx, OpenDartReader)
-├── factors/
-│   ├── base.py             # 추상 팩터 기본 클래스
-│   ├── value.py            # PBR, 시가총액 백분위 팩터
-│   ├── quality.py          # GP/A, 신F-Score 팩터
-│   ├── market_timing.py    # KOSDAQ 지수(KQ11) 이동평균 기반 매수/매도 신호
-│   └── supply.py           # 개인 투자자 순매수 공급 점수
-├── strategies/
-│   └── super_quality.py    # 전략: 조건 A-H 평가, 매도 로직
-├── backtest/
-│   └── engine.py           # 일별 시뮬레이션 루프 (2단계 실행)
-├── analysis/
-│   └── metrics.py          # 성과 지표 (CAGR, Sharpe, MDD 등)
-└── reporting/
-    └── report.py            # HTML 티어시트, PNG 차트, CSV 내보내기
+src/
+├── super_quality/              # LEGACY — frozen at v2.0-abandoned (do not modify)
+│   ├── main.py
+│   ├── config.py
+│   ├── data/
+│   ├── factors/
+│   ├── strategies/
+│   ├── backtest/
+│   ├── analysis/
+│   └── reporting/
+└── k200_mq/                    # NEW — KOSPI 200 Momentum + Quality (WIP)
+    ├── __init__.py
+    ├── main.py                 # CLI 진입점
+    ├── config.py               # K200MQConfig (BacktestConfig + strategy params)
+    ├── core/                   # Reusable infrastructure from legacy
+    │   ├── cache.py
+    │   ├── factors/base.py
+    │   ├── analysis/metrics.py
+    │   └── reporting/report.py
+    ├── data/                   # Data layer (extends core/data/loader.py)
+    ├── factors/                # New factors (momentum, quality, regime)
+    ├── strategies/             # KOSPI 200 Momentum + Quality strategy
+    ├── backtest/               # PortfolioRebalanceEngine
+    ├── analysis/
+    └── reporting/
 ```
 
 ## 데이터 소스
 
-| 데이터 | 소스 | API 키 필요 | 병렬 처리 |
-|--------|------|:---:|:---:|
-| KOSPI / KOSDAQ 종목 리스트 | FinanceDataReader | 아니요 | - |
-| 일별 OHLCV 가격 | FinanceDataReader | 아니요 | - |
-| 시가총액 | FinanceDataReader | 아니요 | - |
-| 재무제표 (K-IFRS) | OpenDartReader | 예 | 프리스크리닝 6 workers |
-| 개인 투자자 순매수 | pykrx | 아니요 | 8 workers |
-| 유상증자 일정 | OpenDartReader | 예 | 4 workers |
-| KOSDAQ 지수 (시장 타이밍) | FinanceDataReader | 아니요 | - |
+| 데이터 | 소스 | API 키 필요 | 병렬 처리 | 용도 |
+|--------|------|:---:|:---:|------|
+| KOSPI / KOSDAQ 종목 리스트 | FinanceDataReader | 아니요 | - | Universe screening |
+| 일별 OHLCV 가격 | FinanceDataReader | 아니요 | - | 가격 데이터 |
+| 시가총액 | FinanceDataReader | 아니요 | - | 유니버스 구성 |
+| 재무제표 (K-IFRS) | OpenDartReader | 예 | 프리스크리닝 6 workers | 팩터 계산 |
+| 개인 투자자 순매수 | pykrx | 아니요 | 8 workers | Supply factor (legacy) |
+| 유상증자 일정 | OpenDartReader | 예 | 4 workers | Share change tracking |
+| KOSDAQ 지수 (KQ11) | FinanceDataReader | 아니요 | - | 레짓 필터 (legacy) |
+| KOSPI 200 지수 (KPI200) | FinanceDataReader | 아니요 | - | 모멘텀+리짓 필터 (신규) |
 
 ## DART API 키
 
