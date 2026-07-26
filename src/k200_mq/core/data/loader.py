@@ -1524,3 +1524,99 @@ def get_available_lag(rebalance_date: date) -> date:
 
     # 3월 31일 이전: 가장 최근 데이터는 전년도 Q3
     return date(y - 1, 9, 30)
+
+
+def get_price_data_with_lookback(
+    tickers: list[str],
+    start: str | date,
+    end: str | date,
+    lookback_days: int = 252,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """백테스트 가격 데이터 + 모멘텀 롤백용 선행 가격 데이터를 가져옵니다.
+
+    Parameters
+    ----------
+    tickers : list[str]
+        주식 ticker 심볼.
+    start : str or date
+        백테스트 시작일.
+    end : str or date
+        백테스트 종료일.
+    lookback_days : int
+        모멘텀 계산을 위한 선행 일수 (기본 252, 약 1년).
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        (backtest_range_data, lookback_range_data).
+        둘 다 MultiIndex ``(ticker, date)`` DataFrame.
+    """
+    start_date = _to_date(start)
+    from datetime import timedelta
+
+    lookback_start = start_date - timedelta(days=lookback_days + 30)
+    end_date = _to_date(end)
+
+    backtest_data = get_price_data(tickers, start_date, end_date)
+    lookback_data = get_price_data(tickers, lookback_start, start_date)
+
+    logger.info(
+        "가격 데이터 로드: backtest=%d행, lookback=%d행",
+        len(backtest_data),
+        len(lookback_data),
+    )
+    return backtest_data, lookback_data
+
+
+def compute_adv(
+    price_data: pd.DataFrame,
+    window: int = 20,
+) -> pd.DataFrame:
+    """평균 일일 거래대금(ADV)을 계산합니다.
+
+    Parameters
+    ----------
+    price_data : pd.DataFrame
+        MultiIndex ``(ticker, date)`` DataFrame with ``volume`` and ``close``.
+    window : int
+        rolling window (기본 20).
+
+    Returns
+    -------
+    pd.DataFrame
+        MultiIndex ``(ticker, date)`` DataFrame with ``adv`` 컬럼.
+        ADV = volume × close.
+    """
+    df = price_data.copy()
+    df["adv"] = df["volume"] * df["close"]
+    df["adv"] = (
+        df.groupby("ticker")["adv"]
+        .transform(lambda x: x.rolling(window, min_periods=1).mean())
+    )
+    return df[["adv"]]
+
+
+def get_kospi200_price_data(
+    start: str | date,
+    end: str | date,
+    lookback_days: int = 252,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """KOSPI 200 종목의 가격 데이터를 가져옵니다.
+
+    Parameters
+    ----------
+    start : str or date
+        백테스트 시작일.
+    end : str or date
+        백테스트 종료일.
+    lookback_days : int
+        모멘텀 계산을 위한 선행 일수.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        (backtest_range_data, lookback_range_data).
+    """
+    start_date = _to_date(start)
+    constituents = get_kospi200_constituents(start_date)
+    return get_price_data_with_lookback(constituents, start_date, _to_date(end), lookback_days)
