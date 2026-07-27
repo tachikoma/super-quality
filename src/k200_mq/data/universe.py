@@ -52,7 +52,7 @@ def get_kospi200_constituents(as_of: date) -> list[str]:
     cache_key = f"kospi200_{as_of.isoformat()}"
     cached = _CACHE.get(cache_key)
     if cached is not None:
-        return cached["tickers"].tolist()
+        return cached["ticker"].tolist()
 
     tickers = _fetch_kospi200(as_of)
     result = pd.DataFrame({"ticker": tickers, "as_of": as_of})
