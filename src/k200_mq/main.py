@@ -335,6 +335,7 @@ def _run_pipeline(config: Any) -> None:
 
     # 전체 가격 데이터 (팩터 계산용 — lookback 포함)
     full_price = pd.concat([lookback_data, backtest_data]).sort_index()
+    full_price = full_price.reset_index()  # MultiIndex → ticker, date 컬럼
 
     # 백테스트 기간 일별 영업일 목록
     backtest_dates = backtest_data.index.get_level_values("date").sort_values().unique()
