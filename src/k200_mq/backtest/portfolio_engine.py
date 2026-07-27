@@ -204,7 +204,8 @@ class PortfolioRebalanceEngine:
 
     def _get_universe(self, as_of: date, lookup: dict[date, list[str]]) -> list[str]:
         """특정 일자의 유니버스를 가져옵니다."""
-        return lookup.get(as_of, [])
+        key = getattr(as_of, 'date', lambda: as_of)()
+        return lookup.get(key, [])
 
     def _price(
         self,
@@ -233,14 +234,17 @@ class PortfolioRebalanceEngine:
         current_date: date,
     ) -> dict[str, dict[str, Any]]:
         """일일 손절을 체크합니다."""
+        to_sell: list[str] = []
         for tkr, pos in positions.items():
             prev_close = self._price(price_data, tkr, prev_ts, "close") if prev_ts else None
             if prev_close is None or prev_close <= 0:
                 continue
             ret = prev_close / pos["entry_price"] - 1.0
-            if ret <= self.config.SLIPPAGE:  # placeholder - real stop-loss below
-                pass
-            # 실제 stop-loss는 별도 config가 필요하므로 추후 구현
+            if ret <= getattr(self.config, 'SL_STOP_LOSS', -0.15):
+                to_sell.append(tkr)
+        for tkr in to_sell:
+            pos = positions[tkr]
+            del positions[tkr]
         return positions
 
     def _rebalance(
