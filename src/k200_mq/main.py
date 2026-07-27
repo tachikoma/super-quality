@@ -146,9 +146,12 @@ def _build_config(args: argparse.Namespace) -> Any:
     """CLI 인자를 기반으로 K200MQConfig를 구성합니다."""
     from k200_mq.config import K200MQConfig
 
+    start_d = _parse_date(args.start)
+    end_d = _parse_date(args.end) if args.end else date.today()
+
     config_kwargs: dict[str, Any] = {
-        "START_DATE": _parse_date(args.start),
-        "END_DATE": _parse_date(args.end) if args.end else date.today(),
+        "START_DATE": start_d.isoformat() if start_d else args.start,
+        "END_DATE": end_d.isoformat() if end_d else "today",
         "TOP_N": args.top_n,
         "REBALANCE_FREQ": args.rebalance_freq,
         "WEIGHT_MOMENTUM": args.weight_momentum,
@@ -291,8 +294,11 @@ def _run_pipeline(config: Any) -> None:
     from k200_mq.factors.quality import QualityFactor
     from k200_mq.factors.regime import RegimeFactor
 
-    start_date = config.START_DATE
-    end_date = config.END_DATE
+    start_date = _parse_date(config.START_DATE) if isinstance(config.START_DATE, str) else config.START_DATE
+    end_date = _parse_date(config.END_DATE) if isinstance(config.END_DATE, str) else config.END_DATE
+    if start_date is None or end_date is None:
+        logger.error("시작일/종료일 파싱 실패")
+        return
 
     # ── 1. 유니버스 구성 ──────────────────────────────────────
     logger.info("1단계: 유니버스 구성 (KOSPI 200 종속 이력)")
