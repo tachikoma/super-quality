@@ -8,10 +8,9 @@ KOSPI 200 Momentum + Quality 전략의 일별 시뮬레이션 루프를 구현�
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from k200_mq.config import K200MQConfig
@@ -234,7 +233,6 @@ class PortfolioRebalanceEngine:
         current_date: date,
     ) -> dict[str, dict[str, Any]]:
         """일일 손절을 체크합니다."""
-        to_sell: list[str] = []
         for tkr, pos in positions.items():
             prev_close = self._price(price_data, tkr, prev_ts, "close") if prev_ts else None
             if prev_close is None or prev_close <= 0:

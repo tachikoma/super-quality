@@ -1617,6 +1617,8 @@ def get_kospi200_price_data(
     tuple[pd.DataFrame, pd.DataFrame]
         (backtest_range_data, lookback_range_data).
     """
+    from k200_mq.data.universe import get_kospi200_constituents
+
     start_date = _to_date(start)
     constituents = get_kospi200_constituents(start_date)
     return get_price_data_with_lookback(constituents, start_date, _to_date(end), lookback_days)

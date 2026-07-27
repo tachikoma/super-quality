@@ -2,7 +2,7 @@
 
 ## 마지막 업데이트: 2026-07-26
 
-## 프로젝트 상태: Phase 0-3 완료, Phase 4 통합/검증 진행 중
+## 프로젝트 상태: Phase 4 파이프라인 완성, 검증 대기
 
 ---
 
@@ -49,9 +49,13 @@
 ---
 
 ## Phase 4: 통합 & 검증
-진행 중 — `_run_pipeline()` 완성, 워크포워드 검증, 회귀 분석
+파이프라인 완성 — 실제 데이터 로드 → 팩터 계산 → 백테스트 → 결과 저장
 
-- [ ] `main.py` 새 CLI (`k200-mq run`) — 데이터 파이프라인 연결
+- [x] `_run_pipeline()` 구현 — universe → price → factors → strategy → engine
+- [x] `main.py` CLI (`k200-mq run`) — 전체 파이프라인 연결 완료
+- [x] 재무 데이터 → 일별 변환 (`_convert_financial_to_daily`)
+- [x] 결과 저장 (portfolio_snapshots, trade_log, daily_returns CSV)
+- [x] 요약 통계 출력 (총수익률, Sharpe, 최대낙폭, 승률)
 - [ ] Walk-forward CV (5-fold expanding)
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
@@ -104,4 +108,4 @@
 
 ## 다음 단계
 
-**즉시 실행**: Phase 4 — `_run_pipeline()` 구현 (실제 팩터 계산 + 포트폴리오 엔진 실행 → 백테스트 루프)
+**즉시 실행**: Phase 4 검증 — Walk-forward CV, 파라미터 민감도, 스트레스 테스트. 또는 `uv run python -m k200_mq.main run`으로 실제 백테스트 실행.
