@@ -135,12 +135,16 @@ def get_kospi200_history(
     """
     from pandas.tseries.offsets import MonthEnd, QuarterEnd
 
+    ts_start = pd.Timestamp(start)
+    ts_end = pd.Timestamp(end)
+
     rebalance_offsets = MonthEnd() if rebalance_freq == "M" else QuarterEnd()
-    dates = pd.date_range(start, end, freq="D").date
+    dates = pd.date_range(ts_start, ts_end, freq="D").date
     rebalance_dates = sorted(
-        {d + rebalance_offsets for d in dates if (d + rebalance_offsets).date() <= end}
+        {d + rebalance_offsets for d in dates if (d + rebalance_offsets).date() <= ts_end.date()}
     )
-    rebalance_dates = [d for d in rebalance_dates if d >= start]
+    rebalance_dates = [d.date() if hasattr(d, 'date') else d for d in rebalance_dates]
+    rebalance_dates = [d for d in rebalance_dates if d >= ts_start.date()]
 
     records = []
     for rd in rebalance_dates:
