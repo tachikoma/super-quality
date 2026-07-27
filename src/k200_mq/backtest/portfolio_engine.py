@@ -170,7 +170,7 @@ class PortfolioRebalanceEngine:
                     ) - pd.Timedelta(days=1)
                 except Exception:
                     continue
-                search_start = month_end.date()
+                search_start = month_end
                 # 실제로 가장 가까운 영업일을 찾음
                 for ad in all_dates:
                     if ad >= search_start:
@@ -181,7 +181,7 @@ class PortfolioRebalanceEngine:
             for d in all_dates:
                 if d.month in quarter_months:
                     last_day = pd.Timestamp(year=d.year, month=d.month + 1, day=1) - pd.Timedelta(days=1)
-                    search_start = last_day.date()
+                    search_start = last_day
                     for ad in all_dates:
                         if ad >= search_start:
                             rebalance_dates.add(ad)
