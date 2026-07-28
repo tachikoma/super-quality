@@ -335,6 +335,10 @@ def _run_pipeline(config: Any) -> None:
 
     # 전체 가격 데이터 (팩터 계산용 — lookback 포함)
     full_price = pd.concat([lookback_data, backtest_data]).sort_index()
+    
+    # 품질 팩터용 전체 일자 추출 (reset_index 전에!)
+    all_full_dates = full_price.index.get_level_values("date").unique()
+    
     full_price = full_price.reset_index()  # MultiIndex → ticker, date 컬럼
 
     # 백테스트 기간 일별 영업일 목록
@@ -367,7 +371,7 @@ def _run_pipeline(config: Any) -> None:
 
             if not financial_data.empty:
                 daily_financial = _convert_financial_to_daily(
-                    financial_data, full_price.index.get_level_values("date").unique(),
+                    financial_data, all_full_dates,
                 )
                 quality_factor = QualityFactor()
                 quality_df = quality_factor.compute(
@@ -405,7 +409,7 @@ def _run_pipeline(config: Any) -> None:
         )
     else:
         logger.warning("  KOSPI 200 지수 데이터 없음 — 리짓 필터 비활성")
-        regime_scale_map = {}
+        regime_scale_map = None
 
     # ── 3d. 팩터 병합 ────────────────────────────────────────
     logger.info("  3d. 팩터 병합 중...")
@@ -431,15 +435,10 @@ def _run_pipeline(config: Any) -> None:
     # ── 4. 백테스트 실행 ──────────────────────────────────────
     logger.info("4단계: PortfolioRebalanceEngine로 백테스트 실행")
     engine = PortfolioRebalanceEngine(config)
-    results = engine.run(backtest_data, index_raw, factor_data, universe_history)
-
-    # 리짓 스케일 적용 (NAV 보정)
-    if regime_scale_map:
-        snapshots = results["portfolio_snapshots"]
-        if not snapshots.empty and "nav" in snapshots.columns:
-            snapshots["regime_scale"] = snapshots["date"].map(regime_scale_map).fillna(1.0)
-            snapshots["nav_adjusted"] = snapshots["nav"] * snapshots["regime_scale"]
-            results["portfolio_snapshots"] = snapshots
+    results = engine.run(
+        backtest_data, index_raw, factor_data, universe_history,
+        regime_scale_map=regime_scale_map,
+    )
 
     # ── 5. 결과 저장 ──────────────────────────────────────────
     logger.info("5단계: 결과 저장")

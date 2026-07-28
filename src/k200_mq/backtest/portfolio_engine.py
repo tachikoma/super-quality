@@ -36,6 +36,7 @@ class PortfolioRebalanceEngine:
         index_data: pd.DataFrame,
         factor_data: pd.DataFrame,
         universe_data: pd.DataFrame,
+        regime_scale_map: dict[Any, float] | None = None,
     ) -> dict[str, Any]:
         """백테스트 시뮬레이션을 실행합니다.
 
@@ -120,6 +121,7 @@ class PortfolioRebalanceEngine:
                     cash,
                     trade_log,
                     date_ordinal,
+                    regime_scale_map,
                 )
 
             # 스냅샷 기록
@@ -225,6 +227,7 @@ class PortfolioRebalanceEngine:
         cash: float,
         trade_log: list[dict[str, Any]],
         date_ordinal: dict[date, int],
+        regime_scale_map: dict[Any, float] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """리밸런싱을 실행합니다."""
         universe = self._get_universe(current_date, universe_lookup)
@@ -261,7 +264,8 @@ class PortfolioRebalanceEngine:
                 if p is not None:
                     nav += pos["shares"] * p
 
-            target_value = nav * s.get("weight", 1.0 / len(selected))
+            regime_scale = regime_scale_map.get(pd.Timestamp(current_date), 1.0) if regime_scale_map else 1.0
+            target_value = nav * s.get("weight", 1.0 / len(selected)) * regime_scale
             target_shares = int(target_value / prev_close)
             if target_shares <= 0:
                 continue
