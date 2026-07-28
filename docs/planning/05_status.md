@@ -76,7 +76,8 @@ Sharpe 비율: 0.596
 - [x] P0-1: 리짓 필터 엔진 내 적용 (regime_scale → target_value at rebalance)
 - [x] P0-2: 리밸런싱 일자 통합 (universe_data as_of 사용)
 - [x] P0-3: 품질 팩터 커버리지 개선 (0 분모 → 1 대체 + coverage 로깅)
-- [ ] Walk-forward CV (5-fold expanding)
+- [x] Walk-forward CV (5-fold expanding, 비중첩 2-3년 윈도우)
+- [ ] 파라미터 민감도 분석
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
 - [ ] 서바이버십 바이어스 테스트
@@ -115,7 +116,7 @@ Sharpe 비율: 0.596
 | 2026-07-28 | P0-1 해결: 리짓 필터 엔진 내 적용 | regime_scale → target_value at rebalance |
 | 2026-07-28 | P0-2 해결: 리밸런싱 일자 통합 | universe_data as_of 사용 |
 | 2026-07-28 | P0-3 해결: 품질 커버리지 개선 | 0 분모 → 1 대체 + coverage 로깅 |
-| 2026-07-28 | P0 전원 해결 완료, 검증 단계 진입 | Walk-forward CV 준비 |
+| 2026-07-28 | Walk-forward CV 완료 (5-fold) | 모든 접힘 양수, 기하평균 수익률 +245.82% |
 
 ---
 
@@ -144,8 +145,7 @@ Sharpe 비율: 0.596
 **P0 이슈 전원 해결 완료 (2026-07-28).**
 
 **다음 우선순위 (검증 결과 신뢰성):**
-1. P0 수정 후 백테스트 재실행 (2015-2026)
-2. Walk-forward CV (5-fold expanding)
-3. P1 이슈: trailing stop-loss, weight drift correction
-4. 파라미터 민감도 분석
-5. 서바이버십 바이어스 / 스트레스 테스트
+1. P1 이슈: trailing stop-loss, weight drift correction
+2. 파라미터 민감도 분석 (window/skip/N/reduction)
+3. 서바이버십 바이어스 / 스트레스 테스트
+4. Turnover / cost attribution
