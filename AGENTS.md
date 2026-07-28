@@ -110,3 +110,11 @@ ruff check
 - **egg-info / dist-info**: Legacy artifacts from `uv sync`. Not needed for personal strategy tools. Will be removed when legacy package is fully frozen or new strategy has its own setup.
 - **`[project.scripts]`**: Entry point `super-quality` in legacy `pyproject.toml` is deprecated. New strategy (`k200_mq`) will have its own `pyproject.toml` with `k200-mq` command (planned).
 - **Distribution packaging**: Not required for personal quantitative strategy tools. `uv sync` for dependency management suffices.
+
+## TASK LOG — 2026-07-26 (cont.)
+- **Phase 2 complete**: Momentum/Quality/Regime factors, strategy, portfolio engine.
+- **Phase 3 complete**: CLI skeleton, 25 files in package.
+- **Phase 4 pipeline complete**: `_run_pipeline()` wiring universe → price → factors → engine → save. First backtest run: +207.06% (2020-2024, **unverified**).
+- **Bug fixes**: config date type, Timestamp vs date comparisons (3 locations), cache key typo, universe lookup type mismatch, stop-loss threshold.
+- **Oracle review**: 14 issues identified (P0: 3, P1: 3, P2: 4, P3: 4). Key P0: regime filter in engine, rebalance date unification, quality factor coverage.
+- **Strategy status**: WIP → Beta (pipeline functional, results unverified).

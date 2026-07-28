@@ -3,7 +3,7 @@
 | 전략 | 상태 | 태그 |
 |------|------|------|
 | Super Quality 2.0 (KOSDAQ 소형주 밸류+품질) | **ABANDONED** | `v2.0-abandoned` |
-| KOSPI 200 Momentum + Quality | 개발 중 (WIP) | — |
+| KOSPI 200 Momentum + Quality | 베타 (Beta) | — |
 
 **Super Quality 2.0**은 강환국 스타일의 한국 주식 퀀트 백테스팅 시스템입니다. 10년(2015-2024) 백테스트 결과 어떤 파라미터 조합으로도 양수 수익을 달성하지 못해 2026-07-25에 전략을 폐기했습니다.
 
