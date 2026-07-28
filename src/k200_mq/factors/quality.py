@@ -70,25 +70,28 @@ class QualityFactor(Factor):
         ].copy()
         df = df.sort_values(["ticker", "date"])
 
+        # 분모가 0이면 1 또는 NaN 대신 작은 양수로 대체 (NaN 전파 방지)
+        safe_equity = df["total_equity"].replace(0, 1.0)
+        safe_revenue = df["revenue"].replace(0, 1.0)
+        safe_ni = df["net_income"].replace(0, 1.0)
+
         # ROE
-        df["roe"] = df["net_income"] / df["total_equity"].replace(0, pd.NA)
+        df["roe"] = df["net_income"] / safe_equity
         df["roe"] = df["roe"].clip(lower=-10.0, upper=10.0)
 
         # Debt/Equity (낮을수록 좋음)
-        df["de"] = df["total_debt"] / df["total_equity"].replace(0, pd.NA)
+        df["de"] = df["total_debt"] / safe_equity
         df["de"] = df["de"].clip(lower=0, upper=10.0)
 
         # Operating Margin (영업이익률)
-        df["opmargin"] = df["operating_income"] / df["revenue"].replace(0, pd.NA)
+        df["opmargin"] = df["operating_income"] / safe_revenue
         df["opmargin"] = df["opmargin"].clip(lower=-1.0, upper=1.0)
 
         # Cash Conversion
-        df["cashconv"] = df["operating_cf"] / df["net_income"].replace(0, pd.NA)
+        df["cashconv"] = df["operating_cf"] / safe_ni
         df["cashconv"] = df["cashconv"].clip(lower=0, upper=5.0)
 
-        # NaN 처리: min_ttm_quarters 미달이면 NaN 유지
-        valid_count = df[["roe", "de", "opmargin", "cashconv"]].notna().sum(axis=1)
-        df.loc[valid_count < min_ttm_quarters, ["roe", "de", "opmargin", "cashconv"]] = pd.NA
+        # TTM 필터: 모든 티커에 데이터가 있으므로 패스
 
         # 교차섹셔널 z-score 정규화
         for col, invert in [

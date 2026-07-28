@@ -421,10 +421,22 @@ def _run_pipeline(config: Any) -> None:
             lambda r: quality_z_map.get((r["ticker"], r["date"]), 0.0),
             axis=1,
         )
+        n_with_quality = (factor_data["quality_z"] != 0.0).sum()
+        quality_tickers = set(
+            factor_data.loc[factor_data["quality_z"] != 0.0, "ticker"].unique()
+        )
+        logger.info(
+            "  품질 커버리지: %d/%d 티커 (%.1f%%), %d/%d 행",
+            len(quality_tickers),
+            factor_data["ticker"].nunique(),
+            len(quality_tickers) / max(factor_data["ticker"].nunique(), 1) * 100,
+            n_with_quality,
+            len(factor_data),
+        )
     else:
         factor_data["quality_z"] = 0.0
+        logger.info("  품질 팩터 없음 — quality_z = 0.0")
 
-    # 리짓 스케일 적용 (팩터 수준이 아닌 포트폴리오 수준에서 적용하므로 별도 보관)
     factor_data = factor_data[
         factor_data["date"].isin(pd.to_datetime(backtest_dates))
     ].copy()
