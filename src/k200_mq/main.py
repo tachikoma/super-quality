@@ -139,6 +139,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="최소 유동성 비율 (기본 0.01)",
     )
 
+    wf_parser = sub.add_parser("walkforward", help="5-fold walk-forward 교차 검증")
+    wf_parser.add_argument(
+        "--dart-api-key",
+        default="",
+        help="OpenDartReader API 키",
+    )
+    wf_parser.add_argument(
+        "--output",
+        "-o",
+        default="outputs_k200mq",
+        help="결과 출력 디렉토리 (기본값: outputs_k200mq)",
+    )
+    wf_parser.add_argument(
+        "--top-n",
+        type=int,
+        default=20,
+        help="선택 종목 수 (기본 20)",
+    )
+    wf_parser.add_argument(
+        "--rebalance-freq",
+        default="M",
+        help="리밸런싱 주기: M(월간) 또는 Q(분기)",
+    )
+
     return parser
 
 
@@ -550,6 +574,144 @@ def _print_summary(results: dict[str, Any], config: Any) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Walk-Forward CV
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _print_fold_metrics(label: str, daily_returns: pd.Series, trade_log: pd.DataFrame) -> dict[str, Any]:
+    """단일 fold의 메트릭을 계산하고 출력합니다."""
+    if daily_returns.empty or daily_returns.isna().all():
+        print(f"  {label}: 데이터 없음")
+        return {"label": label, "total_return": 0.0, "sharpe": 0.0, "max_dd": 0.0, "win_rate": 0.0, "n_trades": 0}
+
+    cum = (1 + daily_returns).cumprod()
+    total_ret = cum.iloc[-1] - 1.0
+    vol = daily_returns.std()
+    n_years = len(daily_returns) / 252
+    ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1
+    ann_vol = vol * (252 ** 0.5)
+    sharpe = ann_ret / ann_vol if ann_vol > 0 else 0.0
+    peak = cum.cummax()
+    dd = (cum - peak) / peak
+    max_dd = dd.min()
+    completed = trade_log[trade_log["return_pct"].notna()] if "return_pct" in trade_log.columns else pd.DataFrame()
+    win_rate = (completed["return_pct"] > 0).mean() * 100 if len(completed) > 0 else 0.0
+
+    print(f"  {label}: 수익률 {total_ret*100:+.2f}% | "
+          f"Sharpe {sharpe:.3f} | MDD {max_dd*100:.2f}% | "
+          f"승률 {win_rate:.1f}% | 거래 {len(completed)}건")
+
+    return {
+        "label": label,
+        "total_return": total_ret,
+        "ann_return": ann_ret,
+        "sharpe": sharpe,
+        "max_dd": max_dd,
+        "win_rate": win_rate,
+        "n_trades": len(completed),
+    }
+
+
+def _run_walkforward(config: Any) -> None:
+    """5-fold walk-forward cross validation.
+
+    각 fold는 독립적인 기간에 대해 백테스트를 실행하고,
+    모든 fold의 결과를 집계하여 보고합니다.
+    """
+    base_output = Path(config.OUTPUT_DIR)
+    wf_dir = base_output / "walkforward"
+
+    today_str = date.today().isoformat()
+    folds = [
+        ("2014-01-01", "2016-12-31", "Fold 1: 2014-2016"),
+        ("2017-01-01", "2018-12-31", "Fold 2: 2017-2018"),
+        ("2019-01-01", "2020-12-31", "Fold 3: 2019-2020"),
+        ("2021-01-01", "2022-12-31", "Fold 4: 2021-2022"),
+        ("2023-01-01", today_str,     "Fold 5: 2023-2026"),
+    ]
+
+    all_daily_returns: list[pd.Series] = []
+    all_trade_logs: list[pd.DataFrame] = []
+    fold_metrics_list: list[dict[str, Any]] = []
+
+    for start_str, end_str, label in folds:
+        print(f"\n{'=' * 60}")
+        print(f"  {label} ({start_str} ~ {end_str})")
+        print(f"{'=' * 60}")
+
+        fold_output = wf_dir / label.replace(":", "").replace(" ", "_")
+        fold_config = config.model_copy(update={
+            "START_DATE": start_str,
+            "END_DATE": end_str,
+            "OUTPUT_DIR": str(fold_output),
+        })
+
+        _run_pipeline(fold_config)
+
+        trade_path = fold_output / "trade_log.csv"
+        returns_path = fold_output / "daily_returns.csv"
+
+        dr = pd.Series(dtype=float)
+        if returns_path.exists():
+            dr_df = pd.read_csv(returns_path)
+            if "daily_return" in dr_df.columns:
+                dr = dr_df["daily_return"]
+                dr.index = pd.to_datetime(dr_df.iloc[:, 0]) if "date" in dr_df.columns else dr.index
+
+        tl = pd.read_csv(trade_path) if trade_path.exists() else pd.DataFrame()
+
+        all_daily_returns.append(dr)
+        all_trade_logs.append(tl)
+
+        metrics = _print_fold_metrics(label, dr, tl)
+        fold_metrics_list.append(metrics)
+
+    # ── 종합 집계 ──────────────────────────────────────────
+    print(f"\n{'=' * 60}")
+    print("  Walk-Forward CV — 종합 결과")
+    print(f"{'=' * 60}")
+    print(f"  {'Fold':<22} {'수익률':>10} {'Sharpe':>8} {'MDD':>8} {'승률':>8} {'거래':>6}")
+    print(f"  {'-'*22} {'-'*10} {'-'*8} {'-'*8} {'-'*8} {'-'*6}")
+
+    for m in fold_metrics_list:
+        print(f"  {m['label']:<22} {m['total_return']*100:>+9.2f}% "
+              f"{m['sharpe']:>8.3f} {m['max_dd']*100:>7.2f}% "
+              f"{m['win_rate']:>7.1f}% {m['n_trades']:>6d}")
+
+    # ── 통합 OOS 시계열 집계 ─────────────────────────────────
+    combined_dr = pd.concat(all_daily_returns).sort_index()
+    combined_dr = combined_dr[combined_dr.notna() & combined_dr != 0.0]
+    combined_tl = pd.concat(all_trade_logs, ignore_index=True) if all_trade_logs else pd.DataFrame()
+
+    if not combined_dr.empty:
+        cum = (1 + combined_dr).cumprod()
+        total_ret = cum.iloc[-1] - 1.0
+        n_years = len(combined_dr) / 252
+        ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1
+        ann_vol = combined_dr.std() * (252 ** 0.5) if combined_dr.std() > 0 else 0.0
+        sharpe = ann_ret / ann_vol if ann_vol > 0 else 0.0
+        peak = cum.cummax()
+        max_dd = (cum - peak).min() / peak.max() if peak.max() > 0 else 0.0
+        win_rate = (combined_dr > 0).mean() * 100
+        n_trades = len(combined_tl[combined_tl["return_pct"].notna()]) if "return_pct" in combined_tl.columns else 0
+
+        print(f"  {'─' * 22} {'─' * 10} {'─' * 8} {'─' * 8} {'─' * 8} {'─' * 6}")
+        print(f"  {'OOS 통합':<22} {total_ret*100:>+9.2f}% "
+              f"{sharpe:>8.3f} {max_dd*100:>7.2f}% "
+              f"{win_rate:>7.1f}% {n_trades:>6d}")
+        print(f"  {'연간 수익률':25} {ann_ret*100:>+9.2f}%")
+        print(f"  {'OBS (거래일)':25} {len(combined_dr):>9d}일")
+
+    print(f"\n  전체 결과 저장: {base_output / 'walkforward_summary.csv'}")
+    print(f"{'=' * 60}")
+
+    # ── 요약 저장 ──────────────────────────────────────────
+    summary_df = pd.DataFrame(fold_metrics_list)
+    summary_path = base_output / "walkforward_summary.csv"
+    summary_df.to_csv(summary_path, index=False)
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 엔트리포인트
 # ═══════════════════════════════════════════════════════════════════
 
@@ -567,6 +729,13 @@ def main() -> None:
         logger.info("파이프라인 시작...")
         _run_pipeline(config)
         logger.info("파이프라인 완료.")
+
+    elif args.command == "walkforward":
+        config = _build_config(args)
+        _print_config_summary(config)
+        logger.info("Walk-forward CV 시작...")
+        _run_walkforward(config)
+        logger.info("Walk-forward CV 완료.")
 
     else:
         parser.print_help()
