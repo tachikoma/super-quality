@@ -59,11 +59,13 @@ class PortfolioRebalanceEngine:
         all_dates = sorted(price_data.index.get_level_values("date").unique())
         if len(all_dates) < 2:
             return self._empty_result()
-
         date_ordinal = {d: i for i, d in enumerate(all_dates)}
 
-        # 리밸런싱 일정 생성
-        rebalance_dates = self._generate_rebalance_dates(all_dates)
+        # 리밸런싱 일자 — universe_data의 as_of 일자를 그대로 사용
+        rebalance_dates = set(pd.to_datetime(universe_data["as_of"].unique()))
+        if not rebalance_dates:
+            logger.warning("리밸런싱 일자가 없습니다.")
+            return self._empty_result()
 
         # 종속 이력 딕셔너리 생성
         universe_lookup = self._build_universe_lookup(universe_data)
@@ -151,43 +153,6 @@ class PortfolioRebalanceEngine:
             "trade_log": trade_log_df,
             "daily_returns": daily_returns,
         }
-
-    def _generate_rebalance_dates(
-        self, all_dates: list[date]
-    ) -> set[date]:
-        """리밸런싱 일자를 생성합니다."""
-        freq = self.config.REBALANCE_FREQ
-        rebalance_dates: set[date] = set()
-
-        if freq == "M":
-            for d in all_dates:
-                # 월말이거나 그에 가장 가까운 영업일
-                next_month = d.month + 1 if d.month < 12 else 1
-                next_year = d.year if d.month < 12 else d.year + 1
-                try:
-                    month_end = pd.Timestamp(
-                        year=next_year, month=next_month, day=1
-                    ) - pd.Timedelta(days=1)
-                except Exception:
-                    continue
-                search_start = month_end
-                # 실제로 가장 가까운 영업일을 찾음
-                for ad in all_dates:
-                    if ad >= search_start:
-                        rebalance_dates.add(ad)
-                        break
-        elif freq == "Q":
-            quarter_months = [3, 6, 9, 12]
-            for d in all_dates:
-                if d.month in quarter_months:
-                    last_day = pd.Timestamp(year=d.year, month=d.month + 1, day=1) - pd.Timedelta(days=1)
-                    search_start = last_day
-                    for ad in all_dates:
-                        if ad >= search_start:
-                            rebalance_dates.add(ad)
-                            break
-
-        return rebalance_dates
 
     def _build_universe_lookup(
         self, universe_data: pd.DataFrame
