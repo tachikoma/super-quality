@@ -170,10 +170,22 @@ def _build_config(args: argparse.Namespace) -> Any:
     """CLI 인자를 기반으로 K200MQConfig를 구성합니다."""
     from k200_mq.config import K200MQConfig
 
+    if hasattr(args, "command") and args.command == "walkforward":
+        config_kwargs: dict[str, Any] = {
+            "OUTPUT_DIR": args.output,
+        }
+        if hasattr(args, "top_n"):
+            config_kwargs["TOP_N"] = args.top_n
+        if hasattr(args, "rebalance_freq"):
+            config_kwargs["REBALANCE_FREQ"] = args.rebalance_freq
+        if hasattr(args, "dart_api_key") and args.dart_api_key:
+            config_kwargs["DART_API_KEY"] = args.dart_api_key
+        return K200MQConfig(**config_kwargs)
+
     start_d = _parse_date(args.start)
     end_d = _parse_date(args.end) if args.end else date.today()
 
-    config_kwargs: dict[str, Any] = {
+    config_kwargs = {
         "START_DATE": start_d.isoformat() if start_d else args.start,
         "END_DATE": end_d.isoformat() if end_d else "today",
         "TOP_N": args.top_n,
@@ -668,7 +680,7 @@ def _run_walkforward(config: Any) -> None:
 
     # ── 종합 집계 ──────────────────────────────────────────
     print(f"\n{'=' * 60}")
-    print("  Walk-Forward CV — 종합 결과")
+    print("  Walk-Forward CV — 접힘별 결과")
     print(f"{'=' * 60}")
     print(f"  {'Fold':<22} {'수익률':>10} {'Sharpe':>8} {'MDD':>8} {'승률':>8} {'거래':>6}")
     print(f"  {'-'*22} {'-'*10} {'-'*8} {'-'*8} {'-'*8} {'-'*6}")
@@ -678,29 +690,24 @@ def _run_walkforward(config: Any) -> None:
               f"{m['sharpe']:>8.3f} {m['max_dd']*100:>7.2f}% "
               f"{m['win_rate']:>7.1f}% {m['n_trades']:>6d}")
 
-    # ── 통합 OOS 시계열 집계 ─────────────────────────────────
-    combined_dr = pd.concat(all_daily_returns).sort_index()
-    combined_dr = combined_dr[combined_dr.notna() & combined_dr != 0.0]
-    combined_tl = pd.concat(all_trade_logs, ignore_index=True) if all_trade_logs else pd.DataFrame()
+    print(f"  {'─' * 22} {'─' * 10} {'─' * 8} {'─' * 8} {'─' * 8} {'─' * 6}")
 
-    if not combined_dr.empty:
-        cum = (1 + combined_dr).cumprod()
-        total_ret = cum.iloc[-1] - 1.0
-        n_years = len(combined_dr) / 252
-        ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1
-        ann_vol = combined_dr.std() * (252 ** 0.5) if combined_dr.std() > 0 else 0.0
-        sharpe = ann_ret / ann_vol if ann_vol > 0 else 0.0
-        peak = cum.cummax()
-        max_dd = (cum - peak).min() / peak.max() if peak.max() > 0 else 0.0
-        win_rate = (combined_dr > 0).mean() * 100
-        n_trades = len(combined_tl[combined_tl["return_pct"].notna()]) if "return_pct" in combined_tl.columns else 0
+    returns = [m["total_return"] for m in fold_metrics_list]
+    sharpes = [m["sharpe"] for m in fold_metrics_list]
+    mdds = [m["max_dd"] for m in fold_metrics_list]
+    wins = [m["win_rate"] for m in fold_metrics_list]
+    trades = [m["n_trades"] for m in fold_metrics_list]
 
-        print(f"  {'─' * 22} {'─' * 10} {'─' * 8} {'─' * 8} {'─' * 8} {'─' * 6}")
-        print(f"  {'OOS 통합':<22} {total_ret*100:>+9.2f}% "
-              f"{sharpe:>8.3f} {max_dd*100:>7.2f}% "
-              f"{win_rate:>7.1f}% {n_trades:>6d}")
-        print(f"  {'연간 수익률':25} {ann_ret*100:>+9.2f}%")
-        print(f"  {'OBS (거래일)':25} {len(combined_dr):>9d}일")
+    geo_mean_return = (1 + np.prod([1 + r for r in returns]) ** (1 / len(returns))) - 1 if returns else 0.0
+    mean_sharpe = np.mean(sharpes)
+    mean_mdd = np.min(mdds)
+    mean_win = np.mean(wins)
+    total_trades = sum(trades)
+
+    print(f"  {'기하 평균':<22} {geo_mean_return*100:>+9.2f}% "
+          f"{mean_sharpe:>8.3f} {mean_mdd*100:>7.2f}% "
+          f"{mean_win:>7.1f}% {total_trades:>6d}")
+    print(f"  {'Sharpe 범위':22} {min(sharpes):>7.3f} ~ {max(sharpes):>7.3f}")
 
     print(f"\n  전체 결과 저장: {base_output / 'walkforward_summary.csv'}")
     print(f"{'=' * 60}")
