@@ -15,6 +15,7 @@ from datetime import date, datetime
 import hashlib
 import json
 import math
+import re
 from types import MappingProxyType
 from typing import Any, Self
 
@@ -35,12 +36,16 @@ OBJECTIVE_TRAIN_SHARPE = "train_sharpe"
 
 
 def classify_walk_forward_result(*, pit_valid: bool) -> str:
-    """Return the explicit result label for the available data contract."""
-    return (
-        VALIDATED_EXPANDING_WALK_FORWARD_PIT
-        if pit_valid
-        else MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
-    )
+    """Return the conservative result label for the pure validation core.
+
+    A bare boolean is not provenance evidence.  The pure core therefore keeps
+    the mechanical label even when a caller passes ``True``; promotion to a
+    validated PIT label is deferred until the actual validator outputs are
+    connected to the runner.
+    """
+    if not isinstance(pit_valid, bool):
+        raise TypeError("pit_valid must be an actual bool")
+    return MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
 
 
 # A short alias is useful to callers that do not need the longer function name.
@@ -58,7 +63,7 @@ class FoldSpec:
 
     def __post_init__(self) -> None:
         values = (self.train_start, self.train_end, self.test_start, self.test_end)
-        if not all(isinstance(value, date) for value in values):
+        if not all(isinstance(value, date) and not isinstance(value, datetime) for value in values):
             raise TypeError("FoldSpec boundaries must be datetime.date values")
         if not self.train_start <= self.train_end < self.test_start <= self.test_end:
             raise ValueError("FoldSpec boundaries must be ordered train then test")
@@ -105,6 +110,18 @@ def _freeze_parameters(parameters: Mapping[str, Any]) -> MappingProxyType:
     return MappingProxyType(frozen)
 
 
+_LIBRARY_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _validate_library_version(value: Any, field_name: str = "library_version") -> str:
+    """Require a non-coerced, serialized library-version token."""
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be a string")
+    if not _LIBRARY_VERSION_PATTERN.fullmatch(value):
+        raise ValueError(f"{field_name} is malformed")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateSpec:
     """Immutable versioned candidate configuration.
@@ -121,8 +138,7 @@ class CandidateSpec:
     def __post_init__(self) -> None:
         if not self.candidate_id or not isinstance(self.candidate_id, str):
             raise ValueError("candidate_id must be a non-empty string")
-        if not self.library_version:
-            raise ValueError("library_version must be non-empty")
+        _validate_library_version(self.library_version)
         object.__setattr__(self, "parameters", _freeze_parameters(self.parameters))
 
     @property
@@ -162,7 +178,9 @@ class CandidateSpec:
         return cls(
             candidate_id=str(payload["candidate_id"]),
             parameters=dict(payload.get("parameters", {})),
-            library_version=str(payload.get("library_version", CANDIDATE_LIBRARY_VERSION)),
+            library_version=_validate_library_version(
+                payload.get("library_version", CANDIDATE_LIBRARY_VERSION)
+            ),
         )
 
 
@@ -212,6 +230,10 @@ class CandidateScore:
     valid: bool = True
     status: str = "valid"
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.valid, bool):
+            raise TypeError("CandidateScore.valid must be an actual bool")
+
     @property
     def score(self) -> float | None:
         """Alias for callers that use the generic score name."""
@@ -240,6 +262,10 @@ class SelectionResult:
     classification: str = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
     minimum_exits: int = DEFAULT_MIN_EXITS
     tie_tolerance: float = DEFAULT_TIE_TOLERANCE
+
+    def __post_init__(self) -> None:
+        _validate_library_version(self.candidate_library_version)
+        object.__setattr__(self, "train_cutoff", _normalise_cutoff(self.train_cutoff))
 
     @property
     def all_train_scores(self) -> tuple[CandidateScore, ...]:
@@ -286,20 +312,23 @@ class SelectionResult:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         """Reconstruct a result from :meth:`to_dict` output."""
+        scores_payload = payload.get("train_scores", [])
         scores = tuple(
             CandidateScore(
                 candidate_id=str(item["candidate_id"]),
                 train_sharpe=item.get("train_sharpe"),
                 n_exits=item.get("n_exits"),
-                valid=bool(item.get("valid", True)),
+                valid=_strict_bool(item.get("valid", True), "valid"),
                 status=str(item.get("status", "valid")),
             )
-            for item in payload.get("train_scores", [])
+            for item in scores_payload
         )
         selected = CandidateSpec.from_dict(payload["selected_candidate"])
         return cls(
-            candidate_library_version=str(payload["candidate_library_version"]),
-            train_cutoff=payload.get("train_cutoff"),
+            candidate_library_version=_validate_library_version(
+                payload["candidate_library_version"], "candidate_library_version"
+            ),
+            train_cutoff=_normalise_cutoff(payload.get("train_cutoff")),
             train_scores=scores,
             selected_candidate=selected,
             objective_name=str(payload["objective_name"]),
@@ -326,7 +355,22 @@ def _normalise_cutoff(value: date | datetime | str | None) -> str | None:
         return value.date().isoformat()
     if isinstance(value, date):
         return value.isoformat()
-    return str(value)
+    if isinstance(value, str):
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(f"invalid ISO train cutoff: {value!r}") from exc
+        if parsed.isoformat() != value:
+            raise ValueError(f"invalid ISO train cutoff: {value!r}")
+        return parsed.isoformat()
+    raise TypeError("train_cutoff must be date-like, an ISO date string, or None")
+
+
+def _strict_bool(value: Any, field_name: str) -> bool:
+    """Require a real JSON/Python boolean instead of truthiness coercion."""
+    if not isinstance(value, bool):
+        raise TypeError(f"{field_name} must be an actual bool")
+    return value
 
 
 def _serializable_train_sharpe(value: Any) -> float | None:
@@ -381,9 +425,7 @@ def _score_from_mapping(
         fields = ", ".join(missing_fields)
         raise TypeError(f"candidate score mappings require explicit field(s): {fields}")
 
-    valid = payload.get("valid", True)
-    if not isinstance(valid, bool):
-        valid = bool(valid)
+    valid = _strict_bool(payload.get("valid", True), "valid")
     return CandidateScore(
         candidate_id=str(payload.get("candidate_id", candidate_id)),
         train_sharpe=payload["train_sharpe"],
@@ -529,10 +571,14 @@ def select_candidate(
     candidate_ids = [candidate.candidate_id for candidate in candidate_library]
     if len(candidate_ids) != len(set(candidate_ids)):
         raise ValueError("candidate_library contains duplicate candidate ids")
-    if classification not in {
-        MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
-        VALIDATED_EXPANDING_WALK_FORWARD_PIT,
-    }:
+    library_versions = {candidate.library_version for candidate in candidate_library}
+    if len(library_versions) != 1:
+        raise ValueError("candidate_library contains mixed library versions")
+    if classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT:
+        raise ValueError(
+            "validated PIT classification is deferred until provenance validators are wired"
+        )
+    if classification != MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT:
         raise ValueError(f"unknown walk-forward classification: {classification!r}")
 
     raw_scores = _normalise_scores(candidate_scores)

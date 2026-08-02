@@ -87,12 +87,17 @@ uv run python -m k200_mq.main robustness
 직렬화 결과가 구현되어 있습니다. 현재 결과는
 `mechanical_expanding_walk_forward_non_pit`으로 분류되며, 이 순수 core는
 아직 `robustness` 동작·전략 실행·live data pipeline에 연결되지 않았습니다.
+`validation/runner.py`도 pure orchestration 전용이며, 모든 fold의 train 선택을
+먼저 동결한 다음 test evaluator를 호출합니다. 따라서 현재 runner는 실제
+provenance validator 출력이 전달되지 않는 한
+`mechanical_expanding_walk_forward_non_pit`만 방출합니다.
 기본 후보는 `BASE` (TOP_N=20/regime on), `TOP_N_10`, `TOP_N_30`,
 `REGIME_OFF`이며, `BASE`와 동일한 `TOP_N_20` 및 `REGIME_ON`은 중복이므로
 포함하지 않습니다.
 현재 손절 설정에는 안전한 on/off 표현이 없어 후보 라이브러리에서도 제외했습니다.
-PIT 데이터 계약을 충족한 실행만 `validated_expanding_walk_forward_pit`로
-분류할 수 있습니다.
+`validated_expanding_walk_forward_pit` 승격은 실제 universe/financial provenance
+validator 결과를 pure runner에 연결하는 후속 작업으로 보류했습니다. 임의의 bool,
+`{"valid": true}` 또는 설명용 evidence는 PIT 근거로 인정하지 않습니다.
 
 ### 데이터 유효성 계약
 

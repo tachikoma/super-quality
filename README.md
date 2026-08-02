@@ -91,8 +91,11 @@ uv run python -m k200_mq.main walkforward
 
 현재 명령은 학습/파라미터 피팅이 없는 independent subperiod robustness
 test이며 true expanding-window walk-forward CV가 아닙니다. True WF의 Phase 1
-pure core(`k200_mq.validation.walk_forward`)는 추가되었지만 아직 실행
-파이프라인에 연결되지 않았습니다.
+pure core와 순수 orchestration runner(`k200_mq.validation.runner`)는 추가되었지만
+아직 실행/live data pipeline에 연결되지 않았습니다. Runner는 모든 fold의 train
+선택을 먼저 동결한 뒤 test 평가를 수행하며, 현재 결과는
+`mechanical_expanding_walk_forward_non_pit`만 허용합니다. 실제 provenance validator
+출력이 연결되기 전에는 PIT 분류를 승격하지 않습니다.
 
 ### 출력 파일
 

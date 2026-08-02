@@ -1,6 +1,6 @@
 """Tests for the pure K200MQ expanding-window validation core."""
 
-from datetime import date
+from datetime import date, datetime
 import json
 import math
 
@@ -31,6 +31,24 @@ def test_expanding_window_schedule_is_exact_and_immutable() -> None:
     )
     with pytest.raises((AttributeError, TypeError)):
         get_expanding_window_folds()[0].train_end = date(2020, 1, 1)  # type: ignore[misc]
+
+
+def test_fold_spec_rejects_datetime_boundaries_and_serializes_dates() -> None:
+    fold = FoldSpec(date(2015, 1, 1), date(2019, 12, 31), date(2020, 1, 1), date(2020, 12, 31))
+
+    assert fold.to_dict() == {
+        "train_start": "2015-01-01",
+        "train_end": "2019-12-31",
+        "test_start": "2020-01-01",
+        "test_end": "2020-12-31",
+    }
+    with pytest.raises(TypeError, match="datetime.date"):
+        FoldSpec(
+            datetime(2015, 1, 1),
+            date(2019, 12, 31),
+            date(2020, 1, 1),
+            date(2020, 12, 31),
+        )
 
 
 def test_candidate_library_is_versioned_and_conservative() -> None:
@@ -136,6 +154,14 @@ def test_score_mappings_require_explicit_train_metric_and_exit_count() -> None:
         select_candidate({"BASE": {"n_exits": 5}})
 
 
+def test_train_cutoff_rejects_trailing_date_text() -> None:
+    with pytest.raises(ValueError, match="invalid ISO train cutoff"):
+        select_candidate(
+            {"BASE": {"train_sharpe": 0.5, "n_exits": 5}},
+            "2019-12-31 trailing",
+        )
+
+
 def test_invalid_train_metrics_serialize_as_null_in_strict_json() -> None:
     result = select_candidate(
         {
@@ -176,18 +202,47 @@ def test_selection_serialization_and_hash_are_stable() -> None:
     assert result.to_dict()["candidate_library_version"] == BASE_CANDIDATE.library_version
 
 
+def test_deserialization_rejects_non_string_or_malformed_library_versions() -> None:
+    candidate_payload = BASE_CANDIDATE.to_dict()
+    for invalid_version in (None, 1, "", "version with spaces"):
+        candidate_payload["library_version"] = invalid_version
+        with pytest.raises((TypeError, ValueError)):
+            CandidateSpec.from_dict(candidate_payload)
+
+    result = select_candidate(
+        {"BASE": {"train_sharpe": 0.5, "n_exits": 5}},
+        date(2019, 12, 31),
+    )
+    selection_payload = result.to_dict()
+    for invalid_version in (None, 1, "", "version with spaces"):
+        selection_payload["candidate_library_version"] = invalid_version
+        with pytest.raises((TypeError, ValueError)):
+            result.from_dict(selection_payload)
+
+
 def test_pit_classification_is_explicit() -> None:
     assert classify_walk_forward_result(pit_valid=False) == (
         MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
     )
-    assert classify_walk_forward_result(pit_valid=True) == VALIDATED_EXPANDING_WALK_FORWARD_PIT
-    assert (
+    # A boolean is not validator output and must never promote the pure core.
+    assert classify_walk_forward_result(pit_valid=True) == (
+        MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
+    )
+    with pytest.raises(ValueError, match="deferred"):
         select_candidate(
             {"BASE": {"train_sharpe": 0.5, "n_exits": 5}},
             classification=VALIDATED_EXPANDING_WALK_FORWARD_PIT,
-        ).classification
-        == VALIDATED_EXPANDING_WALK_FORWARD_PIT
-    )
+        )
+
+
+def test_valid_mapping_flag_is_not_truthiness_coerced() -> None:
+    with pytest.raises(TypeError, match="actual bool"):
+        select_candidate(
+            {
+                "BASE": {"train_sharpe": 0.5, "n_exits": 5, "valid": "false"},
+                "TOP_N_10": {"train_sharpe": 0.4, "n_exits": 5},
+            }
+        )
 
 
 def test_candidate_score_is_accepted_directly() -> None:

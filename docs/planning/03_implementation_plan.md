@@ -186,6 +186,14 @@ for each trading day:
 - 파라미터 피팅은 training 구간 내부에만 제한
 - train/test 성과 차이와 fold 간 안정성 분석
 
+Pure orchestration runner는 두 pass로 동작합니다. 먼저 모든 fold의 train 후보
+평가와 선택을 완료하고 JSON 경계에서 동결한 뒤, 두 번째 pass에서 선택된 후보의
+test evaluator를 호출합니다. 따라서 test callback의 외부 상태 변이가 이후 train
+평가에 영향을 주지 않습니다. 이 runner는 live data/전략 pipeline에 아직 연결되지
+않았으며, 실제 provenance validator 결과가 전달되기 전까지 분류는
+`mechanical_expanding_walk_forward_non_pit`으로 고정합니다. 임의의 PIT flag나
+synthetic evidence로 `validated_expanding_walk_forward_pit`를 만들지 않습니다.
+
 향후 forward label 또는 overlapping outcome을 사용하는 후보 피팅을 추가하면
 그 시점에 purge/embargo를 포함하도록 fold schedule을 다시 설계해야 합니다.
 
