@@ -81,7 +81,7 @@ uv run python -m k200_mq.main run \
 
 ### 출력 파일
 
-모든 출력 파일은 `--output` (기본값: `outputs/`) 디렉토리에 저장됩니다:
+K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리에 저장됩니다:
 
 | 파일 | 설명 |
 |------|------|
@@ -115,6 +115,9 @@ src/
     │   ├── analysis/metrics.py
     │   └── reporting/report.py
     ├── data/                   # Data layer (extends core/data/loader.py)
+    │   ├── __init__.py
+    │   ├── universe.py         # KOSPI 200 history and PIT provenance
+    │   └── provenance.py       # Filing timestamp/PIT validity contracts
     ├── factors/                # New factors (momentum, quality, regime)
     ├── strategies/             # KOSPI 200 Momentum + Quality strategy
     ├── backtest/               # PortfolioRebalanceEngine

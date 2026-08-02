@@ -80,7 +80,7 @@ Sharpe 비율: 0.244
 
 ## Phase 1: 데이터 & 유니버스
 - [x] KOSPI 200 종속 이력 소스 확인 (프록시: mcap top 200 from KRX listings)
-- [x] `universe.py` 구현 (get_kospi200_constituents, point-in-time caching)
+- [x] `universe.py` 구현 (get_kospi200_constituents, as-of-keyed proxy caching; PIT 아님)
 - [x] `loader.py` 확장 (get_price_data_with_lookback, compute_adv, get_kospi200_price_data)
 - [x] KOSPI 200 (KS11) + KOSPI 51 (KOSPI200) index data 지원
 - [x] 종속 이력 검증 (프록시 fallback 구현)
@@ -119,9 +119,10 @@ Sharpe 비율: 0.244
 - [x] Walk-forward CV (5-fold expanding, 비중첩 2-3년 윈도우 — **cash 변이 버그로 무효**)
 - [x] P1-5: trailing stop-loss + cash 변이 버그 픽스 (peak_price 추적, cash 반환)
 - [x] Phase 2: cache ticker/coverage, warmup, regime date, next-open execution, target-weight resize
-- [x] Phase 2 회귀 테스트 (147개)
+- [x] Phase 2 회귀 테스트 (전체 pytest 182개 통과)
 - [x] run manifest 저장 및 기계적 후보 실행
-- [ ] PIT 유니버스 / filing-date 재무 데이터 계약
+- [x] PIT 유니버스 / filing-date 재무 데이터 계약의 bounded validation
+- [ ] KRX 과거 유효일자별 구성종목 파일 및 raw DART filing metadata 확보·연결
 - [ ] WF CV 재설계 및 재실행
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
@@ -135,7 +136,7 @@ Sharpe 비율: 0.244
 - [x] README_K200MQ.md (새 전략 문서)
 - [x] AGENTS.md 업데이트
 - [ ] README.md (새 전략 docs 섹션) — 진행 중
-- [x] Test 보강 (147개)
+- [x] Test 보강 (전체 pytest 182개 통과, PIT provenance/config strict-mode contract tests 추가)
 - [x] 기계적 후보 백테스트 (2015-2024, 성과 확정 전)
 - [ ] 코드 리뷰
 - [ ] v0.1.0 release tag
@@ -199,6 +200,19 @@ Sharpe 비율: 0.244
 **cash, 체결 시점, cache coverage, regime warmup, target-weight resize 문제를 수정했습니다.**
 
 **경고: 현재 결과는 PIT 유니버스와 filing-date 재무 문제 때문에 아직 전략 성과가 아닙니다.**
+
+현재 파이프라인은 FinanceDataReader의 현재 KOSPI200 목록(`proxy_current`) 또는
+현재 리스팅 시가총액 fallback(`mcap_proxy`)만 제공하므로 PIT 유니버스를 만들지
+않습니다. 현재 정규화 DART 데이터는 filing/publication date를 버리기 때문에
+품질 데이터 모드는 `non_pit_fiscal_period`입니다. 기본 탐색 실행은 계속되지만
+이 provenance와 제한은 `run_manifest.json`에 남습니다. `--strict-pit` 또는
+`STRICT_PIT_VALIDATION=true`는 이 두 계약이 충족되지 않으면 팩터 계산 전에
+실패합니다. 레거시 유니버스 캐시에서 구조화된 source/effective-date
+contract/fingerprint가 없으면 `legacy_proxy_unknown`으로 분류합니다. Strict
+모드에서는 현재 시가총액으로 수행하는 `EXCLUDE_KOSPI_TOP_N`도 0이어야 하며,
+공시 timestamp 또는 명시적 cutoff 계약이 없는 재무 데이터도 거부합니다. 다음
+데이터 요구사항은 KRX historical constituent files와 raw DART filing metadata를
+실제 가용일 계산에 연결하는 것입니다.
 
 **다음 우선순위:**
 1. PIT KOSPI 200 유니버스와 공시일 기준 재무 데이터 확보 또는 proxy 한계 명시

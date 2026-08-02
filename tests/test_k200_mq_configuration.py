@@ -14,6 +14,20 @@ from k200_mq.data import universe as universe_module
 from k200_mq.factors import momentum as momentum_module
 
 
+def test_run_cli_uses_documented_output_default_and_preserves_env(monkeypatch) -> None:
+    monkeypatch.delenv("OUTPUT_DIR", raising=False)
+    parser = main_module._build_parser()
+
+    default_config = main_module._build_config(parser.parse_args(["run"]))
+
+    assert default_config.OUTPUT_DIR == "outputs_k200mq"
+
+    monkeypatch.setenv("OUTPUT_DIR", "configured-output")
+    env_config = main_module._build_config(parser.parse_args(["run"]))
+
+    assert env_config.OUTPUT_DIR == "configured-output"
+
+
 def test_run_cli_passes_portfolio_and_liquidity_settings_to_config() -> None:
     parser = main_module._build_parser()
     args = parser.parse_args([

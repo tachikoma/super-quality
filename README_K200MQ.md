@@ -64,6 +64,32 @@ uv run python -m k200_mq.main run \
     --weight-momentum 0.50 --weight-quality 0.50
 ```
 
+### 데이터 유효성 계약
+
+기본 실행은 기존의 탐색적 성과 동작을 유지하지만, `run_manifest.json`에
+데이터 한계를 기록합니다. 현재 FinanceDataReader KOSPI200 목록은 `as_of`를
+무시하는 **`proxy_current`**이고, 현재 종목 목록의 시가총액 상위 200개
+fallback은 **`mcap_proxy`**입니다. 둘 다 PIT(point-in-time) 유니버스가 아닙니다.
+이 날짜 키는 PIT 복원을 보장하지 않는 **as-of-keyed proxy cache**일 뿐이며,
+구조화된 source/effective-date contract/fingerprint가 없는 레거시 캐시는
+**`legacy_proxy_unknown`**으로 분류합니다.
+현재 정규화된 DART 재무 데이터도 공시일을 보존하지 않으므로 품질 데이터
+모드는 **`non_pit_fiscal_period`**입니다.
+
+검증 가능한 실행이 필요하면 다음처럼 strict 모드를 사용합니다.
+
+```bash
+uv run python -m k200_mq.main run --strict-pit
+```
+
+`--strict-pit` (또는 `STRICT_PIT_VALIDATION=true`)는 PIT 유니버스와 실제
+filing/publication timestamp 또는 명시적 cutoff를 사용한 재무 데이터가
+없으면 팩터·백테스트 전에 중단합니다. 현재 top-N 제외 순위는 현재 시가총액
+스냅샷이므로 strict 모드에서는 `EXCLUDE_KOSPI_TOP_N=0`이어야 합니다. strict
+모드를 통과하려면 KRX의 과거 유효일자별 구성종목 파일과 원시 DART filing
+metadata를 확보하고, 그 공시일을 재무 데이터 가용일로 사용하는 로더가
+필요합니다. 분기말이나 임의의 deadline으로 공시일을 추정하지 않습니다.
+
 ### 주요 파라미터
 
 | 파라미터 | 기본값 | 설명 |
@@ -77,6 +103,7 @@ uv run python -m k200_mq.main run \
 | `--max-holdings` | 20 | 최대 동시 보유 |
 | `--sector-cap` | 0.30 | 섹션별 최대 노출 |
 | `--min-adv-ratio` | 0.01 | 최소 유동성 비율 |
+| `--strict-pit` | false | PIT 유니버스·filing-date 재무 데이터가 없으면 중단 |
 
 ## 프로젝트 구조
 
@@ -92,7 +119,9 @@ src/k200_mq/
 │   ├── reporting/report.py
 │   └── data/loader.py
 ├── data/
-│   └── universe.py          # KOSPI 200 유니버스 관리
+│   ├── __init__.py
+│   ├── universe.py          # KOSPI 200 유니버스 및 PIT provenance
+│   └── provenance.py        # Filing timestamp/PIT validity contracts
 ├── factors/
 │   ├── momentum.py          # 모멘텀 팩터 (12-7개월)
 │   ├── quality.py           # 품질 팩터 (ROE, DE, OPM, CC)

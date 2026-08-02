@@ -745,6 +745,13 @@ def get_financial_data(
         - ``revenue``, ``cogs``, ``net_income``, ``operating_cf``
         - ``total_assets``, ``total_equity``, ``shares_outstanding``
 
+    Notes
+    -----
+    The normalized result intentionally does not currently retain DART filing
+    or publication dates.  Consumers must therefore classify its financial
+    quality data as ``non_pit_fiscal_period``; fiscal quarter ends are not
+    substitutes for availability dates.
+
     Raises
     ------
     ValueError

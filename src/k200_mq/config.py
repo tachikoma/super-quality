@@ -31,6 +31,14 @@ class BacktestConfig(BaseSettings):
     # ── 백테스트 기간 ──────────────────────────────────────
     START_DATE: str = Field(default="2015-01-01")
     END_DATE: str = Field(default="today")
+    STRICT_PIT_VALIDATION: bool = Field(
+        default=False,
+        description=(
+            "PIT universe 및 명시적 source/schema filing contract와 meaningful "
+            "timestamp 또는 conservative next-session 재무 데이터가 없으면 실행을 중단합니다 "
+            "(기본값: False)"
+        ),
+    )
 
     # ── 포트폴리오 ───────────────────────────────────────────
     INITIAL_CAPITAL: int = Field(
@@ -81,7 +89,10 @@ class K200MQConfig(BacktestConfig):
     )
     EXCLUDE_KOSPI_TOP_N: int = Field(
         default=50,
-        description="모멘텀 스코어링에서 제외하는 상위 시가총액 종목 수",
+        description=(
+            "모멘텀 스코어링에서 제외하는 상위 시가총액 종목 수 "
+            "(strict PIT에서는 0만 허용)"
+        ),
     )
     MIN_ADV_RATIO: float = Field(
         default=0.01,
@@ -210,6 +221,6 @@ class K200MQConfig(BacktestConfig):
 
     # ── 출력 ────────────────────────────────────────────────────
     OUTPUT_DIR: str = Field(
-        default="outputs",
+        default="outputs_k200mq",
         description="백테스트 결과 출력 디렉토리",
     )

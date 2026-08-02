@@ -3,7 +3,7 @@
 사용법:
     uv run python -m k200_mq.main --help
     uv run python -m k200_mq.main run --dart-api-key=... \
-        --start 2015-01-01 --end 2024-12-31 --output ./outputs
+        --start 2015-01-01 --end 2024-12-31 --output ./outputs_k200mq
 """
 
 from __future__ import annotations
@@ -145,23 +145,23 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser = sub.add_parser("run", help="전체 백테스트 파이프라인 실행")
     run_parser.add_argument(
         "--dart-api-key",
-        default="",
+        default=argparse.SUPPRESS,
         help="OpenDartReader API 키",
     )
     run_parser.add_argument(
         "--start",
-        default="2015-01-01",
+        default=argparse.SUPPRESS,
         help="시작일 YYYY-MM-DD (기본값: 2015-01-01)",
     )
     run_parser.add_argument(
         "--end",
-        default=None,
+        default=argparse.SUPPRESS,
         help="종료일 YYYY-MM-DD (기본값: 오늘)",
     )
     run_parser.add_argument(
         "--output",
         "-o",
-        default="outputs_k200mq",
+        default=argparse.SUPPRESS,
         help="보고서 출력 디렉토리 (기본값: outputs_k200mq)",
     )
     run_parser.add_argument(
@@ -171,87 +171,99 @@ def _build_parser() -> argparse.ArgumentParser:
         help="팩터 캐시를 건너뛰고 재계산",
     )
     run_parser.add_argument(
+        "--strict-pit",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="PIT 유니버스와 filing-date 재무 데이터가 없으면 중단",
+    )
+    run_parser.add_argument(
         "--top-n",
         type=int,
-        default=20,
+        default=argparse.SUPPRESS,
         help="선택 종목 수 (기본 20)",
     )
     run_parser.add_argument(
         "--rebalance-freq",
-        default="M",
+        default=argparse.SUPPRESS,
         help="리밸런싱 주기: M(월간) 또는 Q(분기)",
     )
     run_parser.add_argument(
         "--rebalance-lookback",
         type=int,
-        default=252,
+        default=argparse.SUPPRESS,
         help="모멘텀 계산용 선행 일수 (기본 252)",
     )
     run_parser.add_argument(
         "--weight-momentum",
         type=float,
-        default=0.50,
+        default=argparse.SUPPRESS,
         help="모멘텀 팩터 가중치 (기본 0.50)",
     )
     run_parser.add_argument(
         "--weight-quality",
         type=float,
-        default=0.50,
+        default=argparse.SUPPRESS,
         help="품질 팩터 가중치 (기본 0.50)",
     )
     run_parser.add_argument(
         "--exclude-kospi-top-n",
         type=int,
-        default=50,
+        default=argparse.SUPPRESS,
         help="모멘텀에서 제외할 KOSPI 상위 N개 (기본 50)",
     )
     run_parser.add_argument(
         "--stop-loss",
         type=float,
-        default=-0.15,
+        default=argparse.SUPPRESS,
         help="일일 손절 기준 (기본 -15%)",
     )
     run_parser.add_argument(
         "--max-holdings",
         type=int,
-        default=20,
+        default=argparse.SUPPRESS,
         help="최대 동시 보유 종목 수 (기본 20)",
     )
     run_parser.add_argument(
         "--sector-cap",
         type=float,
-        default=0.30,
+        default=argparse.SUPPRESS,
         help="섹션별 최대 노출 비율 (기본 0.30)",
     )
     run_parser.add_argument(
         "--min-adv-ratio",
         type=float,
-        default=0.01,
+        default=argparse.SUPPRESS,
         help="최소 유동성 비율 (기본 0.01)",
     )
 
     wf_parser = sub.add_parser("walkforward", help="5-fold walk-forward 교차 검증")
     wf_parser.add_argument(
         "--dart-api-key",
-        default="",
+        default=argparse.SUPPRESS,
         help="OpenDartReader API 키",
     )
     wf_parser.add_argument(
         "--output",
         "-o",
-        default="outputs_k200mq",
+        default=argparse.SUPPRESS,
         help="결과 출력 디렉토리 (기본값: outputs_k200mq)",
     )
     wf_parser.add_argument(
         "--top-n",
         type=int,
-        default=20,
+        default=argparse.SUPPRESS,
         help="선택 종목 수 (기본 20)",
     )
     wf_parser.add_argument(
         "--rebalance-freq",
-        default="M",
+        default=argparse.SUPPRESS,
         help="리밸런싱 주기: M(월간) 또는 Q(분기)",
+    )
+    wf_parser.add_argument(
+        "--strict-pit",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="PIT 유니버스와 filing-date 재무 데이터가 없으면 중단",
     )
 
     return parser
@@ -262,35 +274,44 @@ def _build_config(args: argparse.Namespace) -> Any:
     from k200_mq.config import K200MQConfig
 
     if hasattr(args, "command") and args.command == "walkforward":
-        config_kwargs: dict[str, Any] = {
-            "OUTPUT_DIR": args.output,
-        }
+        config_kwargs: dict[str, Any] = {}
+        if hasattr(args, "output"):
+            config_kwargs["OUTPUT_DIR"] = args.output
         if hasattr(args, "top_n"):
             config_kwargs["TOP_N"] = args.top_n
         if hasattr(args, "rebalance_freq"):
             config_kwargs["REBALANCE_FREQ"] = args.rebalance_freq
+        if getattr(args, "strict_pit", False):
+            config_kwargs["STRICT_PIT_VALIDATION"] = True
         if hasattr(args, "dart_api_key") and args.dart_api_key:
             config_kwargs["DART_API_KEY"] = args.dart_api_key
         return K200MQConfig(**config_kwargs)
 
-    start_d = _parse_date(args.start)
-    end_d = _parse_date(args.end) if args.end else date.today()
-
-    config_kwargs = {
-        "START_DATE": start_d.isoformat() if start_d else args.start,
-        "END_DATE": end_d.isoformat() if end_d else "today",
-        "TOP_N": args.top_n,
-        "REBALANCE_FREQ": args.rebalance_freq,
-        "WEIGHT_MOMENTUM": args.weight_momentum,
-        "WEIGHT_QUALITY": args.weight_quality,
-        "EXCLUDE_KOSPI_TOP_N": args.exclude_kospi_top_n,
-        "SL_STOP_LOSS": args.stop_loss,
-        "MAX_HOLDINGS": args.max_holdings,
-        "SECTOR_CAP": args.sector_cap,
-        "MIN_ADV_RATIO": args.min_adv_ratio,
-        "OUTPUT_DIR": args.output,
+    config_kwargs = {}
+    if hasattr(args, "start"):
+        start_d = _parse_date(args.start)
+        config_kwargs["START_DATE"] = start_d.isoformat() if start_d else args.start
+    if hasattr(args, "end"):
+        end_d = _parse_date(args.end) if args.end else date.today()
+        config_kwargs["END_DATE"] = end_d.isoformat() if end_d else "today"
+    explicit_options = {
+        "top_n": "TOP_N",
+        "rebalance_freq": "REBALANCE_FREQ",
+        "weight_momentum": "WEIGHT_MOMENTUM",
+        "weight_quality": "WEIGHT_QUALITY",
+        "exclude_kospi_top_n": "EXCLUDE_KOSPI_TOP_N",
+        "stop_loss": "SL_STOP_LOSS",
+        "max_holdings": "MAX_HOLDINGS",
+        "sector_cap": "SECTOR_CAP",
+        "min_adv_ratio": "MIN_ADV_RATIO",
+        "output": "OUTPUT_DIR",
     }
-    if args.dart_api_key:
+    for argument_name, config_name in explicit_options.items():
+        if hasattr(args, argument_name):
+            config_kwargs[config_name] = getattr(args, argument_name)
+    if getattr(args, "strict_pit", False):
+        config_kwargs["STRICT_PIT_VALIDATION"] = True
+    if getattr(args, "dart_api_key", ""):
         config_kwargs["DART_API_KEY"] = args.dart_api_key
 
     return K200MQConfig(**config_kwargs)
@@ -309,6 +330,7 @@ def _print_config_summary(config: Any) -> None:
     print(f"  품질 가중치: {config.WEIGHT_QUALITY}")
     print(f"  KOSPI 상위 제외: {config.EXCLUDE_KOSPI_TOP_N}")
     print(f"  DART API: {'설정됨' if config.DART_API_KEY else '미설정 (품질 팩터 비활성)'}")
+    print(f"  Strict PIT 검증: {'활성' if config.STRICT_PIT_VALIDATION else '비활성'}")
     print(f"  출력 디렉토리: {config.OUTPUT_DIR}")
     print("=" * 60)
 
@@ -349,12 +371,37 @@ def _convert_financial_to_daily(
     if financial_data.empty:
         return pd.DataFrame()
 
+    from k200_mq.data.provenance import (
+        filing_to_trading_session,
+        has_usable_filing_dates,
+        find_filing_date_field,
+        validate_financial_provenance,
+    )
+
+    filing_date_field = find_filing_date_field(financial_data)
+    use_filing_dates = has_usable_filing_dates(financial_data)
+    financial_provenance = validate_financial_provenance(
+        financial_data,
+        filing_date_used=use_filing_dates,
+    )
+
     records: list[dict[str, Any]] = []
     for _, row in financial_data.iterrows():
-        try:
-            dt = _quarter_end_date(int(row["year"]), int(row["quarter"]))
-        except (ValueError, KeyError):
-            continue
+        if use_filing_dates and filing_date_field is not None:
+            dt = filing_to_trading_session(
+                row[filing_date_field],
+                pd.DatetimeIndex(all_dates),
+                availability_policy=financial_provenance.get("availability_policy"),
+                source_timezone=financial_provenance.get("source_timezone"),
+                cutoff_time=financial_provenance.get("cutoff_time"),
+            )
+            if dt is None:
+                continue
+        else:
+            try:
+                dt = _quarter_end_date(int(row["year"]), int(row["quarter"]))
+            except (ValueError, KeyError):
+                continue
 
         revenue = float(row.get("revenue", 0) or 0)
         cogs = float(row.get("cogs", 0) or 0)
@@ -395,6 +442,7 @@ def _convert_financial_to_daily(
         "revenue", "operating_income", "operating_cf",
     ]
     result[financial_cols] = result[financial_cols].fillna(0.0)
+    result.attrs["financial_provenance"] = financial_provenance
     return result
 
 
@@ -560,9 +608,116 @@ def _build_run_manifest(
         "tax_rate": _manifest_safe(getattr(config, "TAX_RATE", None)),
         "slippage": _manifest_safe(getattr(config, "SLIPPAGE", None)),
     }
+    universe_context = dict(context.get(
+        "universe",
+        {"dates": [], "date_count": 0, "ticker_count": 0},
+    ))
+    supplied_universe_validity = context.get("universe_provenance", {})
+    if not isinstance(supplied_universe_validity, dict):
+        supplied_universe_validity = {}
+    universe_validity = dict(supplied_universe_validity)
+
+    # Never trust a PIT flag supplied directly in a manifest context.  The
+    # pipeline carries the actual history object out-of-band so this function
+    # can re-run the complete validator, including per-date fingerprints.
+    universe_history = context.get("universe_history")
+    if universe_history is not None:
+        from k200_mq.data.universe import validate_universe_provenance
+
+        try:
+            universe_validity = validate_universe_provenance(universe_history)
+        except (AttributeError, TypeError, ValueError):
+            universe_validity = {
+                "provenance": "legacy_proxy_unknown",
+                "source": "legacy_proxy_unknown",
+                "provenance_by_as_of": {},
+                "provenance_metadata_by_as_of": {},
+                "pit_valid": False,
+                "reason": "manifest could not validate the supplied universe history",
+            }
+    elif (
+        universe_validity.get("provenance") == "pit"
+        or universe_validity.get("pit_valid") is True
+        or universe_context.get("provenance") == "pit"
+        or universe_context.get("pit_valid") is True
+    ):
+        universe_validity = {
+            "provenance": "legacy_proxy_unknown",
+            "source": "legacy_proxy_unknown",
+            "provenance_by_as_of": {},
+            "provenance_metadata_by_as_of": {},
+            "pit_valid": False,
+            "reason": "manifest rejected an unvalidated PIT universe claim",
+        }
+    universe_provenance = str(
+        universe_validity.get("provenance", universe_context.get("provenance", "unknown"))
+    )
+    universe_context["provenance"] = universe_provenance
+    universe_context["source"] = universe_provenance
+    universe_context["provenance_by_as_of"] = universe_validity.get(
+        "provenance_by_as_of", {},
+    )
+    universe_context["provenance_metadata_by_as_of"] = universe_validity.get(
+        "provenance_metadata_by_as_of", {},
+    )
+    universe_context["pit_valid"] = bool(universe_validity.get("pit_valid", False))
+
+    quality_context = dict(context.get("quality", {}))
+    financial_validity = context.get("financial_provenance", {})
+    if not isinstance(financial_validity, dict):
+        financial_validity = {}
+    else:
+        financial_validity = dict(financial_validity)
+
+    # A manifest must not promote a caller's parseable-column label to PIT.
+    # Only the validator's complete contract evidence can support the PIT
+    # mode; older/incomplete context is downgraded conservatively.
+    financial_pit_claim = (
+        financial_validity.get("mode") == "pit_filing_date"
+        and financial_validity.get("pit_valid") is True
+        and financial_validity.get("filing_date_used") is True
+        and financial_validity.get("source_schema_contract") is True
+        and (
+            (
+                financial_validity.get("meaningful_timestamp") is True
+                and financial_validity.get("timezone_safe") is True
+                and financial_validity.get("cutoff_policy_valid") is True
+            )
+            or financial_validity.get("availability_policy") == "next_session"
+        )
+    )
+    if financial_validity.get("mode") == "pit_filing_date" and not financial_pit_claim:
+        financial_validity["mode"] = "non_pit_fiscal_period"
+        financial_validity["pit_valid"] = False
+        financial_validity["reason"] = (
+            "manifest rejected an incomplete filing-date PIT provenance contract"
+        )
+    financial_mode = str(
+        financial_validity.get("mode", "non_pit_fiscal_period")
+    )
+    if financial_mode != "pit_filing_date":
+        if quality_context.get("financial_data_mode") == "pit_filing_date":
+            quality_context["financial_data_mode"] = financial_mode
+        if quality_context.get("data_mode") == "pit_filing_date":
+            quality_context["data_mode"] = financial_mode
+        quality_context["financial_provenance"] = financial_validity
+    quality_context.setdefault("financial_data_mode", financial_mode)
+    quality_context.setdefault("data_mode", financial_mode)
+    quality_context.setdefault("financial_provenance", financial_validity)
+
     limitations = {
-        "universe": "non-PIT universe; constituent history is not point-in-time verified",
-        "financials": "financials are not filing-date aligned",
+        "universe": (
+            "legacy_proxy_unknown universe; cache provenance metadata is missing or untrusted"
+            if universe_provenance == "legacy_proxy_unknown"
+            else f"{universe_provenance} universe; constituent history is not point-in-time verified"
+            if universe_provenance != "pit"
+            else "PIT universe provenance recorded"
+        ),
+        "financials": (
+            "financial quality data mode: non_pit_fiscal_period"
+            if financial_mode != "pit_filing_date"
+            else "financial quality data uses filing/publication dates"
+        ),
         "momentum": "existing momentum definition retained; not changed in this pass",
         "adv": "ADV status: configured in K200MQ settings but not applied by the current engine",
         "sector_cap": "sector-cap status: configured in K200MQ settings but not applied by the current engine",
@@ -573,7 +728,7 @@ def _build_run_manifest(
         ),
     }
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "command": context.get("command", "run"),
         "config": _manifest_config(config),
         "measured": {
@@ -584,10 +739,7 @@ def _build_run_manifest(
             "price",
             {"date_range": {"start": None, "end": None}, "ticker_count": 0},
         ),
-        "universe": context.get(
-            "universe",
-            {"dates": [], "date_count": 0, "ticker_count": 0},
-        ),
+        "universe": universe_context,
         "factors": context.get(
             "factors", {"row_count": 0, "ticker_count": 0},
         ),
@@ -599,7 +751,14 @@ def _build_run_manifest(
         "regime_map": context.get(
             "regime_map", {"covered_date_count": 0, "measured_date_count": 0},
         ),
-        "quality": context.get("quality", {}),
+        "quality": quality_context,
+        "data_validity": {
+            "strict_pit_validation": bool(
+                getattr(config, "STRICT_PIT_VALIDATION", False)
+            ),
+            "universe": universe_validity,
+            "financials": financial_validity,
+        },
         "execution": {
             "signal_policy": "close signal",
             "entry_policy": "next open",
@@ -609,6 +768,40 @@ def _build_run_manifest(
         "git": _git_manifest_state(),
         "limitations": limitations,
     }
+
+
+def _enforce_strict_pit_validation(
+    universe_provenance: dict[str, Any],
+    financial_provenance: dict[str, Any] | None = None,
+    config: Any | None = None,
+) -> None:
+    """Raise an actionable error when a strict PIT input contract is unmet."""
+    if config is not None:
+        try:
+            excluded_top_n = int(getattr(config, "EXCLUDE_KOSPI_TOP_N", 0))
+        except (TypeError, ValueError):
+            excluded_top_n = 0
+        if excluded_top_n > 0:
+            raise RuntimeError(
+                "STRICT_PIT_VALIDATION rejects EXCLUDE_KOSPI_TOP_N because the "
+                "current exclusion ranks from a market-cap snapshot. Set "
+                "EXCLUDE_KOSPI_TOP_N=0 until effective-date PIT rank data exists."
+            )
+    if not universe_provenance.get("pit_valid", False):
+        raise RuntimeError(
+            "STRICT_PIT_VALIDATION failed before factor/backtest execution: "
+            f"universe provenance is {universe_provenance.get('provenance', 'unknown')!r}. "
+            "Provide KRX historical constituent files with effective dates; "
+            "the current FDR listing and market-cap fallback are proxies."
+        )
+    if financial_provenance is not None and not financial_provenance.get("pit_valid", False):
+        raise RuntimeError(
+            "STRICT_PIT_VALIDATION failed before factor/backtest execution: "
+            f"financial quality mode is {financial_provenance.get('mode', 'unknown')!r}. "
+            "Use raw DART filing metadata with an explicit source/schema contract, "
+            "a meaningful timestamp, or a documented conservative next-session "
+            "policy; do not infer it from fiscal quarter ends."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -633,7 +826,12 @@ def _run_pipeline(config: Any) -> None:
         get_market_index,
         get_price_data_with_lookback,
     )
+    from k200_mq.data.provenance import (
+        has_usable_filing_dates,
+        validate_financial_provenance,
+    )
     from k200_mq.data.universe import get_kospi200_history
+    from k200_mq.data.universe import validate_universe_provenance
     from k200_mq.factors.momentum import MomentumFactor
     from k200_mq.factors.quality import QualityFactor
     from k200_mq.factors.regime import RegimeFactor
@@ -646,12 +844,36 @@ def _run_pipeline(config: Any) -> None:
 
     # ── 1. 유니버스 구성 ──────────────────────────────────────
     logger.info("1단계: 유니버스 구성 (KOSPI 200 종속 이력)")
+    strict_pit = bool(getattr(config, "STRICT_PIT_VALIDATION", False))
+    if strict_pit:
+        _enforce_strict_pit_validation(
+            {"provenance": "config", "pit_valid": True},
+            config=config,
+        )
     universe_history = get_kospi200_history(
         start_date, end_date, config.REBALANCE_FREQ,
     )
     if universe_history.empty:
+        if strict_pit:
+            raise RuntimeError(
+                "STRICT_PIT_VALIDATION failed before factor/backtest execution: "
+                "universe history is empty and has no PIT provenance. Provide "
+                "KRX historical constituent files with effective dates."
+            )
         logger.error("유니버스 데이터가 비어 있습니다. 백테스트를 중단합니다.")
         return
+
+    universe_provenance = validate_universe_provenance(universe_history)
+    if strict_pit and not universe_provenance["pit_valid"]:
+        _enforce_strict_pit_validation(universe_provenance)
+    if strict_pit and not config.DART_API_KEY:
+        raise RuntimeError(
+            "STRICT_PIT_VALIDATION requires DART financial data with an explicit "
+            "source/schema filing contract and a meaningful timestamp or documented "
+            "next-session policy. Set DART_API_KEY "
+            "and provide raw DART filing metadata; the current fiscal-period-only "
+            "loader is not PIT-valid."
+        )
 
     all_tickers = sorted(universe_history["ticker"].unique().tolist())
     logger.info(
@@ -706,6 +928,8 @@ def _run_pipeline(config: Any) -> None:
             "date_count": int(len(universe_dates)),
             "ticker_count": int(len(all_tickers)),
         },
+        "universe_provenance": universe_provenance,
+        "universe_history": universe_history,
     }
     logger.info(
         "가격 데이터: backtest=%d행 (%d 티커), lookback=%d행",
@@ -726,10 +950,60 @@ def _run_pipeline(config: Any) -> None:
     # 백테스트 기간 일별 영업일 목록
     backtest_dates = backtest_data.index.get_level_values("date").sort_values().unique()
 
-    # ── 3. 팩터 계산 ──────────────────────────────────────────
-    logger.info("3단계: 팩터 계산 (Momentum, Quality, Regime)")
+    # ── 3. 공시일 재무 데이터 계약 확인 ─────────────────────────
+    # The current normalized DART loader intentionally exposes fiscal-period
+    # values only.  Load it before any factor computation so strict mode cannot
+    # run momentum or quality factors with unverifiable financial availability.
+    financial_data = pd.DataFrame()
+    daily_financial = pd.DataFrame()
+    financial_provenance = validate_financial_provenance(financial_data)
+    if config.DART_API_KEY:
+        logger.info("  재무 데이터 로드 중 (DART API)...")
+        try:
+            years = list(range(start_date.year - 1, end_date.year + 1))
+            financial_data = get_financial_data(
+                all_tickers, years, api_key=config.DART_API_KEY,
+            )
+            logger.info("  재무 데이터: %d행", len(financial_data))
+            financial_provenance = validate_financial_provenance(
+                financial_data,
+                filing_date_used=has_usable_filing_dates(financial_data),
+            )
+            if strict_pit and not financial_provenance["pit_valid"]:
+                _enforce_strict_pit_validation(
+                    universe_provenance,
+                    financial_provenance,
+                    config=config,
+                )
+            if not financial_data.empty:
+                daily_financial = _convert_financial_to_daily(
+                    financial_data, all_full_dates,
+                )
+                financial_provenance = daily_financial.attrs.get(
+                    "financial_provenance", financial_provenance,
+                )
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            if strict_pit:
+                raise RuntimeError(
+                    "STRICT_PIT_VALIDATION could not establish filing-date "
+                    "financial availability. Obtain raw DART filing metadata "
+                    "and preserve its publication date."
+                ) from exc
+            logger.warning("  재무 데이터 로드 실패 (%s) — 모멘텀 전용으로 진행", exc)
 
-    # 3a. 모멘텀 팩터
+    if strict_pit and not financial_provenance.get("pit_valid", False):
+        _enforce_strict_pit_validation(
+            universe_provenance,
+            financial_provenance,
+            config=config,
+        )
+
+    # ── 4. 팩터 계산 ──────────────────────────────────────────
+    logger.info("4단계: 팩터 계산 (Momentum, Quality, Regime)")
+
+    # 4a. 모멘텀 팩터
     logger.info("  3a. 모멘텀 팩터 (12-7개월) 계산 중...")
     momentum_factor = MomentumFactor()
     momentum_df = momentum_factor.compute(
@@ -740,35 +1014,28 @@ def _run_pipeline(config: Any) -> None:
     )
     logger.info("  모멘텀 팩터: %d행", len(momentum_df))
 
-    # 3b. 품질 팩터 (DART API 필요)
+    # 4b. 품질 팩터 (DART API 필요)
     quality_df = pd.DataFrame()
-    if config.DART_API_KEY:
-        logger.info("  3b. 품질 팩터 계산 중 (DART API)...")
+    if config.DART_API_KEY and not daily_financial.empty:
+        logger.info("  4b. 품질 팩터 계산 중 (DART API)...")
         try:
-            years = list(range(start_date.year - 1, end_date.year + 1))
-            financial_data = get_financial_data(
-                all_tickers, years, api_key=config.DART_API_KEY,
+            quality_factor = QualityFactor()
+            quality_df = quality_factor.compute(
+                daily_financial,
+                min_ttm_quarters=config.QUALITY_MIN_TTM_QUARTERS,
             )
-            logger.info("  재무 데이터: %d행", len(financial_data))
-
-            if not financial_data.empty:
-                daily_financial = _convert_financial_to_daily(
-                    financial_data, all_full_dates,
-                )
-                quality_factor = QualityFactor()
-                quality_df = quality_factor.compute(
-                    daily_financial,
-                    min_ttm_quarters=config.QUALITY_MIN_TTM_QUARTERS,
-                )
-                logger.info("  품질 팩터: %d행", len(quality_df))
-            else:
-                logger.warning("  재무 데이터가 비어 있어 품질 팩터를 건너뜁니다.")
+            logger.info("  품질 팩터: %d행", len(quality_df))
         except Exception as exc:
+            if strict_pit:
+                raise RuntimeError(
+                    "STRICT_PIT_VALIDATION quality factor preparation failed; "
+                    "verify filing-date financial columns are used."
+                ) from exc
             logger.warning("  품질 팩터 계산 실패 (%s) — 모멘텀 전용으로 진행", exc)
     else:
-        logger.info("  3b. DART API 키 미설정 — 품질 팩터 건너뜀 (모멘텀 전용)")
+        logger.info("  4b. DART API/재무 데이터 없음 — 품질 팩터 건너뜀 (모멘텀 전용)")
 
-    # 3c. 리짓 필터 (KOSPI 200 지수)
+    # 4c. 리짓 필터 (KOSPI 200 지수)
     regime_filter_enabled = bool(getattr(config, "REGIME_FILTER_ENABLED", True))
     if regime_filter_enabled:
         logger.info("  3c. 리짓 필터 계산 중 (KOSPI 200 MA200)...")
@@ -834,7 +1101,7 @@ def _run_pipeline(config: Any) -> None:
             "coverage_ratio": 0.0,
         }
 
-    # ── 3d. 팩터 병합 ────────────────────────────────────────
+    # ── 4d. 팩터 병합 ────────────────────────────────────────
     logger.info("  3d. 팩터 병합 중...")
     factor_data = momentum_df[["ticker", "date", "momentum_z"]].copy()
 
@@ -896,6 +1163,11 @@ def _run_pipeline(config: Any) -> None:
             "required_full_coverage": False,
         }
 
+    quality_coverage["financial_data_mode"] = financial_provenance.get(
+        "mode", "non_pit_fiscal_period",
+    )
+    quality_coverage["financial_provenance"] = financial_provenance
+
     factor_data = factor_data[
         factor_data["date"].isin(pd.to_datetime(backtest_dates))
     ].copy()
@@ -915,9 +1187,10 @@ def _run_pipeline(config: Any) -> None:
     }
     manifest_context["rebalance_readiness"] = rebalance_readiness
     manifest_context["quality"] = quality_coverage
+    manifest_context["financial_provenance"] = financial_provenance
 
-    # ── 4. 백테스트 실행 ──────────────────────────────────────
-    logger.info("4단계: PortfolioRebalanceEngine로 백테스트 실행")
+    # ── 5. 백테스트 실행 ──────────────────────────────────────
+    logger.info("5단계: PortfolioRebalanceEngine로 백테스트 실행")
     engine = PortfolioRebalanceEngine(config)
     results = engine.run(
         backtest_data, index_raw, factor_data, universe_history,
@@ -928,11 +1201,11 @@ def _run_pipeline(config: Any) -> None:
     )
     results["_manifest_context"] = manifest_context
 
-    # ── 5. 결과 저장 ──────────────────────────────────────────
-    logger.info("5단계: 결과 저장")
+    # ── 6. 결과 저장 ──────────────────────────────────────────
+    logger.info("6단계: 결과 저장")
     _save_results(results, config)
 
-    # ── 6. 요약 출력 ──────────────────────────────────────────
+    # ── 7. 요약 출력 ──────────────────────────────────────────
     _print_summary(results, config)
 
 

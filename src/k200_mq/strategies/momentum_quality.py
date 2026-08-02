@@ -150,6 +150,8 @@ class MomentumQualityStrategy:
 
         tickers = selected["ticker"].tolist()
         filtered = exclude_kospi_top_n(
-            tickers, n=self.config.EXCLUDE_KOSPI_TOP_N
+            tickers,
+            n=self.config.EXCLUDE_KOSPI_TOP_N,
+            strict_pit=bool(getattr(self.config, "STRICT_PIT_VALIDATION", False)),
         )
         return selected[selected["ticker"].isin(filtered)]
