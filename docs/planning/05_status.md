@@ -1,24 +1,64 @@
 # 작업 진행 상황
 
-## 마지막 업데이트: 2026-07-28
+## 마지막 업데이트: 2026-08-02
 
-## 프로젝트 상태: Phase 4 완료, P0 이슈 전원 해결, 검증 진행 중
+## 프로젝트 상태: Phase 4 검증 진행 중, 엔진·캐시·체결 시점 수정 완료, **PIT 데이터 검증 전**
 
-## 최근 업데이트: 2026-07-28 (P0 이슈 3건 해결)
+## 최근 업데이트: 2026-08-02 (Phase 2 검증 수정 및 canonical 후보 실행)
 
-## 최초 백테스트 결과 (2020-2024)
+## 중요: 이전 백테스트 결과 모두 무효
+
+**2026-07-28: 치명적 cash 변이 버그 발견.**
+
+`_rebalance()`가 `cash`를 float 파라미터로 받아 로컬에서 `cash -= cost`로 수정했지만,
+이 변경이 호출자(`run()`)에 반영되지 않아 **cash가 항상 INITIAL_CAPITAL(100M)으로 고정**되어 있었습니다.
+NAV가 `cash + holdings`로 계산되므로 cash를 double-counting하여 수익률이 약 2배 부풀려졌습니다.
+
+**P1-5에서 버그 수정**: `_rebalance()`와 `_check_stop_losses()`가 모두 `(positions, cash)` 튜플을 반환하도록 변경.
+`run()`에서 반환값을 destructure하여 cash 변경이 올바르게 전파됩니다.
+
+**모든 이전 백테스트 결과(+207%, +244%, WF CV +245%)는 cash 변이 버그로 인해 무효입니다.**
+
+## 수정 후 백테스트 결과 (2015-2024)
 
 ```
-초기 자본: 100,000,000원 → 최종 자본: 307,063,900원
-총 수익률: +207.06%
-연간 수익률: +61.94%
-Sharpe 비율: 0.596
-최대 낙폭: -60.71%
-총 거래: 62건 | 승률: 77.4%
-평균 보유일: 131.3일 | 평균 보유 종목: 9.2개
+초기 자본: 100,000,000원 → 최종 자본: 114,171,995원
+총 수익률: +14.17%
+연간 수익률: +2.82%
+연간 변동성: 16.85%
+Sharpe 비율: 0.165
+최대 낙폭: -37.51%
+총 거래: 502건 | 승률: 37.6%
+평균 보유일: 38.9일 | 평균 보유 종목: 8.1개
+출구 사유: stop_loss 388건, rebalance 114건
 ```
 
-> **주의**: 결과는 검증되지 않은 초기 실행 결과입니다. P0 이슈(리짓 필터 미적용, 리밸런싱 누락, 품질 팩터 9.5% 커버리지)가 보고된 상태에서 실행되었습니다. 신뢰할 수 있는 결과를 얻으려면 P0 수정 후 재실행 필요.
+> **해석**: 전략이 유의미한 alpha를 생성하지 못함. +14.17%/10년은 KOSPI 200 벤치마크 대비 저조. 리짓 필터가 bullish 36.8%로 시장 참여율이 낮고, trailing stop-loss가 77%의 거래를 중단시킴. 근본적인 전략 재검토 필요.
+
+## Phase 2 수정 후 후보 실행 (2015-2024)
+
+```
+체결: signal일 종가 → 다음 거래일 시가
+첫 준비 완료 리밸런싱: 2015-03-31
+최종 자본: 126,970,159원
+총 수익률: +26.97%
+연간 변동성: 14.07%
+Sharpe 비율: 0.244
+최대 낙폭: -28.72%
+요약 거래: 1,179건
+```
+
+> **주의**: 이 결과는 mechanical candidate입니다. `outputs_k200mq/run_manifest.json`에 기록된 비-PIT 유니버스, 비공시일 기준 재무, momentum 정의 불일치, ADV/sector cap 미적용 제한 때문에 전략 성과로 확정하지 않습니다.
+
+## 구성요소 Ablation 후보 결과 (2015-2024)
+
+| 구성 | 총수익률 | Sharpe | MDD | 판정 |
+|------|---------:|-------:|----:|------|
+| Momentum + Quality | +26.97% | 0.244 | -28.72% | 후보 기준 |
+| Momentum only | +48.63% | 0.350 | -30.92% | Quality 추가 효과 없음 신호 |
+| Quality only | -13.21% | -0.066 | -27.70% | 품질 데이터 시점 문제로 참고용 |
+
+> **주의**: 세 결과 모두 비-PIT 유니버스와 filing-date 미반영 재무 데이터 제한이 있습니다. Quality 제거·regime 변경을 최종 결정하기 전에 재무 데이터 시점을 수정해야 합니다.
 
 ---
 
@@ -72,12 +112,17 @@ Sharpe 비율: 0.596
 - [x] 재무 데이터 → 일별 변환 (`_convert_financial_to_daily`)
 - [x] 결과 저장 (portfolio_snapshots, trade_log, daily_returns CSV)
 - [x] 요약 통계 출력 (총수익률, Sharpe, 최대낙폭, 승률)
-- [x] 최초 백테스트 실행 (2020-2024, +207.06% 수익률)
+- [x] 최초 백테스트 실행 (2020-2024, +207.06% 수익률 — **cash 변이 버그로 무효**)
 - [x] P0-1: 리짓 필터 엔진 내 적용 (regime_scale → target_value at rebalance)
 - [x] P0-2: 리밸런싱 일자 통합 (universe_data as_of 사용)
 - [x] P0-3: 품질 팩터 커버리지 개선 (0 분모 → 1 대체 + coverage 로깅)
-- [x] Walk-forward CV (5-fold expanding, 비중첩 2-3년 윈도우)
-- [ ] 파라미터 민감도 분석
+- [x] Walk-forward CV (5-fold expanding, 비중첩 2-3년 윈도우 — **cash 변이 버그로 무효**)
+- [x] P1-5: trailing stop-loss + cash 변이 버그 픽스 (peak_price 추적, cash 반환)
+- [x] Phase 2: cache ticker/coverage, warmup, regime date, next-open execution, target-weight resize
+- [x] Phase 2 회귀 테스트 (147개)
+- [x] run manifest 저장 및 기계적 후보 실행
+- [ ] PIT 유니버스 / filing-date 재무 데이터 계약
+- [ ] WF CV 재설계 및 재실행
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
 - [ ] 서바이버십 바이어스 테스트
@@ -90,8 +135,8 @@ Sharpe 비율: 0.596
 - [x] README_K200MQ.md (새 전략 문서)
 - [x] AGENTS.md 업데이트
 - [ ] README.md (새 전략 docs 섹션) — 진행 중
-- [ ] Test 보강 (118 → 200+)
-- [ ] 최종 백테스트 (2015-2024)
+- [x] Test 보강 (147개)
+- [x] 기계적 후보 백테스트 (2015-2024, 성과 확정 전)
 - [ ] 코드 리뷰
 - [ ] v0.1.0 release tag
 
@@ -117,6 +162,12 @@ Sharpe 비율: 0.596
 | 2026-07-28 | P0-2 해결: 리밸런싱 일자 통합 | universe_data as_of 사용 |
 | 2026-07-28 | P0-3 해결: 품질 커버리지 개선 | 0 분모 → 1 대체 + coverage 로깅 |
 | 2026-07-28 | Walk-forward CV 완료 (5-fold) | 모든 접힘 양수, 기하평균 수익률 +245.82% |
+| 2026-07-28 | **치명적 cash 변이 버그 발견** | `_rebalance()`의 cash가 local copy, `run()`에 반영 안 됨 |
+| 2026-07-28 | P1-5 해결: trailing stop-loss + cash 버그 픽스 | peak_price 추적, `(positions, cash)` 튜플 반환 |
+| 2026-07-28 | **이전 모든 결과 무효 선언** | cash 변이 버그로 +207%, +244%, WF CV 모두 부풀려짐 |
+| 2026-07-28 | 수정 후 백테스트: +14.17%/10년, Sharpe 0.165 | 전략 유의미한 alpha 없음, 근본적 재검토 필요
+| 2026-08-02 | Phase 2 수정 완료 | next-open 체결, regime warmup, cache coverage, target-weight, readiness gate |
+| 2026-08-02 | Phase 2 후보 실행 | +26.97%, Sharpe 0.244 — mechanical candidate, 성과 확정 금지 |
 
 ---
 
@@ -134,18 +185,24 @@ Sharpe 비율: 0.596
 | ~~P0-1: 리짓 필터가 백테스트 후에만 적용됨~~ | ~~치명적~~ | ~~엔진 내 리밸런싱 시 적용~~ | **해결** (engine._rebalance) |
 | ~~P0-2: 리밸런싱 일자 생성 불일치~~ | ~~치명적~~ | ~~universe ↔ engine 간 일자 생성 통합~~ | **해결** (universe_data as_of) |
 | ~~P0-3: 품질 팩터 커버리지 9.5%~~ | ~~치명적~~ | ~~모든 티커 일별 변환, z-score 완화~~ | **해결** (0→1 대체, 로깅) |
-| P1-4: 리밸런싱이 add/remove만 함 (weight drift) | 높음 | weight adjustment 구현 | 미해결 |
-| P1-5: 손절이 진입가 기준 (trailing 아님) | 높음 | peak_price 추적 | 미해결 |
-| P1-6: 리짓 조건이 너무 엄격 (29.6% bullish) | 높음 | MA200 alone 또는 3-state | 미해결 |
+| ~~P1-4: 리밸런싱이 add/remove만 함 (weight drift)~~ | ~~높음~~ | 목표 비중 resize 구현 | **해결** |
+| ~~P1-5: 손절이 진입가 기준 (trailing 아님)~~ | ~~높음~~ | peak_price 추적, cash 반환 | **해결** (trailing stop + cash fix) |
+| ~~cash 변이 버그: cash가 로컬 copy로 수정 손실~~ | **치명적** | `_rebalance()`, `_check_stop_losses()` → `(positions, cash)` 반환 | **해결** |
+| 전략 alpha 검증 불가 | **치명적** | PIT 유니버스·공시일 재무·benchmark 검증 | 미해결 |
+| 실행 모델/입력 데이터 변경으로 과거 결과 비비교 가능 | **높음** | manifest와 canonical 규칙 고정 | 진행 중 |
+| P1-6: 리짓 조건이 너무 엄격 (36.8% bullish) | 높음 | MA200 alone 또는 3-state | 미해결 |
 
 ---
 
 ## 다음 단계
 
-**P0 이슈 전원 해결 완료 (2026-07-28).**
+**cash, 체결 시점, cache coverage, regime warmup, target-weight resize 문제를 수정했습니다.**
 
-**다음 우선순위 (검증 결과 신뢰성):**
-1. P1 이슈: trailing stop-loss, weight drift correction
-2. 파라미터 민감도 분석 (window/skip/N/reduction)
-3. 서바이버십 바이어스 / 스트레스 테스트
-4. Turnover / cost attribution
+**경고: 현재 결과는 PIT 유니버스와 filing-date 재무 문제 때문에 아직 전략 성과가 아닙니다.**
+
+**다음 우선순위:**
+1. PIT KOSPI 200 유니버스와 공시일 기준 재무 데이터 확보 또는 proxy 한계 명시
+2. KOSPI 200 benchmark와 비용 attribution 추가
+3. 수정된 WF 검증 재실행
+4. Momentum/Quality/Regime/Stop-loss ablation
+5. 그 후에만 regime·window·N 파라미터 재검토

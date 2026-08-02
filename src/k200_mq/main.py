@@ -9,7 +9,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -19,6 +21,95 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+_SECRET_FIELD_MARKERS = (
+    "api",
+    "credential",
+    "key",
+    "password",
+    "passwd",
+    "pw",
+    "pwd",
+    "private",
+    "secret",
+    "token",
+)
+
+
+def _is_secret_field(name: str) -> bool:
+    """Return whether a config key should be excluded from the manifest."""
+    lowered = name.lower()
+    if lowered in {"krx_id", "krx_pw"}:
+        return True
+    return any(marker in lowered for marker in _SECRET_FIELD_MARKERS)
+
+
+def _manifest_safe(value: Any) -> Any:
+    """Convert common pandas/config values into deterministic JSON values."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (date, datetime, pd.Timestamp)):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return _manifest_safe(value.item())
+    if isinstance(value, dict):
+        return {
+            str(key): _manifest_safe(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+            if not _is_secret_field(str(key))
+        }
+    if isinstance(value, set):
+        return sorted((_manifest_safe(item) for item in value), key=str)
+    if isinstance(value, (list, tuple)):
+        return [_manifest_safe(item) for item in value]
+    return str(value)
+
+
+def _manifest_config(config: Any) -> dict[str, Any]:
+    """Return public config values without API keys or credential fields."""
+    if hasattr(config, "model_dump"):
+        values = config.model_dump()
+    elif hasattr(config, "__dict__"):
+        values = vars(config)
+    else:
+        values = {}
+    if not isinstance(values, dict):
+        return {}
+    return {
+        str(key): _manifest_safe(value)
+        for key, value in sorted(values.items(), key=lambda item: str(item[0]))
+        if not _is_secret_field(str(key))
+    }
+
+
+def _git_manifest_state() -> dict[str, Any]:
+    """Best-effort local git state; failure never blocks a backtest save."""
+    repo_root = Path(__file__).resolve().parents[2]
+    state: dict[str, Any] = {"sha": None, "dirty": None}
+    try:
+        sha_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if sha_result.returncode == 0 and sha_result.stdout.strip():
+            state["sha"] = sha_result.stdout.strip()
+        status_result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if status_result.returncode == 0:
+            state["dirty"] = bool(status_result.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return state
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -193,6 +284,10 @@ def _build_config(args: argparse.Namespace) -> Any:
         "WEIGHT_MOMENTUM": args.weight_momentum,
         "WEIGHT_QUALITY": args.weight_quality,
         "EXCLUDE_KOSPI_TOP_N": args.exclude_kospi_top_n,
+        "SL_STOP_LOSS": args.stop_loss,
+        "MAX_HOLDINGS": args.max_holdings,
+        "SECTOR_CAP": args.sector_cap,
+        "MIN_ADV_RATIO": args.min_adv_ratio,
         "OUTPUT_DIR": args.output,
     }
     if args.dart_api_key:
@@ -303,6 +398,219 @@ def _convert_financial_to_daily(
     return result
 
 
+def _validate_first_rebalance_factor_readiness(
+    universe_history: pd.DataFrame,
+    factor_data: pd.DataFrame,
+    measured_dates: pd.DatetimeIndex,
+    config: Any | None = None,
+) -> dict[str, Any]:
+    """Find the first scheduled rebalance with enough momentum coverage.
+
+    Quality is intentionally not part of this gate: DART coverage may be
+    partial or disabled, while momentum is the factor whose trading-day
+    warmup is required for the measured interval to be valid.  A scheduled
+    rebalance can be inspected only after mapping it to the latest measured
+    trading bar on or before its calendar date.  Earlier scheduled dates are
+    recorded as skipped rather than making the whole run fail.
+    """
+    if universe_history.empty or "as_of" not in universe_history.columns:
+        raise RuntimeError("예정 리밸런싱을 확인할 유니버스 이력이 없습니다.")
+
+    as_of_dates = pd.to_datetime(universe_history["as_of"], errors="coerce")
+    valid_as_of = as_of_dates.dropna()
+    if valid_as_of.empty:
+        raise RuntimeError("유니버스 이력에 유효한 리밸런싱 날짜가 없습니다.")
+
+    measured = pd.DatetimeIndex(pd.to_datetime(measured_dates, errors="coerce"))
+    measured = measured.dropna().normalize().unique().sort_values()
+    if not len(measured):
+        raise RuntimeError("첫 예정 리밸런싱을 확인할 측정 기간 가격 바가 없습니다.")
+
+    configured_top_n = getattr(config, "TOP_N", 1) if config is not None else 1
+    try:
+        configured_top_n = max(int(configured_top_n), 0)
+    except (TypeError, ValueError):
+        configured_top_n = 1
+
+    # Only schedules in the measured calendar window are eligible.  The
+    # signal date is allowed to be the first measured bar when a schedule is
+    # a weekend/holiday, but a schedule before the measured window is not a
+    # measured-period trading opportunity.
+    scheduled_dates = sorted({
+        pd.Timestamp(value).normalize()
+        for value in valid_as_of
+        if measured.min() <= pd.Timestamp(value).normalize() <= measured.max()
+    })
+    if not scheduled_dates:
+        raise RuntimeError("측정 기간에 예정된 리밸런싱 날짜가 없습니다.")
+
+    factor_dates = pd.Series(pd.NaT, index=factor_data.index, dtype="datetime64[ns]")
+    momentum = pd.Series(np.nan, index=factor_data.index, dtype=float)
+    if "date" in factor_data.columns:
+        factor_dates = pd.to_datetime(factor_data["date"], errors="coerce").dt.normalize()
+    if "momentum_z" in factor_data.columns:
+        momentum = pd.to_numeric(factor_data["momentum_z"], errors="coerce")
+
+    evaluations: list[dict[str, Any]] = []
+    first_ready: dict[str, Any] | None = None
+    for scheduled_date in scheduled_dates:
+        prior_measured = measured[measured <= scheduled_date]
+        signal_date = pd.Timestamp(prior_measured[-1]).normalize() if len(prior_measured) else None
+
+        scheduled_rows = universe_history.loc[
+            as_of_dates.dt.normalize() == scheduled_date,
+        ]
+        universe = set(scheduled_rows["ticker"].dropna().astype(str)) if "ticker" in scheduled_rows else set()
+        required_count = min(configured_top_n, len(universe))
+
+        usable_tickers: set[str] = set()
+        if signal_date is not None and {"ticker", "date", "momentum_z"}.issubset(factor_data.columns):
+            usable = (
+                factor_data["ticker"].astype(str).isin(universe)
+                & factor_dates.eq(signal_date)
+                & momentum.notna()
+                & np.isfinite(momentum)
+            )
+            usable_rows = factor_data.loc[usable]
+            if not usable_rows.empty:
+                usable_tickers = set(usable_rows["ticker"].astype(str).unique())
+
+        usable_count = len(usable_tickers)
+        missing_tickers = sorted(universe - usable_tickers)
+        coverage = {
+            "scheduled_date": scheduled_date.date().isoformat(),
+            "signal_date": signal_date.date().isoformat() if signal_date is not None else None,
+            "usable_ticker_count": usable_count,
+            "universe_ticker_count": len(universe),
+            "required_ticker_count": required_count,
+            "usable_tickers": sorted(usable_tickers),
+            "missing_tickers": missing_tickers,
+            "quality_required": False,
+        }
+        evaluations.append(coverage)
+
+        is_ready = bool(universe) and signal_date is not None and usable_count >= required_count
+        if is_ready and first_ready is None:
+            first_ready = coverage
+            logger.info(
+                "첫 준비 완료 리밸런싱: 예정일=%s, 신호일=%s, momentum=%d/%d개",
+                scheduled_date.date(),
+                signal_date.date(),
+                usable_count,
+                required_count,
+            )
+        elif first_ready is None:
+            logger.info(
+                "준비 전 리밸런싱 건너뜀: 예정일=%s, 신호일=%s, momentum=%d/%d개",
+                scheduled_date.date(),
+                signal_date.date() if signal_date is not None else None,
+                usable_count,
+                required_count,
+            )
+        else:
+            logger.info(
+                "첫 준비 완료 이후 momentum 커버리지: 예정일=%s, 신호일=%s, "
+                "momentum=%d/%d개",
+                scheduled_date.date(),
+                signal_date.date() if signal_date is not None else None,
+                usable_count,
+                required_count,
+            )
+
+    if first_ready is None:
+        coverage_summary = [
+            "%s=%d/%d" % (
+                item["scheduled_date"],
+                item["usable_ticker_count"],
+                item["required_ticker_count"],
+            )
+            for item in evaluations
+        ]
+        raise RuntimeError(
+            "측정 기간의 모든 예정 리밸런싱에서 momentum 커버리지가 부족합니다: %s. "
+            "가격 warmup에 momentum shift에 필요한 거래일 관측치가 포함되었는지 "
+            "확인하십시오 (quality 커버리지는 이 검증 대상이 아닙니다)."
+            % ", ".join(coverage_summary)
+        )
+
+    first_scheduled_coverage = evaluations[0]
+    skipped = evaluations[:evaluations.index(first_ready)]
+    return {
+        "first_scheduled_rebalance": {
+            "scheduled_date": first_scheduled_coverage["scheduled_date"],
+            "signal_date": first_scheduled_coverage["signal_date"],
+        },
+        "first_ready_rebalance": first_ready,
+        "measured_trading_readiness_date": first_ready["signal_date"],
+        "skipped_not_ready_rebalances": skipped,
+        "scheduled_rebalance_count": len(evaluations),
+        "quality_required": False,
+    }
+
+
+def _build_run_manifest(
+    config: Any,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the auditable, secret-free metadata for one pipeline run."""
+    context = context or {}
+    dart_configured = bool(getattr(config, "DART_API_KEY", ""))
+    costs = {
+        "commission_rate": _manifest_safe(getattr(config, "COMMISSION_RATE", None)),
+        "tax_rate": _manifest_safe(getattr(config, "TAX_RATE", None)),
+        "slippage": _manifest_safe(getattr(config, "SLIPPAGE", None)),
+    }
+    limitations = {
+        "universe": "non-PIT universe; constituent history is not point-in-time verified",
+        "financials": "financials are not filing-date aligned",
+        "momentum": "existing momentum definition retained; not changed in this pass",
+        "adv": "ADV status: configured in K200MQ settings but not applied by the current engine",
+        "sector_cap": "sector-cap status: configured in K200MQ settings but not applied by the current engine",
+        "dart": (
+            "missing DART mode: quality disabled and missing quality values filled with 0"
+            if not dart_configured
+            else "missing DART mode: not applicable; DART was configured"
+        ),
+    }
+    return {
+        "schema_version": 2,
+        "command": context.get("command", "run"),
+        "config": _manifest_config(config),
+        "measured": {
+            "start": context.get("measured_start"),
+            "end": context.get("measured_end"),
+        },
+        "price": context.get(
+            "price",
+            {"date_range": {"start": None, "end": None}, "ticker_count": 0},
+        ),
+        "universe": context.get(
+            "universe",
+            {"dates": [], "date_count": 0, "ticker_count": 0},
+        ),
+        "factors": context.get(
+            "factors", {"row_count": 0, "ticker_count": 0},
+        ),
+        # ``first_scheduled_rebalance`` is the calendar schedule we inspect;
+        # ``first_ready_rebalance`` is the first schedule allowed to trade.
+        # Keep this distinction explicit because the first schedule may have
+        # no factor rows during momentum warmup.
+        "rebalance_readiness": context.get("rebalance_readiness", {}),
+        "regime_map": context.get(
+            "regime_map", {"covered_date_count": 0, "measured_date_count": 0},
+        ),
+        "quality": context.get("quality", {}),
+        "execution": {
+            "signal_policy": "close signal",
+            "entry_policy": "next open",
+            "exit_policy": "next open",
+        },
+        "costs": costs,
+        "git": _git_manifest_state(),
+        "limitations": limitations,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 메인 파이프라인
 # ═══════════════════════════════════════════════════════════════════
@@ -355,8 +663,16 @@ def _run_pipeline(config: Any) -> None:
     # ── 2. 가격 데이터 로드 ───────────────────────────────────
     logger.info("2단계: 가격 데이터 로드 (252d lookback + ADV)")
     lookback_days = 252
+    required_momentum_observations = max(
+        config.MOMENTUM_WINDOW_LONG - config.MOMENTUM_SKIP_DAYS,
+        config.MOMENTUM_WINDOW_SHORT,
+    ) + 1
     backtest_data, lookback_data = get_price_data_with_lookback(
-        all_tickers, start_date, end_date, lookback_days=lookback_days,
+        all_tickers,
+        start_date,
+        end_date,
+        lookback_days=lookback_days,
+        required_observations=required_momentum_observations,
     )
 
     if backtest_data.empty:
@@ -364,13 +680,43 @@ def _run_pipeline(config: Any) -> None:
         return
 
     n_tickers_price = backtest_data.index.get_level_values("ticker").nunique()
+    actual_price_dates = pd.DatetimeIndex(
+        pd.to_datetime(backtest_data.index.get_level_values("date"), errors="coerce")
+    ).dropna().normalize().unique().sort_values()
+    universe_dates = pd.DatetimeIndex(
+        pd.to_datetime(universe_history["as_of"], errors="coerce").dropna()
+    ).normalize().unique().sort_values()
+    manifest_context: dict[str, Any] = {
+        "command": "run",
+        "measured_start": start_date.isoformat(),
+        "measured_end": end_date.isoformat(),
+        "price": {
+            "date_range": {
+                "start": actual_price_dates.min().date().isoformat()
+                if len(actual_price_dates)
+                else None,
+                "end": actual_price_dates.max().date().isoformat()
+                if len(actual_price_dates)
+                else None,
+            },
+            "ticker_count": int(n_tickers_price),
+        },
+        "universe": {
+            "dates": [dt.date().isoformat() for dt in universe_dates],
+            "date_count": int(len(universe_dates)),
+            "ticker_count": int(len(all_tickers)),
+        },
+    }
     logger.info(
         "가격 데이터: backtest=%d행 (%d 티커), lookback=%d행",
         len(backtest_data), n_tickers_price, len(lookback_data),
     )
 
-    # 전체 가격 데이터 (팩터 계산용 — lookback 포함)
-    full_price = pd.concat([lookback_data, backtest_data]).sort_index()
+    # 전체 가격 데이터 (팩터 계산용 — lookback 포함).  The loader's
+    # contract makes warmup half-open, but de-duplicate here as a safe guard
+    # for older cache entries.  Warmup rows are never passed to the engine.
+    full_price = pd.concat([lookback_data, backtest_data])
+    full_price = full_price[~full_price.index.duplicated(keep="last")].sort_index()
     
     # 품질 팩터용 전체 일자 추출 (reset_index 전에!)
     all_full_dates = full_price.index.get_level_values("date").unique()
@@ -423,34 +769,76 @@ def _run_pipeline(config: Any) -> None:
         logger.info("  3b. DART API 키 미설정 — 품질 팩터 건너뜀 (모멘텀 전용)")
 
     # 3c. 리짓 필터 (KOSPI 200 지수)
-    logger.info("  3c. 리짓 필터 계산 중 (KOSPI 200 MA200)...")
-    index_ticker = config.MARKET_INDEX_TICKER  # KPI200
-    index_raw = get_market_index(index_ticker, start_date, end_date)
+    regime_filter_enabled = bool(getattr(config, "REGIME_FILTER_ENABLED", True))
+    if regime_filter_enabled:
+        logger.info("  3c. 리짓 필터 계산 중 (KOSPI 200 MA200)...")
+        index_ticker = config.MARKET_INDEX_TICKER  # KPI200
+        # MA200 needs roughly 200 trading observations before the first measured
+        # date.  Use a deliberately conservative calendar window so weekends and
+        # holidays do not leave the first measured regime silently incomplete.
+        regime_history_days = max(config.REGIME_MA_PERIOD * 2, 365)
+        regime_index_start = pd.Timestamp(start_date) - pd.Timedelta(days=regime_history_days)
+        index_raw = get_market_index(index_ticker, regime_index_start.date(), end_date)
 
-    if not index_raw.empty:
-        regime_factor = RegimeFactor()
-        index_for_regime = index_raw.reset_index()
-        regime_df = regime_factor.compute(
-            index_for_regime,
-            ma_period=config.REGIME_MA_PERIOD,
-            min_return_days=20,
-            reduction=config.REGIME_REDUCTION,
-        )
-        regime_scale_map = regime_df.set_index("date")["position_scale"].to_dict()
-        logger.info(
-            "  리짓: %d일 중 Bullish %d일 (%.1f%%)",
-            len(regime_df),
-            regime_df["regime"].sum(),
-            regime_df["regime"].mean() * 100,
-        )
+        if not index_raw.empty:
+            regime_factor = RegimeFactor()
+            index_for_regime = index_raw.reset_index()
+            regime_df = regime_factor.compute(
+                index_for_regime,
+                ma_period=config.REGIME_MA_PERIOD,
+                min_return_days=20,
+                reduction=config.REGIME_REDUCTION,
+            )
+            measured_regime = regime_df[
+                regime_df["date"].isin(pd.to_datetime(backtest_dates))
+            ].dropna(subset=["regime", "position_scale"])
+            regime_scale_map = measured_regime.set_index("date")["position_scale"].to_dict()
+            valid_regime = regime_df.dropna(subset=["regime"])
+            logger.info(
+                "  리짓: %d일 중 Bullish %d일 (%.1f%%)",
+                len(valid_regime),
+                int(valid_regime["regime"].sum()),
+                valid_regime["regime"].mean() * 100 if not valid_regime.empty else 0.0,
+            )
+            manifest_context["regime_map"] = {
+                "enabled": True,
+                "status": "applied",
+                "applied": True,
+                "covered_date_count": int(len(regime_scale_map)),
+                "measured_date_count": int(len(backtest_dates)),
+                "coverage_ratio": len(regime_scale_map) / max(len(backtest_dates), 1),
+            }
+        else:
+            logger.warning("  KOSPI 200 지수 데이터 없음 — 리짓 필터 비활성")
+            regime_scale_map = None
+            manifest_context["regime_map"] = {
+                "enabled": True,
+                "status": "no_index_data",
+                "applied": False,
+                "covered_date_count": 0,
+                "measured_date_count": int(len(backtest_dates)),
+                "coverage_ratio": 0.0,
+            }
     else:
-        logger.warning("  KOSPI 200 지수 데이터 없음 — 리짓 필터 비활성")
+        logger.info("  3c. REGIME_FILTER_ENABLED=False — 리짓 축소/스케일 적용 안 함")
+        index_raw = pd.DataFrame()
         regime_scale_map = None
+        manifest_context["regime_map"] = {
+            "enabled": False,
+            "status": "disabled",
+            "mode": "disabled_by_config",
+            "reason": "REGIME_FILTER_ENABLED=False",
+            "applied": False,
+            "covered_date_count": 0,
+            "measured_date_count": int(len(backtest_dates)),
+            "coverage_ratio": 0.0,
+        }
 
     # ── 3d. 팩터 병합 ────────────────────────────────────────
     logger.info("  3d. 팩터 병합 중...")
     factor_data = momentum_df[["ticker", "date", "momentum_z"]].copy()
 
+    quality_coverage: dict[str, Any]
     if not quality_df.empty:
         quality_z_map = quality_df.set_index(["ticker", "date"])["quality_composite_z"]
         factor_data["quality_z"] = factor_data.apply(
@@ -469,9 +857,44 @@ def _run_pipeline(config: Any) -> None:
             n_with_quality,
             len(factor_data),
         )
+        quality_keys = set(
+            zip(
+                quality_df["ticker"].astype(str),
+                pd.to_datetime(quality_df["date"], errors="coerce").dt.normalize(),
+            )
+        )
+        factor_keys = list(
+            zip(
+                factor_data["ticker"].astype(str),
+                pd.to_datetime(factor_data["date"], errors="coerce").dt.normalize(),
+            )
+        )
+        covered_rows = sum(key in quality_keys for key in factor_keys)
+        covered_tickers = {
+            ticker for ticker, factor_date in factor_keys
+            if (ticker, factor_date) in quality_keys
+        }
+        quality_coverage = {
+            "mode": "partial_allowed_fill_missing_with_zero",
+            "quality_factor_row_count": int(len(quality_df)),
+            "quality_factor_ticker_count": int(quality_df["ticker"].nunique()),
+            "covered_factor_row_count": int(covered_rows),
+            "covered_factor_ticker_count": int(len(covered_tickers)),
+            "factor_row_count": int(len(factor_data)),
+            "required_full_coverage": False,
+        }
     else:
         factor_data["quality_z"] = 0.0
         logger.info("  품질 팩터 없음 — quality_z = 0.0")
+        quality_coverage = {
+            "mode": "disabled_fill_missing_with_zero",
+            "quality_factor_row_count": 0,
+            "quality_factor_ticker_count": 0,
+            "covered_factor_row_count": 0,
+            "covered_factor_ticker_count": 0,
+            "factor_row_count": int(len(factor_data)),
+            "required_full_coverage": False,
+        }
 
     factor_data = factor_data[
         factor_data["date"].isin(pd.to_datetime(backtest_dates))
@@ -480,13 +903,30 @@ def _run_pipeline(config: Any) -> None:
                 len(factor_data),
                 factor_data["ticker"].nunique())
 
+    rebalance_readiness = _validate_first_rebalance_factor_readiness(
+        universe_history,
+        factor_data,
+        pd.DatetimeIndex(backtest_dates),
+        config,
+    )
+    manifest_context["factors"] = {
+        "row_count": int(len(factor_data)),
+        "ticker_count": int(factor_data["ticker"].nunique()),
+    }
+    manifest_context["rebalance_readiness"] = rebalance_readiness
+    manifest_context["quality"] = quality_coverage
+
     # ── 4. 백테스트 실행 ──────────────────────────────────────
     logger.info("4단계: PortfolioRebalanceEngine로 백테스트 실행")
     engine = PortfolioRebalanceEngine(config)
     results = engine.run(
         backtest_data, index_raw, factor_data, universe_history,
         regime_scale_map=regime_scale_map,
+        measured_start=start_date,
+        measured_end=end_date,
+        active_trading_start=rebalance_readiness["measured_trading_readiness_date"],
     )
+    results["_manifest_context"] = manifest_context
 
     # ── 5. 결과 저장 ──────────────────────────────────────────
     logger.info("5단계: 결과 저장")
@@ -524,6 +964,22 @@ def _save_results(results: dict[str, Any], config: Any) -> None:
         ret_path = output_dir / "daily_returns.csv"
         daily_returns.to_csv(ret_path, header=True)
         logger.info("일별 수익률 저장: %s", ret_path)
+
+    manifest = _build_run_manifest(
+        config,
+        results.get("_manifest_context"),
+    )
+    manifest_path = output_dir / "run_manifest.json"
+    with manifest_path.open("w", encoding="utf-8") as manifest_file:
+        json.dump(
+            _manifest_safe(manifest),
+            manifest_file,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        manifest_file.write("\n")
+    logger.info("실행 매니페스트 저장: %s", manifest_path)
 
 
 def _print_summary(results: dict[str, Any], config: Any) -> None:

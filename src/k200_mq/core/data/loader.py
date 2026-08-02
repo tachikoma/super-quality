@@ -240,6 +240,152 @@ def _check_old_cache(start: str | date, end: str | date) -> None:
         logger.debug("이전 캐시 키 발견: %s (마이그레이션되지 않음)", old_key)
 
 
+def _merge_price_year_cache(
+    existing: pd.DataFrame | None,
+    downloaded: pd.DataFrame,
+) -> pd.DataFrame:
+    """Merge a yearly download without discarding cached tickers.
+
+    A ticker-missing cache reload downloads only the missing ticker(s).  The
+    yearly parquet is still the source of truth for all tickers, so replacing
+    it with that partial response would make the next cache hit lose data.
+    Newly downloaded rows win for an identical ``(ticker, date)`` key.
+    """
+    frames = [frame for frame in (existing, downloaded) if frame is not None and not frame.empty]
+    if not frames:
+        return pd.DataFrame()
+
+    normalised: list[pd.DataFrame] = []
+    for frame in frames:
+        if "ticker" not in frame.columns or "date" not in frame.columns:
+            continue
+        current = frame.copy()
+        current["ticker"] = current["ticker"].astype(str)
+        current["date"] = pd.to_datetime(current["date"], errors="coerce")
+        current = current.dropna(subset=["date"])
+        normalised.append(current)
+
+    if not normalised:
+        return pd.DataFrame()
+
+    merged = pd.concat(normalised, ignore_index=True, sort=False)
+    return (
+        merged.drop_duplicates(subset=["ticker", "date"], keep="last")
+        .sort_values(["ticker", "date"])
+        .reset_index(drop=True)
+    )
+
+
+_PRICE_EDGE_MISSING_BUSINESS_DAYS = 3
+_PRICE_INTERIOR_MISSING_BUSINESS_DAYS = 10
+
+
+def _business_days_between(start: pd.Timestamp, end: pd.Timestamp) -> int:
+    """Return the number of expected weekday sessions strictly between dates.
+
+    This is deliberately a weekday heuristic rather than an exchange-calendar
+    assertion.  It is used only to distinguish ordinary year/partial-period
+    boundaries and holidays from a materially incomplete daily cache.
+    """
+    if end <= start:
+        return 0
+    return max(len(pd.bdate_range(start, end, inclusive="both")) - 2, 0)
+
+
+def _price_frame_has_material_gaps(
+    frame: pd.DataFrame,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+) -> bool:
+    """Return whether a cached price frame has duplicate/order/long-gap issues.
+
+    Only the requested interval is inspected.  Rows outside a later narrow
+    request must not make an otherwise complete request look incomplete.
+    """
+    if not {"ticker", "date"}.issubset(frame.columns):
+        return False
+
+    dates = pd.to_datetime(frame["date"], errors="coerce")
+    valid = frame.loc[dates.notna(), ["ticker", "date"]].copy()
+    if valid.empty:
+        return False
+    valid["_date"] = pd.to_datetime(valid["date"], errors="coerce")
+    valid["_ticker"] = valid["ticker"].astype(str)
+    # Duplicate rows and an out-of-order ticker series are cache corruption,
+    # not normal sparse trading.  Do this before the merge can normalise them.
+    if valid.duplicated(subset=["_ticker", "_date"]).any():
+        return False
+    for _, group in valid.groupby("_ticker", sort=False):
+        ticker_dates = pd.DatetimeIndex(group["_date"])
+        if not ticker_dates.is_monotonic_increasing:
+            return False
+        for previous, current in zip(ticker_dates[:-1], ticker_dates[1:]):
+            gap_start = max(previous, start) if start is not None else previous
+            gap_end = min(current, end) if end is not None else current
+            if (
+                gap_end > gap_start
+                and _business_days_between(gap_start, gap_end)
+                > _PRICE_INTERIOR_MISSING_BUSINESS_DAYS
+            ):
+                return False
+    return True
+
+
+def _price_frame_covers_range(
+    frame: pd.DataFrame | None,
+    tickers: set[str],
+    start: date,
+    end: date,
+) -> bool:
+    """Return whether every ticker has usable rows spanning the requested range.
+
+    ``price_meta`` records the range requested when a parquet file was
+    written, not the range actually returned for each ticker.  A delisted or
+    newly listed ticker can therefore be present in the metadata while its
+    rows start after the requested beginning.  Cache discovery must inspect
+    the rows themselves before treating such a file as complete.
+
+    Calendar January 1 and December 31 are not necessarily observed exchange
+    sessions.  A small weekday allowance therefore applies at the two edges;
+    actual rows, rather than those literal dates, remain the source of truth.
+    Interior long gaps and duplicate/order corruption are rejected, while a
+    ticker is not required to have a row on every possible session.
+    """
+    if frame is None or frame.empty or not {"ticker", "date"}.issubset(frame.columns):
+        return False
+
+    dates = pd.to_datetime(frame["date"], errors="coerce")
+    valid = frame.loc[dates.notna(), ["ticker", "date"]].copy()
+    if valid.empty:
+        return False
+    valid["_date"] = pd.to_datetime(valid["date"], errors="coerce")
+    valid["_ticker"] = valid["ticker"].astype(str)
+
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    if not _price_frame_has_material_gaps(frame, start_ts, end_ts):
+        return False
+    for ticker in tickers:
+        ticker_dates = valid.loc[valid["_ticker"] == ticker, "_date"]
+        if ticker_dates.empty:
+            return False
+        first_observed = ticker_dates.min()
+        last_observed = ticker_dates.max()
+        if (
+            first_observed > start_ts
+            and _business_days_between(start_ts, first_observed)
+            > _PRICE_EDGE_MISSING_BUSINESS_DAYS
+        ):
+            return False
+        if (
+            last_observed < end_ts
+            and _business_days_between(last_observed, end_ts)
+            > _PRICE_EDGE_MISSING_BUSINESS_DAYS
+        ):
+            return False
+    return True
+
+
 def get_price_data(
     tickers: list[str],
     start: str | date,
@@ -270,6 +416,20 @@ def get_price_data(
     start_date = _to_date(start)
     end_date = _to_date(end)
 
+    # A cache entry is assembled only for the requested universe.  In
+    # particular, do not let an empty ticker request accidentally return the
+    # complete year cache.
+    requested_tickers = {str(ticker) for ticker in tickers}
+    if not requested_tickers:
+        empty = pd.DataFrame(
+            columns=["open", "high", "low", "close", "volume", "mcap"],
+        )
+        empty.index = pd.MultiIndex.from_arrays(
+            [pd.Index([], dtype=object), pd.DatetimeIndex([])],
+            names=["ticker", "date"],
+        )
+        return empty
+
     # 이전 캐시 키 확인 (로깅 전용)
     _check_old_cache(start, end)
 
@@ -298,8 +458,11 @@ def get_price_data(
     years_needed = {str(y) for y in range(start_date.year, end_date.year + 1)}
 
     meta = _cache.get_json("price_meta")
-    if meta is None:
+    if not isinstance(meta, dict):
         meta = {"cache_version": 1, "years": {}}
+    if not isinstance(meta.get("years"), dict):
+        # Keep loading usable with metadata written by older versions.
+        meta["years"] = {}
 
     download_years: set[str] = set()
     reload_years: set[str] = set()
@@ -309,21 +472,43 @@ def get_price_data(
         y_start = max(start_date, date(y, 1, 1))
         y_end = min(end_date, date(y, 12, 31))
 
-        if y_str not in meta["years"]:
+        cached_frame = _cache.get(f"price_{y_str}")
+        if y_str not in meta["years"] and cached_frame is None:
             download_years.add(y_str)
         else:
-            info = meta["years"][y_str]
-            # req_start/req_end = 이전에 다운로드한 요청 범위
-            # 캐시가 현재 요청 범위를 완전히 커버하지 않으면 reload
-            cached_start = _to_date(info["req_start"])
-            cached_end = _to_date(info["req_end"])
-            if cached_start > y_start or cached_end < y_end:
+            info = meta["years"].get(y_str, {})
+            if not isinstance(info, dict):
+                info = {}
+            # ``tickers`` and req_start/req_end are aggregate metadata.  They
+            # do not prove that each requested ticker spans the requested
+            # interval (for example, a newly listed ticker may start late).
+            # Inspect the actual yearly rows for every cache discovery.  The
+            # request metadata is retained for auditability, but is not used
+            # as proof that literal Jan 1/Dec 31 rows exist.
+            covers_request = _price_frame_covers_range(
+                cached_frame, requested_tickers, y_start, y_end,
+            )
+            if not covers_request:
+                logger.debug(
+                    "가격 캐시 %s: 요청 티커별 날짜 범위 불충분 — 재로드", y_str,
+                )
                 reload_years.add(y_str)
+            elif y_str not in meta["years"] and cached_frame is not None:
+                # Reconstruct metadata for an orphan parquet only after the
+                # rows themselves have passed the coverage checks.
+                meta["years"][y_str] = {
+                    "req_start": y_start.isoformat(),
+                    "req_end": y_end.isoformat(),
+                    "tickers": sorted(cached_frame["ticker"].astype(str).unique()),
+                }
 
     # ── 2. Download ───────────────────────────────────────────────
     years_to_fetch = download_years | reload_years
 
-    if download_years == years_needed:
+    has_orphan_cache = any(
+        _cache.get(f"price_{y_str}") is not None for y_str in years_needed
+    )
+    if download_years == years_needed and not has_orphan_cache:
         # First download: full range at once → split by year
         logger.info("전체 범위 다운로드 중… (%d년)", len(years_needed))
         full = _download_ticker_batch(tickers, start_date, end_date, shares_map)
@@ -334,12 +519,18 @@ def get_price_data(
                 y = int(y_str)
                 y_req_start = max(start_date, date(y, 1, 1))
                 y_req_end = min(end_date, date(y, 12, 31))
-                _cache.put(f"price_{y_str}", grp)
+                # Even on the initial full-range path, an orphan parquet may
+                # have appeared between discovery and the write.  Merging is
+                # safer than replacing a yearly source-of-truth file.
+                existing = _cache.get(f"price_{y_str}")
+                merged = _merge_price_year_cache(existing, grp)
+                _cache.put(f"price_{y_str}", merged)
                 meta["years"][y_str] = {
                     "req_start": y_req_start.isoformat(),
                     "req_end": y_req_end.isoformat(),
+                    "tickers": sorted(merged["ticker"].astype(str).unique()),
                 }
-                logger.info("  %s → %s일 캐시됨", y_str, len(grp))
+                logger.info("  %s → %s일 캐시됨", y_str, len(merged))
             del full
     elif years_to_fetch:
         # Incremental: download missing / incomplete years
@@ -362,10 +553,29 @@ def get_price_data(
             if year_data.empty:
                 logger.warning("  %s: 데이터 없음, 건너뜀", y_str)
                 continue
-            _cache.put(f"price_{y_str}", year_data)
+
+            existing = _cache.get(f"price_{y_str}")
+            merged = _merge_price_year_cache(existing, year_data)
+            if merged.empty:
+                logger.warning("  %s: 유효한 데이터 없음, 건너뜀", y_str)
+                continue
+            _cache.put(f"price_{y_str}", merged)
+
+            previous_info = meta["years"].get(y_str, {})
+            if not isinstance(previous_info, dict):
+                previous_info = {}
+            try:
+                merged_req_start = min(y_start, _to_date(previous_info["req_start"]))
+            except (KeyError, TypeError, ValueError):
+                merged_req_start = y_start
+            try:
+                merged_req_end = max(y_end, _to_date(previous_info["req_end"]))
+            except (KeyError, TypeError, ValueError):
+                merged_req_end = y_end
             meta["years"][y_str] = {
-                "req_start": y_start.isoformat(),
-                "req_end": y_end.isoformat(),
+                "req_start": merged_req_start.isoformat(),
+                "req_end": merged_req_end.isoformat(),
+                "tickers": sorted(merged["ticker"].astype(str).unique()),
             }
 
     # Cache hit: nothing to download
@@ -390,9 +600,20 @@ def get_price_data(
     else:
         result = pd.concat(frames, ignore_index=True)
         result["date"] = pd.to_datetime(result["date"])
-        result = result.set_index(["ticker", "date"]).sort_index()
-        # Filter by requested range (cache may have wider data)
-        result = result.loc[(slice(None), slice(start_date, end_date)), :]
+        # Cache files can contain a wider range, other tickers, or duplicate
+        # rows from an older incremental download.  Filter and de-duplicate
+        # before constructing the MultiIndex so every (ticker, date) key is
+        # unique in the public result.
+        result["ticker"] = result["ticker"].astype(str)
+        result = result[
+            result["ticker"].isin(requested_tickers)
+            & result["date"].between(pd.Timestamp(start_date), pd.Timestamp(end_date))
+        ]
+        result = (
+            result.drop_duplicates(subset=["ticker", "date"], keep="last")
+            .set_index(["ticker", "date"])
+            .sort_index()
+        )
 
         # 캐시된 mcap이 모두 0이면 발행주식수 × 종가로 재계산
         mcap_sum = int(result["mcap"].sum()) if "mcap" in result.columns else 0
@@ -1531,6 +1752,7 @@ def get_price_data_with_lookback(
     start: str | date,
     end: str | date,
     lookback_days: int = 252,
+    required_observations: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """백테스트 가격 데이터 + 모멘텀 롤백용 선행 가격 데이터를 가져옵니다.
 
@@ -1544,21 +1766,68 @@ def get_price_data_with_lookback(
         백테스트 종료일.
     lookback_days : int
         모멘텀 계산을 위한 선행 일수 (기본 252, 약 1년).
+    required_observations : int, optional
+        Minimum number of prior trading observations needed by the factor
+        configuration.  If omitted, ``lookback_days`` is used.  The calendar
+        request is deliberately wider than this trading-day requirement.
 
     Returns
     -------
     tuple[pd.DataFrame, pd.DataFrame]
         (backtest_range_data, lookback_range_data).
         둘 다 MultiIndex ``(ticker, date)`` DataFrame.
+
+    Notes
+    -----
+    ``lookback_range_data`` is warmup-only data.  Its interval is
+    ``[lookback_start, start)``: the backtest start date belongs only to the
+    measured range, never to both returned frames.  Callers must use
+    ``backtest_range_data`` for snapshots/trades and may use the warmup frame
+    only when calculating historical factors.
     """
     start_date = _to_date(start)
     from datetime import timedelta
 
-    lookback_start = start_date - timedelta(days=lookback_days + 30)
+    required_rows = max(
+        int(required_observations if required_observations is not None else lookback_days),
+        1,
+    )
+    # Korean exchange holidays make a small fixed calendar add-on unreliable
+    # for a trading-day shift.  Two calendar days per required observation is
+    # intentionally conservative and still keeps the measured interval
+    # separate from warmup below.
+    calendar_days = max(lookback_days + 30, required_rows * 2)
+    lookback_start = start_date - timedelta(days=calendar_days)
     end_date = _to_date(end)
 
     backtest_data = get_price_data(tickers, start_date, end_date)
-    lookback_data = get_price_data(tickers, lookback_start, start_date)
+    # The backtest start is inclusive in ``backtest_data``.  Exclude it from
+    # warmup to prevent duplicate (ticker, date) rows when the frames are
+    # concatenated for factor computation.
+    lookback_end = start_date - timedelta(days=1)
+    lookback_data = get_price_data(tickers, lookback_start, lookback_end)
+
+    if not lookback_data.empty:
+        warmup_tickers = lookback_data.index.get_level_values("ticker").astype(str)
+        rows_by_ticker = warmup_tickers.value_counts()
+        insufficient = [
+            str(ticker) for ticker in tickers
+            if int(rows_by_ticker.get(str(ticker), 0)) < required_rows
+        ]
+        if insufficient:
+            logger.warning(
+                "모멘텀 warmup 부족: %d/%d 티커가 %d개 거래 관측치 미만입니다 (예: %s)",
+                len(insufficient),
+                len(set(map(str, tickers))),
+                required_rows,
+                ", ".join(insufficient[:5]),
+            )
+    elif tickers:
+        logger.warning(
+            "모멘텀 warmup 데이터가 비어 있습니다: %d개 티커에 %d개 거래 관측치 필요",
+            len(set(map(str, tickers))),
+            required_rows,
+        )
 
     logger.info(
         "가격 데이터 로드: backtest=%d행, lookback=%d행",

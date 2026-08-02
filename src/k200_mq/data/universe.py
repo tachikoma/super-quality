@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -133,18 +133,23 @@ def get_kospi200_history(
         컬럼: as_of, ticker.
         각 리밸런싱 일자에 해당하는 KOSPI 200 종목 목록.
     """
-    from pandas.tseries.offsets import MonthEnd, QuarterEnd
-
     ts_start = pd.Timestamp(start)
     ts_end = pd.Timestamp(end)
 
-    rebalance_offsets = MonthEnd() if rebalance_freq == "M" else QuarterEnd()
-    dates = pd.date_range(ts_start, ts_end, freq="D").date
-    rebalance_dates = sorted(
-        {d + rebalance_offsets for d in dates if (d + rebalance_offsets).date() <= ts_end.date()}
-    )
-    rebalance_dates = [d.date() if hasattr(d, 'date') else d for d in rebalance_dates]
-    rebalance_dates = [d for d in rebalance_dates if d >= ts_start.date()]
+    # Generate calendar period ends once, then roll each one back to the
+    # latest weekday.  The old ``every day + MonthEnd`` construction produced
+    # duplicate candidates and left weekend month-ends unusable as trading
+    # signals.  The engine performs a final roll against the actual price
+    # calendar, which also handles exchange holidays absent from this simple
+    # weekday calendar.
+    frequency = "ME" if rebalance_freq == "M" else "QE"
+    calendar_ends = pd.date_range(ts_start, ts_end, freq=frequency)
+    rebalance_dates: list[date] = []
+    for calendar_end in calendar_ends:
+        rebalance_date = _last_weekday(calendar_end.date())
+        if ts_start.date() <= rebalance_date <= ts_end.date():
+            rebalance_dates.append(rebalance_date)
+    rebalance_dates = sorted(set(rebalance_dates))
 
     records = []
     for rd in rebalance_dates:
@@ -156,6 +161,19 @@ def get_kospi200_history(
         return pd.DataFrame(columns=["as_of", "ticker"])
 
     return pd.DataFrame(records)
+
+
+def _last_weekday(value: date) -> date:
+    """Return the last weekday on or before *value*.
+
+    This is the calendar-level fallback used before the price loader is
+    available.  ``PortfolioRebalanceEngine`` additionally maps the result to
+    the last actual price bar, covering exchange holidays as well.
+    """
+    timestamp = pd.Timestamp(value)
+    while timestamp.weekday() >= 5:
+        timestamp -= timedelta(days=1)
+    return timestamp.date()
 
 
 def is_kospi200_constituent(ticker: str, as_of: date) -> bool:

@@ -12,8 +12,10 @@ build/
 
 # Data science / project
 data/raw/
+# data/universe/
 data/processed/
 outputs/
+outputs_k200mq/
 docs_cache/
 
 # Environment variables
@@ -27,3 +29,4 @@ docs_cache/
 .omo/*
 !.omo/evidence/
 !.omo/plans/
+.slim/deepwork/

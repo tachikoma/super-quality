@@ -105,6 +105,15 @@ src/k200_mq/
 └── reporting/
 ```
 
+## 리밸런싱 준비 게이트
+
+`run_manifest.json`의 `rebalance_readiness`는 모멘텀 warmup으로 인한 초기
+리밸런싱 건너뜀을 기록합니다. `first_scheduled_rebalance`는 측정 기간의
+첫 예정일이고, `first_ready_rebalance`는 `min(TOP_N, 해당 유니버스 규모)`개의
+유한한 모멘텀 후보가 처음 확보된 예정일입니다. 실제 엔진 거래는
+`measured_trading_readiness_date` 이후에만 시작되며, 그 전의
+`skipped_not_ready_rebalances`와 커버리지가 함께 저장됩니다.
+
 ## 학술 근거
 
 - Kang, Kwon & Park (2014): 한국 대형주에서 외부인 흐름 → 모멘텀 효과

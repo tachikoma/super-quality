@@ -54,15 +54,23 @@ class RegimeFactor(Factor):
             ``cum_return_20d``, ``regime`` (True = Bullish, False = Bearish),
             ``position_scale`` (1.0 or reduction).
         """
-        df = data[["close"]].copy()
-        if "date" not in df.columns:
-            if isinstance(data.index, pd.DatetimeIndex):
-                df["date"] = df.index
-            else:
-                df["date"] = pd.date_range(
-                    start=df.index[0], periods=len(df), freq="B"
-                )
+        # Keep the source dates before reducing the frame to the columns used
+        # by the calculation.  In particular, ``main`` passes
+        # ``index_raw.reset_index()`` here; dropping ``date`` and then falling
+        # back to a RangeIndex silently manufactured 1970 dates and left the
+        # measured regime map empty.
+        if "date" in data.columns:
+            df = data[["date", "close"]].copy()
+        elif isinstance(data.index, pd.RangeIndex):
+            if len(data):
+                raise ValueError("data must contain a 'date' column or a date-like index")
+            df = data[["close"]].copy()
+            df["date"] = pd.DatetimeIndex([])
+        else:
+            df = data[["close"]].copy()
+            df["date"] = data.index
 
+        df["date"] = pd.to_datetime(df["date"])
         df = df.reset_index(drop=True)
 
         # MA200 계산
@@ -78,11 +86,20 @@ class RegimeFactor(Factor):
             .apply(lambda x: (1 + x).prod() - 1, raw=True)
         )
 
-        # 리짓 판단
-        df["regime"] = (df["close"] > df["ma"]) & (df["cum_return_20d"] > 0)
-        df["regime"] = df["regime"].fillna(False)
+        # 리짓 판단.  Rows without a complete MA/return warmup are unknown,
+        # not bearish.  Keeping them as NA prevents a short index download
+        # from silently applying the bearish reduction to the start of a
+        # measured backtest.
+        valid = df["ma"].notna() & df["cum_return_20d"].notna()
+        df["regime"] = pd.Series(pd.NA, index=df.index, dtype="boolean")
+        df.loc[valid, "regime"] = (
+            (df.loc[valid, "close"] > df.loc[valid, "ma"])
+            & (df.loc[valid, "cum_return_20d"] > 0)
+        )
 
-        # 포지션 스케일
+        # Missing regime values are intentionally left without a scale.  The
+        # caller treats a missing map entry as neutral (1.0), rather than as a
+        # bearish reduction.
         df["position_scale"] = df["regime"].map({True: 1.0, False: reduction})
 
         return df[["date", "close", "ma", "daily_return", "cum_return_20d", "regime", "position_scale"]]

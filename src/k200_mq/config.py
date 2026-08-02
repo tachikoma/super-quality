@@ -55,6 +55,10 @@ class BacktestConfig(BaseSettings):
         default=0.001,
         description="슬리피지 가정 (0.1%)",
     )
+    SL_STOP_LOSS: float = Field(
+        default=-0.15,
+        description="고점 대비 trailing stop 기준 (기본 -15%)",
+    )
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent.parent / ".env",
