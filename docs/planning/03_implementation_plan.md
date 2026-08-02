@@ -176,7 +176,7 @@ for each trading day:
 - 유효 subperiod만 사용한 기하 평균 수익률과 worst MDD
 - 비어 있거나 유효하지 않은 subperiod의 명시적 상태
 
-### 4.3 True expanding-window Walk-Forward (Phase 1 pure core)
+### 4.3 True expanding-window Walk-Forward
 현재 pure core는 다음의 인접한 고정 fold 일정을 사용합니다.
 - Training window: 2015–2019 (expanding)
 - Test window: 2020, 2021, 2022, 2023, 2024
@@ -189,8 +189,9 @@ for each trading day:
 Pure orchestration runner는 두 pass로 동작합니다. 먼저 모든 fold의 train 후보
 평가와 선택을 완료하고 JSON 경계에서 동결한 뒤, 두 번째 pass에서 선택된 후보의
 test evaluator를 호출합니다. 따라서 test callback의 외부 상태 변이가 이후 train
-평가에 영향을 주지 않습니다. 이 runner는 live data/전략 pipeline에 아직 연결되지
-않았으며, 실제 provenance validator 결과가 전달되기 전까지 분류는
+평가에 영향을 주지 않습니다. `true-walkforward` CLI는 준비된 입력을 각
+train/test interval로 잘라 이 runner에 전달하며, 준비된 거래일이 있으면 exact
+OOS coverage를 요구합니다. 실제 provenance validator 결과가 전달되기 전까지 분류는
 `mechanical_expanding_walk_forward_non_pit`으로 고정합니다. 임의의 PIT flag나
 synthetic evidence로 `validated_expanding_walk_forward_pit`를 만들지 않습니다.
 

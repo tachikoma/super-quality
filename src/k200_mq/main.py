@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import hashlib
 import json
 import logging
@@ -25,6 +26,17 @@ from k200_mq.core.analysis.metrics import PerformanceMetrics
 from k200_mq.validation.prepared import (
     PreparedK200MQInputs,
     execute_engine_interval,
+)
+from k200_mq.validation.runner import (
+    TestEvaluation,
+    TrainEvaluation,
+    WalkForwardResult,
+    run_walk_forward,
+)
+from k200_mq.validation.walk_forward import (
+    MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+    get_candidate_library,
+    get_expanding_window_folds,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +58,17 @@ _CREDENTIAL_FIELD_NAMES = frozenset({
     "SECRET_KEY",
     "TOKEN",
 })
+
+_TRUE_WALKFORWARD_START = date(2015, 1, 1)
+_TRUE_WALKFORWARD_END = date(2024, 12, 31)
+_TRUE_WALKFORWARD_WARMUP_DAYS = 252
+_TRUE_WALKFORWARD_LIMITATIONS = (
+    "Mechanical non-PIT walk-forward only; this is not a validated performance claim.",
+    "The prepared universe and quality inputs retain their current provenance and coverage limitations.",
+    "Static/current market-cap ranking and non-filing-date inputs are not historical PIT evidence.",
+    "Candidates are restricted to safe runtime overrides; factor preparation is not recomputed per candidate.",
+    "Exact OOS date coverage is enforced when the prepared trading calendar is available; otherwise structural and non-empty OOS checks apply.",
+)
 
 
 def _is_secret_field(name: str) -> bool:
@@ -316,6 +339,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="PIT 유니버스와 filing-date 재무 데이터가 없으면 중단",
     )
 
+    true_walkforward_parser = sub.add_parser(
+        "true-walkforward",
+        aliases=["expanding-walkforward"],
+        help=(
+            "기계적 non-PIT expanding walk-forward 실행 "
+            "(검증된 성과 주장 아님)"
+        ),
+        description=(
+            "Prepared K200MQ 입력을 한 번만 사용해 train-only 후보 선택과 "
+            "expanding test를 실행합니다. 기계적 non-PIT 결과이며 검증된 "
+            "성과 주장이 아닙니다."
+        ),
+    )
+    true_walkforward_parser.add_argument(
+        "--dart-api-key",
+        default=argparse.SUPPRESS,
+        help="OpenDartReader API 키 (재무 입력 준비용)",
+    )
+    true_walkforward_parser.add_argument(
+        "--output",
+        "-o",
+        default=argparse.SUPPRESS,
+        help="결과 출력 디렉토리 (기본값: outputs_k200mq)",
+    )
+    true_walkforward_parser.add_argument(
+        "--strict-pit",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="현재 non-PIT 입력을 실행 전에 거부 (기계적 WF에는 사용 불가)",
+    )
+
     return parser
 
 
@@ -331,6 +385,23 @@ def _build_config(args: argparse.Namespace) -> Any:
             config_kwargs["TOP_N"] = args.top_n
         if hasattr(args, "rebalance_freq"):
             config_kwargs["REBALANCE_FREQ"] = args.rebalance_freq
+        if getattr(args, "strict_pit", False):
+            config_kwargs["STRICT_PIT_VALIDATION"] = True
+        if hasattr(args, "dart_api_key") and args.dart_api_key:
+            config_kwargs["DART_API_KEY"] = args.dart_api_key
+        return K200MQConfig(**config_kwargs)
+
+    if getattr(args, "command", None) in {
+        "true-walkforward",
+        "expanding-walkforward",
+    }:
+        config_kwargs = {
+            "START_DATE": _TRUE_WALKFORWARD_START.isoformat(),
+            "END_DATE": _TRUE_WALKFORWARD_END.isoformat(),
+            "PRINT_SUMMARY": False,
+        }
+        if hasattr(args, "output"):
+            config_kwargs["OUTPUT_DIR"] = args.output
         if getattr(args, "strict_pit", False):
             config_kwargs["STRICT_PIT_VALIDATION"] = True
         if hasattr(args, "dart_api_key") and args.dart_api_key:
@@ -1431,6 +1502,650 @@ _execute_engine_interval = execute_engine_interval
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Mechanical expanding walk-forward integration
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _true_walkforward_json_safe(value: Any) -> Any:
+    """Convert pandas/numpy values into strict, deterministic JSON values."""
+    if value is None or value is pd.NA or value is pd.NaT:
+        return None
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return _true_walkforward_json_safe(value.item())
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, (int, str, bool)):
+        return value
+    if isinstance(value, pd.DataFrame):
+        return [
+            _true_walkforward_json_safe(record)
+            for record in value.to_dict(orient="records")
+        ]
+    if isinstance(value, pd.Series):
+        return [
+            {
+                "date": _true_walkforward_json_safe(index),
+                "value": _true_walkforward_json_safe(item),
+            }
+            for index, item in value.items()
+        ]
+    if isinstance(value, np.ndarray):
+        return [_true_walkforward_json_safe(item) for item in value.tolist()]
+    if isinstance(value, Mapping):
+        return {
+            str(key): _true_walkforward_json_safe(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_true_walkforward_json_safe(item) for item in value]
+    if isinstance(value, set):
+        return sorted(
+            (_true_walkforward_json_safe(item) for item in value),
+            key=str,
+        )
+    return str(value)
+
+
+def _completed_exit_count(trade_log: Any) -> int:
+    """Count exits with the same return-log rule used by robustness."""
+    if not isinstance(trade_log, pd.DataFrame) or "return_pct" not in trade_log:
+        return 0
+    return int(trade_log["return_pct"].notna().sum())
+
+
+def _evaluate_interval_result(
+    results: Any,
+    *,
+    returns: pd.Series | None = None,
+) -> dict[str, Any]:
+    """Extract shared PerformanceMetrics values from one engine interval."""
+    if not isinstance(results, dict):
+        return {
+            "train_sharpe": None,
+            "n_exits": 0,
+            "valid": False,
+            "status": "invalid_engine_result",
+            "reason": "engine result is not a mapping",
+            "metrics": {},
+        }
+
+    daily_returns = returns if returns is not None else results.get("daily_returns")
+    if not isinstance(daily_returns, pd.Series) or daily_returns.empty:
+        return {
+            "train_sharpe": None,
+            "n_exits": _completed_exit_count(results.get("trade_log")),
+            "valid": False,
+            "status": "empty_daily_returns",
+            "reason": "daily returns are empty or missing",
+            "metrics": {},
+        }
+
+    numeric_returns = pd.to_numeric(daily_returns, errors="coerce")
+    if numeric_returns.isna().any():
+        reason = "daily returns contain missing or non-numeric values"
+        return {
+            "train_sharpe": None,
+            "n_exits": _completed_exit_count(results.get("trade_log")),
+            "valid": False,
+            "status": "invalid_daily_returns",
+            "reason": reason,
+            "metrics": {},
+        }
+    if not np.isfinite(numeric_returns.to_numpy(dtype=float)).all():
+        reason = "daily returns contain non-finite values"
+        return {
+            "train_sharpe": None,
+            "n_exits": _completed_exit_count(results.get("trade_log")),
+            "valid": False,
+            "status": "invalid_daily_returns",
+            "reason": reason,
+            "metrics": {},
+        }
+    if (numeric_returns <= -1.0).any():
+        reason = "daily returns contain a loss of 100% or more"
+        return {
+            "train_sharpe": None,
+            "n_exits": _completed_exit_count(results.get("trade_log")),
+            "valid": False,
+            "status": "invalid_daily_returns",
+            "reason": reason,
+            "metrics": {},
+        }
+    if isinstance(numeric_returns.index, pd.DatetimeIndex) and numeric_returns.index.isna().any():
+        reason = "daily returns contain invalid dates"
+        return {
+            "train_sharpe": None,
+            "n_exits": _completed_exit_count(results.get("trade_log")),
+            "valid": False,
+            "status": "invalid_daily_returns",
+            "reason": reason,
+            "metrics": {},
+        }
+
+    metric_returns = numeric_returns.copy()
+    if not isinstance(metric_returns.index, pd.DatetimeIndex):
+        metric_returns.index = pd.bdate_range("2000-01-03", periods=len(metric_returns))
+    metrics = PerformanceMetrics(metric_returns).compute_all(
+        trade_log=results.get("trade_log")
+    )
+    sharpe = float(metrics["sharpe_ratio"])
+    if not np.isfinite(sharpe):
+        return {
+            "train_sharpe": None,
+            "n_exits": _completed_exit_count(results.get("trade_log")),
+            "valid": False,
+            "status": "invalid_non_finite_sharpe",
+            "reason": "PerformanceMetrics returned a non-finite Sharpe",
+            "metrics": metrics,
+        }
+    return {
+        "train_sharpe": sharpe,
+        "n_exits": _completed_exit_count(results.get("trade_log")),
+        "valid": True,
+        "status": "valid",
+        "reason": "",
+        "metrics": metrics,
+    }
+
+
+def _restrict_interval_returns(
+    daily_returns: Any,
+    measured_start: date,
+    measured_end: date,
+) -> pd.Series:
+    """Return a detached daily-return series restricted to one test fold."""
+    if not isinstance(daily_returns, pd.Series) or daily_returns.empty:
+        return pd.Series(dtype=float)
+    dates = pd.DatetimeIndex(pd.to_datetime(daily_returns.index, errors="coerce"))
+    if dates.isna().any():
+        return pd.Series(daily_returns.to_numpy(copy=True), index=dates)
+    mask = (dates >= pd.Timestamp(measured_start)) & (dates <= pd.Timestamp(measured_end))
+    restricted = daily_returns.loc[mask].copy(deep=True)
+    restricted.index = dates[mask]
+    return restricted
+
+
+def _true_walkforward_train_evaluator(
+    prepared: PreparedK200MQInputs,
+):
+    """Build a train callback that only executes the prepared interval adapter."""
+    def evaluate(fold: Any, candidate: Any, candidate_config: Any) -> TrainEvaluation:
+        try:
+            results = execute_engine_interval(
+                prepared,
+                candidate_config,
+                measured_start=fold.train_start,
+                measured_end=fold.train_end,
+                active_trading_start=prepared.active_trading_start,
+            )
+        except Exception as exc:  # noqa: BLE001 - recorded as an invalid score
+            return TrainEvaluation(
+                train_sharpe=None,
+                n_exits=0,
+                valid=False,
+                status="train_engine_error",
+                metrics={"error": str(exc)},
+            )
+
+        evaluation = _evaluate_interval_result(results)
+        return TrainEvaluation(
+            train_sharpe=evaluation["train_sharpe"],
+            n_exits=evaluation["n_exits"],
+            valid=evaluation["valid"],
+            status=evaluation["status"],
+            metrics=_true_walkforward_json_safe(evaluation["metrics"]),
+        )
+
+    return evaluate
+
+
+def _true_walkforward_test_evaluator(
+    prepared: PreparedK200MQInputs,
+):
+    """Build a test callback for the selected candidate and test interval only."""
+    def evaluate(fold: Any, candidate: Any, candidate_config: Any) -> TestEvaluation:
+        try:
+            results = execute_engine_interval(
+                prepared,
+                candidate_config,
+                measured_start=fold.test_start,
+                measured_end=fold.test_end,
+                active_trading_start=prepared.active_trading_start,
+            )
+        except Exception as exc:  # noqa: BLE001 - recorded as an invalid fold
+            return TestEvaluation(
+                returns={},
+                metrics={"error": str(exc)},
+                results={},
+                valid=False,
+                status="test_engine_error",
+                reason=str(exc),
+            )
+
+        raw_test_returns = (
+            results.get("daily_returns") if isinstance(results, dict) else None
+        )
+        test_returns = _restrict_interval_returns(
+            raw_test_returns,
+            fold.test_start,
+            fold.test_end,
+        )
+        # Do not hide adapter output outside the test interval.  The runner's
+        # out-of-bound contract must see those dates and reject the fold.
+        if isinstance(raw_test_returns, pd.Series) and not raw_test_returns.empty:
+            raw_dates = pd.DatetimeIndex(
+                pd.to_datetime(raw_test_returns.index, errors="coerce")
+            )
+            if not raw_dates.isna().any() and (
+                (raw_dates < pd.Timestamp(fold.test_start)).any()
+                or (raw_dates > pd.Timestamp(fold.test_end)).any()
+            ):
+                test_returns = raw_test_returns.copy(deep=True)
+                test_returns.index = raw_dates
+        evaluation = _evaluate_interval_result(results, returns=test_returns)
+        serializable_results = (
+            {
+                str(key): _true_walkforward_json_safe(value)
+                for key, value in results.items()
+                if key != "daily_returns"
+            }
+            if isinstance(results, dict)
+            else {}
+        )
+        return TestEvaluation(
+            returns=test_returns,
+            metrics=_true_walkforward_json_safe(evaluation["metrics"]),
+            results=serializable_results,
+            valid=evaluation["valid"],
+            status=evaluation["status"],
+            reason=evaluation["reason"],
+        )
+
+    return evaluate
+
+
+def _expected_true_walkforward_test_dates(
+    prepared: PreparedK200MQInputs,
+    folds: tuple[Any, ...],
+) -> dict[int, tuple[date, ...]]:
+    """Build exact OOS calendars from prepared price coverage when available."""
+    if not prepared.measured_dates:
+        return {}
+    measured_dates = tuple(
+        sorted({pd.Timestamp(value).floor("D").date() for value in prepared.measured_dates})
+    )
+    return {
+        fold_number: tuple(
+            point_date
+            for point_date in measured_dates
+            if fold.test_start <= point_date <= fold.test_end
+        )
+        for fold_number, fold in enumerate(folds, start=1)
+    }
+
+
+def _true_walkforward_summary_rows(result: WalkForwardResult) -> list[dict[str, Any]]:
+    """Build stable one-row-per-fold summary records."""
+    rows: list[dict[str, Any]] = []
+    base_config = _true_walkforward_json_safe(result.base_runtime_config)
+    preparation_context = _true_walkforward_json_safe(
+        result.preparation_manifest_context
+    )
+    git_state = _true_walkforward_json_safe(result.git_state)
+    for fold_result in result.folds:
+        fold = fold_result.fold
+        metrics = dict(fold_result.test_metrics)
+        rows.append({
+            "fold": fold_result.fold_number,
+            "train_start": fold.train_start.isoformat(),
+            "train_end": fold.train_end.isoformat(),
+            "test_start": fold.test_start.isoformat(),
+            "test_end": fold.test_end.isoformat(),
+            "classification": fold_result.classification,
+            "selected_candidate_id": fold_result.selected_candidate_id,
+            "selected_config_hash": fold_result.selected_config_hash,
+            "effective_config_hash": fold_result.selected_effective_config_hash,
+            "selected_effective_config_hash": fold_result.selected_effective_config_hash,
+            "base_runtime_config_hash": result.base_runtime_config_hash,
+            "base_runtime_config": json.dumps(
+                base_config,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "effective_config": json.dumps(
+                _true_walkforward_json_safe(fold_result.selected_effective_config),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "effective_candidate_configs": json.dumps(
+                _true_walkforward_json_safe(fold_result.effective_candidate_configs),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "effective_candidate_config_hashes": json.dumps(
+                _true_walkforward_json_safe(
+                    fold_result.effective_candidate_config_hashes
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "git_state": json.dumps(
+                git_state,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "preparation_manifest_context": json.dumps(
+                preparation_context,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "valid": fold_result.valid,
+            "status": fold_result.status,
+            "error": fold_result.error,
+            "train_scores": json.dumps(
+                [score.to_dict() for score in fold_result.train_scores],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "test_total_return": metrics.get("total_return"),
+            "test_cagr": metrics.get("cagr"),
+            "test_sharpe": metrics.get("sharpe_ratio"),
+            "test_max_drawdown": metrics.get("max_drawdown"),
+            "test_total_trades": metrics.get("total_trades"),
+            "n_test_returns": len(fold_result.test_returns),
+            "expected_oos_dates": json.dumps(
+                [item.isoformat() for item in fold_result.expected_oos_dates],
+                separators=(",", ":"),
+            ),
+            "returned_oos_dates": json.dumps(
+                [item.isoformat() for item in fold_result.returned_oos_dates],
+                separators=(",", ":"),
+            ),
+        })
+    return rows
+
+
+def _save_true_walkforward_artifacts(
+    result: WalkForwardResult,
+    prepared: PreparedK200MQInputs,
+    config: Any,
+) -> Path:
+    """Save deterministic true-WF artifacts without writing fold intermediates."""
+    output_dir = Path(config.OUTPUT_DIR) / "true_walkforward"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = result.to_dict()
+    manifest.update({
+        "command": "true-walkforward",
+        "classification": MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+        "claim": "mechanical non-PIT walk-forward; not a validated performance claim",
+        "limitations": list(_TRUE_WALKFORWARD_LIMITATIONS),
+        "base_runtime_config": _true_walkforward_json_safe(
+            result.base_runtime_config
+        ),
+        "base_runtime_config_hash": result.base_runtime_config_hash,
+        "git": _true_walkforward_json_safe(result.git_state),
+        "preparation_manifest_context": _true_walkforward_json_safe(
+            result.preparation_manifest_context
+        ),
+        "prepared_inputs": {
+            "warmup_start": _true_walkforward_json_safe(prepared.warmup_start),
+            "warmup_end": _true_walkforward_json_safe(prepared.warmup_end),
+            "measured_start": _true_walkforward_json_safe(prepared.measured_start),
+            "measured_end": _true_walkforward_json_safe(prepared.measured_end),
+            "active_trading_start": _true_walkforward_json_safe(
+                prepared.active_trading_start,
+            ),
+            "provenance": _true_walkforward_json_safe(dict(prepared.provenance)),
+            "coverage": _true_walkforward_json_safe(dict(prepared.coverage)),
+            "manifest_context": _true_walkforward_json_safe(
+                dict(prepared.manifest_context)
+            ),
+        },
+        "selected_config_hashes_by_fold": {
+            str(fold.fold_number): fold.selected_config_hash
+            for fold in result.folds
+        },
+        "selected_candidates_by_fold": {
+            str(fold.fold_number): fold.selected_candidate_id
+            for fold in result.folds
+        },
+        "effective_candidate_configs_by_fold": _true_walkforward_json_safe(
+            result.effective_candidate_configs_by_fold
+        ),
+        "effective_candidate_config_hashes_by_fold": _true_walkforward_json_safe(
+            result.effective_candidate_config_hashes_by_fold
+        ),
+    })
+    manifest_path = output_dir / "selection_and_folds.json"
+    with manifest_path.open("w", encoding="utf-8") as manifest_file:
+        json.dump(
+            _true_walkforward_json_safe(manifest),
+            manifest_file,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        manifest_file.write("\n")
+
+    oos_path = output_dir / "oos_returns.csv"
+    oos_frame = pd.DataFrame(
+        result.to_csv_rows(),
+        columns=["fold", "date", "daily_return"],
+    )
+    oos_frame.to_csv(oos_path, index=False)
+
+    summary_path = output_dir / "summary.csv"
+    summary_columns = [
+        "fold", "train_start", "train_end", "test_start", "test_end",
+        "classification", "selected_candidate_id", "selected_config_hash",
+        "effective_config_hash",
+        "selected_effective_config_hash", "base_runtime_config_hash",
+        "base_runtime_config", "effective_config", "effective_candidate_configs",
+        "effective_candidate_config_hashes", "git_state",
+        "preparation_manifest_context",
+        "valid", "status", "error", "train_scores", "test_total_return",
+        "test_cagr", "test_sharpe", "test_max_drawdown", "test_total_trades",
+        "n_test_returns", "expected_oos_dates", "returned_oos_dates",
+    ]
+    pd.DataFrame(
+        _true_walkforward_summary_rows(result),
+        columns=summary_columns,
+    ).to_csv(summary_path, index=False)
+    logger.info("true-walkforward artifacts 저장: %s", output_dir)
+    return output_dir
+
+
+def _save_true_walkforward_failure_artifact(
+    prepared: PreparedK200MQInputs | None,
+    config: Any,
+    error: str,
+) -> Path:
+    """Persist a diagnostic manifest when orchestration fails early."""
+    output_dir = Path(config.OUTPUT_DIR) / "true_walkforward"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    base_runtime_config = _manifest_config(
+        prepared.runtime_config if prepared is not None else config
+    )
+    base_runtime_config_hash = hashlib.sha256(
+        json.dumps(
+            base_runtime_config,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    diagnostic = {
+        "command": "true-walkforward",
+        "classification": MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+        "status": "invalid",
+        "valid": False,
+        "error": error,
+        "claim": "mechanical non-PIT walk-forward; not a validated performance claim",
+        "limitations": list(_TRUE_WALKFORWARD_LIMITATIONS),
+        "base_runtime_config": base_runtime_config,
+        "base_runtime_config_hash": base_runtime_config_hash,
+        "git": _git_manifest_state(),
+        "preparation_manifest_context": _true_walkforward_json_safe(
+            dict(prepared.manifest_context) if prepared is not None else {}
+        ),
+        "prepared_inputs": {
+            "measured_start": _true_walkforward_json_safe(
+                prepared.measured_start if prepared is not None else None
+            ),
+            "measured_end": _true_walkforward_json_safe(
+                prepared.measured_end if prepared is not None else None
+            ),
+            "provenance": _true_walkforward_json_safe(
+                dict(prepared.provenance) if prepared is not None else {}
+            ),
+            "coverage": _true_walkforward_json_safe(
+                dict(prepared.coverage) if prepared is not None else {}
+            ),
+        },
+    }
+    path = output_dir / "selection_and_folds.json"
+    with path.open("w", encoding="utf-8") as diagnostic_file:
+        json.dump(
+            _true_walkforward_json_safe(diagnostic),
+            diagnostic_file,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        diagnostic_file.write("\n")
+    pd.DataFrame(
+        [{
+            "status": "invalid",
+            "valid": False,
+            "error": error,
+            "base_runtime_config_hash": base_runtime_config_hash,
+            "base_runtime_config": json.dumps(
+                diagnostic["base_runtime_config"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "git_state": json.dumps(
+                diagnostic["git"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "preparation_manifest_context": json.dumps(
+                diagnostic["preparation_manifest_context"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }]
+    ).to_csv(output_dir / "summary.csv", index=False)
+    pd.DataFrame(columns=["fold", "date", "daily_return"]).to_csv(
+        output_dir / "oos_returns.csv",
+        index=False,
+    )
+    return output_dir
+
+
+def _run_true_walkforward(config: Any) -> WalkForwardResult:
+    """Run mechanical expanding WF over one shared prepared input bundle."""
+    logger.warning(
+        "true-walkforward: mechanical non-PIT WF only; not a validated performance claim"
+    )
+    logger.warning(
+        "현재 universe/quality provenance 및 coverage limitations remain; "
+        "candidate/fold마다 입력을 재준비하지 않습니다"
+    )
+
+    try:
+        prepared = prepare_k200mq_inputs(
+            config,
+            overall_start=_TRUE_WALKFORWARD_START,
+            overall_end=_TRUE_WALKFORWARD_END,
+            warmup_days=_TRUE_WALKFORWARD_WARMUP_DAYS,
+        )
+    except Exception as exc:
+        _save_true_walkforward_failure_artifact(None, config, str(exc))
+        raise RuntimeError(
+            "true-walkforward input preparation failed for the full "
+            f"2015-01-01 through 2024-12-31 range: {exc}"
+        ) from exc
+    if prepared is None:
+        _save_true_walkforward_failure_artifact(None, config, "no prepared inputs")
+        raise RuntimeError(
+            "true-walkforward input preparation returned no prepared inputs for "
+            "the full 2015-01-01 through 2024-12-31 range"
+        )
+
+    if bool(getattr(config, "STRICT_PIT_VALIDATION", False)):
+        _save_true_walkforward_failure_artifact(
+            prepared,
+            config,
+            "true-walkforward rejects --strict-pit before engine execution",
+        )
+        raise RuntimeError(
+            "true-walkforward rejects --strict-pit before engine execution: "
+            "the current prepared universe/quality inputs are mechanical non-PIT "
+            "and cannot support a validated PIT classification"
+        )
+
+    folds = get_expanding_window_folds()
+    candidates = get_candidate_library()
+    try:
+        result = run_walk_forward(
+            folds,
+            candidates,
+            _true_walkforward_train_evaluator(prepared),
+            _true_walkforward_test_evaluator(prepared),
+            classification=MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+            base_runtime_config=prepared.runtime_config,
+            preparation_manifest_context=_true_walkforward_json_safe(
+                dict(prepared.manifest_context)
+            ),
+            git_state=_git_manifest_state(),
+            expected_test_dates=_expected_true_walkforward_test_dates(prepared, folds),
+        )
+    except Exception as exc:
+        _save_true_walkforward_failure_artifact(prepared, config, str(exc))
+        raise RuntimeError(
+            f"true-walkforward failed before a valid result was produced; "
+            f"diagnostic artifacts were saved: {Path(config.OUTPUT_DIR) / 'true_walkforward'}"
+        ) from exc
+    _save_true_walkforward_artifacts(result, prepared, config)
+    if not result.valid:
+        invalid_folds = [
+            f"fold {fold.fold_number}: {fold.status}"
+            for fold in result.folds
+            if not fold.valid
+        ]
+        raise RuntimeError(
+            "true-walkforward produced an invalid result; diagnostic artifacts were "
+            f"saved: {Path(config.OUTPUT_DIR) / 'true_walkforward'}; "
+            + ", ".join(invalid_folds)
+        )
+    logger.warning(
+        "true-walkforward 완료: classification=%s; 결과는 검증된 성과 주장이 아님",
+        MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+    )
+    return result
+
+
+# Compatibility-friendly internal name for callers using the alternate command.
+_run_expanding_walkforward = _run_true_walkforward
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 결과 저장 및 요약
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1623,7 +2338,9 @@ def _print_fold_metrics(
     metric_returns = numeric_returns.copy()
     if not isinstance(metric_returns.index, pd.DatetimeIndex):
         metric_returns.index = pd.bdate_range("2000-01-03", periods=len(metric_returns))
-    shared_metrics = PerformanceMetrics(metric_returns).compute_all()
+    shared_metrics = PerformanceMetrics(metric_returns).compute_all(
+        trade_log=trade_log
+    )
 
     completed = (
         trade_log[trade_log["return_pct"].notna()]
@@ -1878,6 +2595,11 @@ def main() -> None:
         logger.info("Independent subperiod robustness test 시작...")
         _run_subperiod_robustness(config)
         logger.info("Independent subperiod robustness test 완료.")
+
+    elif args.command in {"true-walkforward", "expanding-walkforward"}:
+        config = _build_config(args)
+        _print_config_summary(config)
+        _run_true_walkforward(config)
 
     else:
         parser.print_help()

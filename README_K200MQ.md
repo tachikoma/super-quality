@@ -77,20 +77,35 @@ uv run python -m k200_mq.main robustness
 
 기존 사용자를 위해 `walkforward` 명령도 호환 alias로 유지되지만,
 출력과 `subperiod_robustness_summary.csv`는 독립 subperiod robustness 결과로
-표시됩니다. 학습 구간을 사용하는 expanding-window true walk-forward 검증은
-아직 실행 파이프라인에 연결되지 않았습니다.
+표시됩니다.
 
-### True expanding-window WF core (Phase 1)
+### True expanding-window WF
 
-`src/k200_mq/validation/walk_forward.py`에 2015–2024 고정 5-fold expanding-window
-일정, 실제 의미가 있는 보수적 후보 라이브러리, train-only Sharpe 선택기와
-직렬화 결과가 구현되어 있습니다. 현재 결과는
+`true-walkforward` 명령은 2015–2024 고정 5-fold expanding-window 일정에서
+모든 후보를 train-only로 평가하고 선택된 후보만 각 test interval에서 실행합니다.
+입력은 한 번 준비되지만, 각 train/test 실행 전에 가격·팩터·지수·유니버스·regime
+자료가 해당 interval로 잘립니다. 준비된 가격 거래일이 있으면 test OOS 날짜가
+예상 거래일과 정확히 일치해야 하며, 누락된 결과는 invalid입니다.
+준비된 거래일 달력이 없는 pure-runner 사용에서는 이 exact 검사를 적용할 수
+없으므로 구조적 날짜 검증과 non-empty 검증만 적용됩니다.
+
+```bash
+uv run python -m k200_mq.main true-walkforward --output outputs_k200mq
+```
+
+결과는 `outputs_k200mq/true_walkforward/`에 저장됩니다.
+
+- `selection_and_folds.json`: fold 선택/결과, base runtime config, fold별 유효
+  merged config 및 hash, git state, preparation manifest context
+- `summary.csv`: fold별 test 지표와 위 provenance를 포함한 요약
+- `oos_returns.csv`: 검증된 stitched OOS 일별 수익률
+
+현재 결과는
 `mechanical_expanding_walk_forward_non_pit`으로 분류되며, 이 순수 core는
-아직 `robustness` 동작·전략 실행·live data pipeline에 연결되지 않았습니다.
-`validation/runner.py`도 pure orchestration 전용이며, 모든 fold의 train 선택을
-먼저 동결한 다음 test evaluator를 호출합니다. 따라서 현재 runner는 실제
-provenance validator 출력이 전달되지 않는 한
-`mechanical_expanding_walk_forward_non_pit`만 방출합니다.
+실제 historical constituent와 filing-date provenance validator가 연결되지 않은
+기계적 결과입니다. 따라서 성과 주장이 아니며, strict PIT 분류로 승격되지
+않습니다. `selection_and_folds.json`의 config hash는 후보 파라미터만이 아니라
+비밀을 제외한 비용·자본·제외·팩터 등 유효 runtime config를 포함합니다.
 기본 후보는 `BASE` (TOP_N=20/regime on), `TOP_N_10`, `TOP_N_30`,
 `REGIME_OFF`이며, `BASE`와 동일한 `TOP_N_20` 및 `REGIME_ON`은 중복이므로
 포함하지 않습니다.
@@ -98,6 +113,23 @@ provenance validator 출력이 전달되지 않는 한
 `validated_expanding_walk_forward_pit` 승격은 실제 universe/financial provenance
 validator 결과를 pure runner에 연결하는 후속 작업으로 보류했습니다. 임의의 bool,
 `{"valid": true}` 또는 설명용 evidence는 PIT 근거로 인정하지 않습니다.
+
+#### 완료된 기계적 진단 실행 (2026-08-03)
+
+실행 명령은 `uv run python -m k200_mq.main true-walkforward --output
+/tmp/k200mq_true_wf`입니다. 분류는
+`mechanical_expanding_walk_forward_non_pit`이며, 5개 fold가 모두 유효했고
+모든 fold에서 `TOP_N_10`이 선택되었습니다. OOS는 1,231개 포인트(2020–2024
+test 기간), stitched 누적 수익률은 **+44.6426%**, stitched MDD는
+**-32.5935%**입니다. Fold별 test 수익률은 2020 **+60.4528%**, 2021
+**-2.0225%**, 2022 **-20.2042%**, 2023 **+19.2139%**, 2024
+**-3.2801%**입니다.
+
+산출물은 `/tmp/k200mq_true_wf/true_walkforward/` 아래의
+`selection_and_folds.json`, `summary.csv`, `oos_returns.csv`이며 저장소에
+복사하지 않습니다. 현재 KOSPI 200 membership/ranking은 non-PIT proxy이고
+normalized DART 재무 데이터는 `non_pit_fiscal_period`이므로, 이 결과는
+**validated performance evidence가 아니며 canonical/production 결과도 아닙니다.**
 
 ### 데이터 유효성 계약
 
@@ -191,12 +223,14 @@ src/k200_mq/
 
 - 이 전략은 **베타 (Beta)** 상태입니다. 파이프라인은 완성되었지만 결과는 검증되지 않았습니다.
 - 현재 `robustness` 명령은 고정된 독립 subperiod robustness test입니다. 학습/피팅이
-  포함된 expanding-window true walk-forward CV의 Phase 1 pure core는 구현됐지만,
-  실행 파이프라인에는 아직 연결되지 않았습니다.
+  없는 반면, `true-walkforward`는 학습/선택과 OOS 실행을 분리한 expanding-window
+  command입니다.
 - 백테스트 결과는 아직 검증되지 않았습니다. 리짓 필터 적용, 리밸런싱 일자 통합,
   품질 팩터 커버리지 개선은 구현되었지만, PIT 유니버스와 filing-date 재무 데이터
   한계가 남아 있어 결과를 전략 성과로 해석할 수 없습니다.
 - 기존 Super Quality 2.0 레거시 코드는 `src/super_quality/`에 frozen 상태로 보존됩니다.
+- true-walkforward의 기계적 interval slicing은 future rows가 adapter에 들어가는
+  것을 막지만, 이것만으로 historical PIT 유니버스·재무 provenance가 생기지는 않습니다.
 
 ## 초기 백테스트 결과 (2026-07-26, 2020-2024; P0 수정 전)
 

@@ -90,12 +90,25 @@ uv run python -m k200_mq.main walkforward
 ```
 
 현재 명령은 학습/파라미터 피팅이 없는 independent subperiod robustness
-test이며 true expanding-window walk-forward CV가 아닙니다. True WF의 Phase 1
-pure core와 순수 orchestration runner(`k200_mq.validation.runner`)는 추가되었지만
-아직 실행/live data pipeline에 연결되지 않았습니다. Runner는 모든 fold의 train
-선택을 먼저 동결한 뒤 test 평가를 수행하며, 현재 결과는
-`mechanical_expanding_walk_forward_non_pit`만 허용합니다. 실제 provenance validator
-출력이 연결되기 전에는 PIT 분류를 승격하지 않습니다.
+test이며 true expanding-window walk-forward CV가 아닙니다. True WF는 다음처럼
+별도 실행합니다.
+
+```bash
+uv run python -m k200_mq.main true-walkforward --output outputs_k200mq
+```
+
+`outputs_k200mq/true_walkforward/`에는 `selection_and_folds.json`,
+`summary.csv`, `oos_returns.csv`가 저장됩니다. Selection artifact와 summary에는
+secret-free base runtime config, fold별 effective merged candidate config/hash,
+git state, preparation manifest context가 포함됩니다. 준비된 가격 거래일이
+있을 때 OOS 날짜는 fold의 예상 test 거래일과 정확히 일치해야 하고, truncated
+결과는 invalid로 저장된 뒤 CLI가 nonzero로 종료합니다. 이 실행은 모든 fold의
+train 선택을 먼저 동결한 뒤 test 평가를 수행하며 현재 결과는
+`mechanical_expanding_walk_forward_non_pit`만 허용합니다. 이는 future rows를
+interval adapter에서 제거하는 **기계적 non-PIT 보호**이지 historical PIT
+유니버스나 filing-date provenance를 만들어 주는 기능은 아닙니다.
+준비된 거래일 달력이 없는 pure-runner 호출은 exact 날짜 대신 구조적·non-empty
+검사만 사용합니다.
 
 ### 출력 파일
 
@@ -110,6 +123,9 @@ K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리�
 | `drawdown.png` | 고점 대비 낙폭 차트 |
 | `monthly_returns.png` | 월별 수익률 히트맵 |
 | `subperiod_robustness_summary.csv` | 독립 subperiod robustness 결과 요약 |
+| `true_walkforward/selection_and_folds.json` | expanding-WF 선택, fold 결과 및 provenance |
+| `true_walkforward/summary.csv` | fold별 OOS 지표와 config/git/preparation provenance |
+| `true_walkforward/oos_returns.csv` | exact-coverage 검사를 통과한 stitched OOS 수익률 |
 
 ## 프로젝트 구조
 

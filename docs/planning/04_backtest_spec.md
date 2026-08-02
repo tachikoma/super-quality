@@ -5,8 +5,8 @@
 단일 10년 백테스트는 과적합 위험이 높습니다. 현재 CLI는 고정된 기간을
 나누어 실행하는 **independent subperiod robustness test**를 제공합니다.
 이는 학습/파라미터 피팅이 없는 기간별 견고성 점검이며, true walk-forward
-cross-validation이 아닙니다. 파라미터 최적화와 expanding-window WF는
-향후 작업으로 남아 있습니다.
+cross-validation이 아닙니다. 학습/선택이 포함된 expanding-window WF는
+별도의 `true-walkforward` 명령으로 실행합니다.
 
 ---
 
@@ -24,16 +24,19 @@ cross-validation이 아닙니다. 파라미터 최적화와 expanding-window WF�
 
 각 기간에는 training window가 없으며 전략 파라미터는 고정됩니다.
 
-## True Walk-Forward 설계 (Phase 1 core 구현, 실행 연결 전)
+## True Walk-Forward 실행 규격
 
 고정 fold 일정과 train-only 후보 선택/직렬화 core가
 `src/k200_mq/validation/walk_forward.py`에 구현되었습니다. 이 단계는
-순수한 validation primitive만 제공하며 기존 `robustness`, 전략 실행 및 live
-data pipeline은 변경하지 않습니다. 따라서 현재 분류는
+`true-walkforward`가 준비된 입력을 각 train/test interval로 잘라 실행합니다.
+기존 `robustness`와 별도이며, 현재 분류는
 `mechanical_expanding_walk_forward_non_pit`이며, PIT 데이터 계약을 충족한
 실행만 `validated_expanding_walk_forward_pit`로 분류할 수 있습니다.
 
-실제 fold 실행과 결과 재실행은 후속 통합 작업입니다.
+준비된 거래일 달력이 있으면 test OOS 날짜 exact coverage를 요구하고, truncated
+fold는 invalid로 저장합니다. 결과와 secret-free config/hash, git state,
+preparation context는 `true_walkforward/selection_and_folds.json` 및
+`summary.csv`에 저장됩니다.
 
 ### 기본 구조 (Expanding Window)
 
@@ -45,6 +48,25 @@ Fold 4: Train [2015-01 ~ 2022-12] | Test [2023-01 ~ 2023-12]
 Fold 5: Train [2015-01 ~ 2023-12] | Test [2024-01 ~ 2024-12]
 ```
 
+### 완료된 기계적 진단 실행 (2026-08-03)
+
+명령: `uv run python -m k200_mq.main true-walkforward --output
+/tmp/k200mq_true_wf`
+분류: `mechanical_expanding_walk_forward_non_pit`
+
+5개 fold가 모두 유효했고 모두 `TOP_N_10`을 선택했습니다. 2020–2024 test
+기간의 OOS는 1,231개 포인트이며, stitched 누적 수익률은 **+44.6426%**,
+stitched MDD는 **-32.5935%**입니다. Fold별 test 수익률은 2020
+**+60.4528%**, 2021 **-2.0225%**, 2022 **-20.2042%**, 2023
+**+19.2139%**, 2024 **-3.2801%**입니다.
+
+산출물은 `/tmp/k200mq_true_wf/true_walkforward/`의
+`selection_and_folds.json`, `summary.csv`, `oos_returns.csv`입니다. 현재
+KOSPI 200 membership/ranking은 non-PIT proxy이고 normalized DART 재무 데이터는
+`non_pit_fiscal_period`이므로, 이 진단은 **validated performance evidence가
+아니며 canonical/production 결과로 취급하지 않습니다.** 산출물은 저장소에
+복사하거나 커밋하지 않습니다.
+
 ### Purge & Embargo
 - **현재 상태: deferred/not applicable** — 이 pure core의 후보는 과거 데이터만
   사용하는 backward-only fixed-signal 후보이며 forward label이나 overlapping
@@ -54,7 +76,7 @@ Fold 5: Train [2015-01 ~ 2023-12] | Test [2024-01 ~ 2024-12]
 - 향후 forward label 또는 overlapping outcome을 사용하는 후보 피팅을 연결하면
   해당 누수 구조에 맞춰 fold schedule과 purge/embargo를 먼저 재설계해야 합니다.
 
-### True WF 교차검증 지표 (구현 시 per fold)
+### True WF 교차검증 지표 (per fold)
 
 | 지표 | 목표 | 비고 |
 |------|------|------|
@@ -169,7 +191,8 @@ Fold 5: Train [2015-01 ~ 2023-12] | Test [2024-01 ~ 2024-12]
 현재 robustness CLI가 출력하는 지표는 CAGR, Sharpe, MaxDD, WinRate,
 Tradecount입니다. Profit Factor와 CAGR vs Benchmark는 현재 runner에서
 계산하거나 출력하지 않으며, 향후 거래 지표/벤치마크 구현 후 추가합니다.
-True walk-forward가 구현되면 train/test 결과를 별도 표로 추가합니다.
+True walk-forward 결과는 `true_walkforward/summary.csv`에 train/test 결과를
+별도 fold 행으로 저장합니다.
 
 | Subperiod | Period | CAGR | Sharpe | MaxDD | WinRate | Tradecount |
 |------|--------|------|--------|-------|---------|------------|

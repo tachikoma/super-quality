@@ -1,24 +1,26 @@
 """Pure orchestration for expanding-window walk-forward validation.
 
 The runner intentionally stops at an in-memory result.  It does not know how
-prices, fundamentals, or a portfolio engine are loaded, and it is not wired
-to either of the existing CLI commands.  A caller supplies evaluators for one
-fold and one candidate; the runner supplies the fold, candidate, and an
-immutable configuration mapping.
+prices, fundamentals, or a portfolio engine are loaded.  A caller supplies
+evaluators for one fold and one candidate; the runner supplies the fold,
+candidate, and an immutable configuration mapping.  The true-walkforward CLI
+adapter supplies those evaluators from one prepared K200MQ bundle.
 
 The separation between :mod:`walk_forward` and this module is deliberate:
 ``walk_forward`` owns the schedule and train-only selector, while this module
 owns the order in which those pure pieces are called.
 
-This is orchestration only; it is not connected to the live data/backtest
-pipeline.  Until actual universe and financial provenance validator outputs
-are integrated, the runner emits only the mechanical non-PIT classification.
+This is orchestration only and remains independent of the live data loaders.
+The CLI integration supplies prepared K200MQ inputs, while the runner still
+emits only the mechanical non-PIT classification until actual universe and
+financial provenance validator outputs support a validated PIT result.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+import hashlib
 from datetime import date, datetime
 import json
 import math
@@ -36,6 +38,75 @@ from k200_mq.validation.walk_forward import (
     candidate_config_hash,
     select_candidate,
 )
+
+
+_CREDENTIAL_FIELD_NAMES = frozenset({
+    "ACCESS_TOKEN",
+    "API_KEY",
+    "API_TOKEN",
+    "AUTH_TOKEN",
+    "CLIENT_SECRET",
+    "DART_API_KEY",
+    "KRX_ID",
+    "KRX_PW",
+    "PASSWD",
+    "PASSWORD",
+    "PRIVATE_KEY",
+    "PWD",
+    "SECRET",
+    "SECRET_KEY",
+    "TOKEN",
+})
+
+
+def _is_secret_field(name: object) -> bool:
+    return str(name).upper() in _CREDENTIAL_FIELD_NAMES
+
+
+def _public_mapping(value: Any) -> dict[str, Any]:
+    """Return a secret-free mapping suitable for config provenance."""
+    if value is None:
+        return {}
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        value = model_dump()
+    elif isinstance(value, Mapping):
+        value = dict(value)
+    else:
+        return {}
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): _public_value(item)
+        for key, item in value.items()
+        if not _is_secret_field(key)
+    }
+
+
+def _public_value(value: Any) -> Any:
+    """Recursively remove credential fields from nested provenance values."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): _public_value(item)
+            for key, item in value.items()
+            if not _is_secret_field(key)
+        }
+    if isinstance(value, (list, tuple)):
+        return [_public_value(item) for item in value]
+    return value
+
+
+def _config_hash(config: Mapping[str, Any]) -> str:
+    """Hash the complete public runtime configuration, not just candidate params."""
+    frozen = _freeze_json_value(_public_mapping(config))
+    encoded = json.dumps(
+        _thaw_json_value(frozen),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +217,12 @@ class FoldResult:
     valid: bool
     status: str
     error: str | None = None
+    effective_candidate_configs: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    effective_candidate_config_hashes: Mapping[str, str] = field(default_factory=dict)
+    selected_effective_config: Mapping[str, Any] | None = None
+    selected_effective_config_hash: str | None = None
+    expected_oos_dates: tuple[date, ...] = ()
+    returned_oos_dates: tuple[date, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -155,6 +232,22 @@ class FoldResult:
         )
         object.__setattr__(self, "test_metrics", _freeze_json_value(self.test_metrics))
         object.__setattr__(self, "test_results", _freeze_json_value(self.test_results))
+        object.__setattr__(
+            self,
+            "effective_candidate_configs",
+            _freeze_json_value(self.effective_candidate_configs),
+        )
+        object.__setattr__(
+            self,
+            "effective_candidate_config_hashes",
+            _freeze_json_value(self.effective_candidate_config_hashes),
+        )
+        if self.selected_effective_config is not None:
+            object.__setattr__(
+                self,
+                "selected_effective_config",
+                _freeze_json_value(self.selected_effective_config),
+            )
 
     @property
     def selected_candidate_id(self) -> str | None:
@@ -179,10 +272,28 @@ class FoldResult:
             "status": self.status,
             "error": self.error,
             "candidate_config_hashes": _thaw_json_value(self.candidate_config_hashes),
+            "effective_candidate_config_hashes": _thaw_json_value(
+                self.effective_candidate_config_hashes
+            ),
+            "effective_config_hashes": _thaw_json_value(
+                self.effective_candidate_config_hashes
+            ),
+            "effective_candidate_configs": _thaw_json_value(
+                self.effective_candidate_configs
+            ),
+            "effective_configs": _thaw_json_value(self.effective_candidate_configs),
             "train_scores": scores,
             "selection": selection,
             "selected_candidate": selected,
             "selected_config_hash": self.selected_config_hash,
+            "candidate_config_hash": self.selected_config_hash,
+            "effective_config_hash": self.selected_effective_config_hash,
+            "selected_effective_config_hash": self.selected_effective_config_hash,
+            "selected_effective_config": (
+                _thaw_json_value(self.selected_effective_config)
+                if self.selected_effective_config is not None
+                else None
+            ),
             "train": {
                 "scores": scores,
                 "selection": selection,
@@ -191,6 +302,12 @@ class FoldResult:
             "test_metrics": _thaw_json_value(self.test_metrics),
             "test_results": _thaw_json_value(self.test_results),
             "test_returns": [point.to_dict() for point in self.test_returns],
+            "expected_oos_dates": [
+                point_date.isoformat() for point_date in self.expected_oos_dates
+            ],
+            "returned_oos_dates": [
+                point_date.isoformat() for point_date in self.returned_oos_dates
+            ],
         }
 
 
@@ -206,6 +323,16 @@ class WalkForwardResult:
     valid: bool
     status: str
     pit_valid_context: Mapping[str, Any] | None = None
+    base_runtime_config: Mapping[str, Any] = field(default_factory=dict)
+    base_runtime_config_hash: str | None = None
+    effective_candidate_configs_by_fold: Mapping[str, Mapping[str, Mapping[str, Any]]] = (
+        field(default_factory=dict)
+    )
+    effective_candidate_config_hashes_by_fold: Mapping[str, Mapping[str, str]] = (
+        field(default_factory=dict)
+    )
+    preparation_manifest_context: Mapping[str, Any] = field(default_factory=dict)
+    git_state: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -213,6 +340,25 @@ class WalkForwardResult:
             "candidate_config_hashes",
             _freeze_json_value(self.candidate_config_hashes),
         )
+        object.__setattr__(self, "base_runtime_config", _freeze_json_value(
+            _public_mapping(self.base_runtime_config),
+        ))
+        object.__setattr__(
+            self,
+            "effective_candidate_configs_by_fold",
+            _freeze_json_value(self.effective_candidate_configs_by_fold),
+        )
+        object.__setattr__(
+            self,
+            "effective_candidate_config_hashes_by_fold",
+            _freeze_json_value(self.effective_candidate_config_hashes_by_fold),
+        )
+        object.__setattr__(
+            self,
+            "preparation_manifest_context",
+            _freeze_json_value(self.preparation_manifest_context),
+        )
+        object.__setattr__(self, "git_state", _freeze_json_value(self.git_state))
         if self.pit_valid_context is not None:
             object.__setattr__(
                 self,
@@ -234,6 +380,24 @@ class WalkForwardResult:
             "classification": self.classification,
             "candidate_library_version": self.candidate_library_version,
             "candidate_config_hashes": _thaw_json_value(self.candidate_config_hashes),
+            "base_runtime_config": _thaw_json_value(self.base_runtime_config),
+            "base_runtime_config_hash": self.base_runtime_config_hash,
+            "effective_candidate_configs_by_fold": _thaw_json_value(
+                self.effective_candidate_configs_by_fold
+            ),
+            "effective_candidate_config_hashes_by_fold": _thaw_json_value(
+                self.effective_candidate_config_hashes_by_fold
+            ),
+            "effective_config_hashes_by_fold": _thaw_json_value(
+                self.effective_candidate_config_hashes_by_fold
+            ),
+            "effective_configs_by_fold": _thaw_json_value(
+                self.effective_candidate_configs_by_fold
+            ),
+            "preparation_manifest_context": _thaw_json_value(
+                self.preparation_manifest_context
+            ),
+            "git": _thaw_json_value(self.git_state),
             "pit_valid_context": (
                 _thaw_json_value(self.pit_valid_context)
                 if self.pit_valid_context is not None
@@ -366,16 +530,27 @@ def _candidate_config(
     candidate: CandidateSpec,
     classification: str,
     phase: str,
+    base_runtime_config: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
-    """Build a fresh immutable evaluator config for a candidate."""
-    payload: dict[str, Any] = dict(candidate.parameters)
+    """Build a fresh immutable evaluator config for a candidate.
+
+    ``config_hash`` remains the candidate-library hash used to validate the
+    train selection.  ``effective_config_hash`` is the hash of the complete
+    secret-free runtime configuration after candidate overrides and is the
+    provenance hash used for execution.
+    """
+    effective_config = _public_mapping(base_runtime_config)
+    effective_config.update(_public_mapping(candidate.parameters))
+    payload: dict[str, Any] = _public_mapping(candidate.parameters)
     payload.update(
         {
             "candidate_id": candidate.candidate_id,
-            "parameters": dict(candidate.parameters),
+            "parameters": _public_mapping(candidate.parameters),
             "config_hash": candidate_config_hash(candidate),
             "classification": classification,
             "phase": phase,
+            "effective_config": effective_config,
+            "effective_config_hash": _config_hash(effective_config),
         }
     )
     return _freeze_json_value(payload)
@@ -385,8 +560,11 @@ def _test_config(
     candidate: CandidateSpec,
     classification: str,
     selection_json: str,
+    base_runtime_config: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
-    payload = dict(_candidate_config(candidate, classification, "test"))
+    payload = dict(
+        _candidate_config(candidate, classification, "test", base_runtime_config)
+    )
     selection_payload = json.loads(selection_json)
     payload.update(
         {
@@ -507,6 +685,50 @@ def _normalise_returns(
     return tuple(sorted(points, key=lambda point: point.date))
 
 
+def _normalise_expected_dates(
+    expected_dates: Iterable[Any],
+    fold: FoldSpec,
+    fold_number: int,
+) -> tuple[date, ...]:
+    """Normalize the prepared trading calendar used for exact OOS coverage."""
+    seen: set[date] = set()
+    for raw_date in expected_dates:
+        point_date = _normalise_date(raw_date)
+        if point_date in seen:
+            raise ValueError(
+                f"duplicate expected OOS date in fold {fold_number}: "
+                f"{point_date.isoformat()}"
+            )
+        if not fold.test_start <= point_date <= fold.test_end:
+            raise ValueError(
+                f"expected OOS date {point_date.isoformat()} is outside fold "
+                f"{fold_number} test period"
+            )
+        seen.add(point_date)
+    return tuple(sorted(seen))
+
+
+def _coverage_error(
+    expected_dates: tuple[date, ...],
+    returned_dates: tuple[date, ...],
+) -> str | None:
+    """Describe an exact expected/returned OOS date mismatch."""
+    if not expected_dates:
+        return None
+    expected = set(expected_dates)
+    returned = set(returned_dates)
+    missing = sorted(expected - returned)
+    extra = sorted(returned - expected)
+    if not missing and not extra:
+        return None
+    details: list[str] = []
+    if missing:
+        details.append("missing=" + ",".join(item.isoformat() for item in missing))
+    if extra:
+        details.append("unexpected=" + ",".join(item.isoformat() for item in extra))
+    return "OOS date coverage mismatch (" + "; ".join(details) + ")"
+
+
 def _is_date_key(value: object) -> bool:
     try:
         _normalise_date(value)
@@ -574,6 +796,8 @@ class _FrozenTrainFold:
     train_scores: tuple[CandidateScore, ...]
     selection: SelectionResult | None
     selection_json: str | None
+    effective_candidate_configs: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    effective_candidate_config_hashes: Mapping[str, str] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -586,6 +810,10 @@ def run_walk_forward(
     selector: TrainSelector = select_candidate,
     classification: str = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
     pit_valid_context: object | None = None,
+    base_runtime_config: Mapping[str, Any] | object | None = None,
+    preparation_manifest_context: Mapping[str, Any] | None = None,
+    git_state: Mapping[str, Any] | None = None,
+    expected_test_dates: Mapping[int, Iterable[Any]] | None = None,
 ) -> WalkForwardResult:
     """Run true expanding-window orchestration without data-side effects.
 
@@ -617,15 +845,52 @@ def run_walk_forward(
         for candidate in sorted(candidates, key=lambda item: item.candidate_id)
     }
     candidate_library_version = candidates[0].library_version
+    public_base_config = _public_mapping(base_runtime_config)
+    base_config_hash = _config_hash(public_base_config)
+    frozen_preparation_context = (
+        preparation_manifest_context if preparation_manifest_context is not None else {}
+    )
+    frozen_git_state = git_state if git_state is not None else {}
+    expected_dates_by_fold: dict[int, tuple[date, ...]] = {}
+    for fold_number, fold in enumerate(folds, start=1):
+        raw_expected = (
+            expected_test_dates.get(fold_number)
+            if expected_test_dates is not None
+            else None
+        )
+        if raw_expected is not None:
+            expected_dates_by_fold[fold_number] = _normalise_expected_dates(
+                raw_expected, fold, fold_number
+            )
     train_phase: list[_FrozenTrainFold] = []
 
     # Pass 1: evaluate and freeze every train selection before any test callback
     # is allowed to run.  In particular, do not move test evaluation back into
     # this loop: external evaluator state is outside the runner's control.
     for fold_number, fold in enumerate(folds, start=1):
+        effective_configs = {
+            candidate.candidate_id: _thaw_json_value(
+                _candidate_config(
+                    candidate,
+                    classification,
+                    "train",
+                    public_base_config,
+                )
+            )["effective_config"]
+            for candidate in candidates
+        }
+        effective_hashes = {
+            candidate_id: _config_hash(config)
+            for candidate_id, config in effective_configs.items()
+        }
         train_scores: list[CandidateScore] = []
         for candidate in candidates:
-            config = _candidate_config(candidate, classification, "train")
+            config = _candidate_config(
+                candidate,
+                classification,
+                "train",
+                public_base_config,
+            )
             try:
                 raw_train = train_evaluator(fold, candidate, config)
             except Exception:  # evaluator failures are explicit fold data
@@ -690,6 +955,8 @@ def run_walk_forward(
                     train_scores=deterministic_scores,
                     selection=None,
                     selection_json=None,
+                    effective_candidate_configs=effective_configs,
+                    effective_candidate_config_hashes=effective_hashes,
                     error=str(exc),
                 )
             )
@@ -701,6 +968,8 @@ def run_walk_forward(
                     train_scores=frozen_selection.train_scores,
                     selection=frozen_selection,
                     selection_json=selection_json,
+                    effective_candidate_configs=effective_configs,
+                    effective_candidate_config_hashes=effective_hashes,
                 )
             )
 
@@ -730,12 +999,27 @@ def run_walk_forward(
                     valid=False,
                     status="invalid_train_selection",
                     error=state.error,
+                    effective_candidate_configs=state.effective_candidate_configs,
+                    effective_candidate_config_hashes=state.effective_candidate_config_hashes,
+                    expected_oos_dates=expected_dates_by_fold.get(fold_number, ()),
                 )
             )
             continue
 
         selected_candidate = frozen_selection.selected_candidate
-        test_config = _test_config(selected_candidate, classification, state.selection_json)
+        test_config = _test_config(
+            selected_candidate,
+            classification,
+            state.selection_json,
+            public_base_config,
+        )
+        selected_effective_config = state.effective_candidate_configs.get(
+            selected_candidate.candidate_id,
+        )
+        selected_effective_hash = state.effective_candidate_config_hashes.get(
+            selected_candidate.candidate_id,
+        )
+        expected_dates = expected_dates_by_fold.get(fold_number, ())
         try:
             raw_test = test_evaluator(fold, selected_candidate, test_config)
         except Exception as exc:
@@ -755,6 +1039,11 @@ def run_walk_forward(
                     valid=False,
                     status="test_evaluator_error",
                     error=str(exc),
+                    effective_candidate_configs=state.effective_candidate_configs,
+                    effective_candidate_config_hashes=state.effective_candidate_config_hashes,
+                    selected_effective_config=selected_effective_config,
+                    selected_effective_config_hash=selected_effective_hash,
+                    expected_oos_dates=expected_dates,
                 )
             )
             continue
@@ -783,6 +1072,11 @@ def run_walk_forward(
                         valid=False,
                         status=invalid_status,
                         error=test_evaluation.reason or "test evaluator returned invalid result",
+                        effective_candidate_configs=state.effective_candidate_configs,
+                        effective_candidate_config_hashes=state.effective_candidate_config_hashes,
+                        selected_effective_config=selected_effective_config,
+                        selected_effective_config_hash=selected_effective_hash,
+                        expected_oos_dates=expected_dates,
                     )
                 )
                 continue
@@ -804,6 +1098,42 @@ def run_walk_forward(
                         valid=False,
                         status="invalid_empty_test_returns",
                         error=test_evaluation.reason or "test evaluator returned no OOS rows",
+                        effective_candidate_configs=state.effective_candidate_configs,
+                        effective_candidate_config_hashes=state.effective_candidate_config_hashes,
+                        selected_effective_config=selected_effective_config,
+                        selected_effective_config_hash=selected_effective_hash,
+                        expected_oos_dates=expected_dates,
+                        returned_oos_dates=tuple(point.date for point in test_returns),
+                    )
+                )
+                continue
+            coverage_error = _coverage_error(
+                expected_dates,
+                tuple(point.date for point in test_returns),
+            )
+            if coverage_error is not None:
+                fold_results.append(
+                    FoldResult(
+                        fold_number=fold_number,
+                        fold=fold,
+                        classification=classification,
+                        candidate_config_hashes=candidate_hashes,
+                        train_scores=frozen_selection.train_scores,
+                        selection=frozen_selection,
+                        selected_candidate=selected_candidate,
+                        selected_config_hash=selected_candidate.config_hash(),
+                        test_metrics=test_evaluation.metrics,
+                        test_results=test_evaluation.results,
+                        test_returns=(),
+                        valid=False,
+                        status="invalid_oos_coverage",
+                        error=coverage_error,
+                        effective_candidate_configs=state.effective_candidate_configs,
+                        effective_candidate_config_hashes=state.effective_candidate_config_hashes,
+                        selected_effective_config=selected_effective_config,
+                        selected_effective_config_hash=selected_effective_hash,
+                        expected_oos_dates=expected_dates,
+                        returned_oos_dates=tuple(point.date for point in test_returns),
                     )
                 )
                 continue
@@ -827,6 +1157,12 @@ def run_walk_forward(
                     test_returns=test_returns,
                     valid=True,
                     status="valid",
+                    effective_candidate_configs=state.effective_candidate_configs,
+                    effective_candidate_config_hashes=state.effective_candidate_config_hashes,
+                    selected_effective_config=selected_effective_config,
+                    selected_effective_config_hash=selected_effective_hash,
+                    expected_oos_dates=expected_dates,
+                    returned_oos_dates=tuple(point.date for point in test_returns),
                 )
             )
         except (ValueError, TypeError):
@@ -850,6 +1186,11 @@ def run_walk_forward(
                     valid=False,
                     status="test_evaluator_error",
                     error=str(exc),
+                    effective_candidate_configs=state.effective_candidate_configs,
+                    effective_candidate_config_hashes=state.effective_candidate_config_hashes,
+                    selected_effective_config=selected_effective_config,
+                    selected_effective_config_hash=selected_effective_hash,
+                    expected_oos_dates=expected_dates,
                 )
             )
 
@@ -864,6 +1205,18 @@ def run_walk_forward(
         valid=all_valid,
         status="valid" if all_valid else "invalid",
         pit_valid_context=None,
+        base_runtime_config=public_base_config,
+        base_runtime_config_hash=base_config_hash,
+        effective_candidate_configs_by_fold={
+            str(state.fold_number): state.effective_candidate_configs
+            for state in train_phase
+        },
+        effective_candidate_config_hashes_by_fold={
+            str(state.fold_number): state.effective_candidate_config_hashes
+            for state in train_phase
+        },
+        preparation_manifest_context=frozen_preparation_context,
+        git_state=frozen_git_state,
     )
 
 

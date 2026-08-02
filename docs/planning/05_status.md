@@ -1,10 +1,39 @@
 # 작업 진행 상황
 
-## 마지막 업데이트: 2026-08-02
+## 마지막 업데이트: 2026-08-03
 
 ## 프로젝트 상태: Phase 4 검증 진행 중, 엔진·캐시·체결 시점 수정 완료, **PIT 데이터 검증 전**
 
-## 최근 업데이트: 2026-08-02 (Phase 2 검증 수정 및 canonical 후보 실행)
+## 최근 업데이트: 2026-08-03 (true-walkforward result-integrity 수정)
+
+`uv run python -m k200_mq.main true-walkforward --output <dir>`가 true
+expanding-window 실행 경로입니다. `<dir>/true_walkforward/`의
+`selection_and_folds.json`, `summary.csv`, `oos_returns.csv`에 fold 선택,
+secret-free effective config/hash, git state, preparation context, exact OOS
+coverage 결과를 남깁니다. 이 실행은 historical PIT validator가 연결되지 않은
+`mechanical_expanding_walk_forward_non_pit`이며, interval slicing은 mechanical
+future-row 방지일 뿐 PIT 보증이 아닙니다.
+
+## 완료된 기계적 True-WF 진단 실행 (2026-08-03)
+
+실행 명령:
+`uv run python -m k200_mq.main true-walkforward --output /tmp/k200mq_true_wf`
+
+- 분류: `mechanical_expanding_walk_forward_non_pit`
+- 5개 fold 모두 유효; 모든 fold의 선택 후보는 `TOP_N_10`
+- OOS 1,231개 포인트 (2020–2024 test 기간)
+- Stitched 누적 수익률: **+44.6426%** | Stitched MDD: **-32.5935%**
+- Fold별 test 수익률: 2020 **+60.4528%**, 2021 **-2.0225%**, 2022
+  **-20.2042%**, 2023 **+19.2139%**, 2024 **-3.2801%**
+
+산출물은 `/tmp/k200mq_true_wf/true_walkforward/` 아래의
+`selection_and_folds.json`, `summary.csv`, `oos_returns.csv`입니다. 이 경로의
+산출물은 저장소에 복사하거나 커밋하지 않습니다.
+
+> **중요 경고:** 현재 KOSPI 200 membership/ranking은 non-PIT proxy이며,
+> normalized DART 재무 데이터는 `non_pit_fiscal_period`입니다. 따라서 이번
+> 실행은 validated performance evidence가 아니며 canonical/production 결과로
+> 해석하지 않습니다.
 
 ## 중요: 이전 백테스트 결과 모두 무효
 
@@ -124,11 +153,16 @@ Sharpe 비율: 0.244
 - [x] run manifest 저장 및 기계적 후보 실행
 - [x] PIT 유니버스 / filing-date 재무 데이터 계약의 bounded validation
 - [x] Phase 1: pure expanding-window WF core (folds, conservative candidates, train-only selector)
-- [x] Pure true-WF orchestration layer (`validation/runner.py`); not wired to the live pipeline
+- [x] True-WF orchestration layer wired to the `true-walkforward` CLI
 - [x] WF runner train/test two-pass isolation, strict flags, fold/date/version validation
+- [x] Exact prepared test-date coverage; truncated OOS folds are invalid
+- [x] Interval slicing for price/factor/index/universe/regime inputs
+- [x] Test trade metrics use the interval `trade_log`
+- [x] Secret-free effective config/hash, git state, and preparation context in WF artifacts
+- [x] Invalid WF runs save diagnostics and exit nonzero
 - [x] Pure WF classification remains mechanical non-PIT; validated PIT promotion deferred until actual validator outputs are wired
 - [ ] KRX 과거 유효일자별 구성종목 파일 및 raw DART filing metadata 확보·연결
-- [ ] True expanding-window WF CV 실행 연결·재실행 (현재 robustness test와 별개)
+- [x] True expanding-window WF CV 실행 연결·재실행 (현재 robustness test와 별개)
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
 - [ ] 서바이버십 바이어스 테스트
@@ -222,6 +256,6 @@ contract/fingerprint가 없으면 `legacy_proxy_unknown`으로 분류합니다. 
 **다음 우선순위:**
 1. PIT KOSPI 200 유니버스와 공시일 기준 재무 데이터 확보 또는 proxy 한계 명시
 2. KOSPI 200 benchmark와 비용 attribution 추가
-3. true expanding-window WF 검증 설계·구현·재실행 (현재 독립 subperiod robustness와 구분)
+3. true expanding-window WF 실행 결과를 PIT 데이터 계약으로 재검증 (현재 독립 subperiod robustness와 구분)
 4. Momentum/Quality/Regime/Stop-loss ablation
 5. 그 후에만 regime·window·N 파라미터 재검토

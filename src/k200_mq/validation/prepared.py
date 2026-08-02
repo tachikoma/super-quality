@@ -7,8 +7,9 @@ for every interval, so no cash, positions, pending orders, or strategy state
 can leak from one simulation to another.
 
 This module deliberately contains no data-loader calls.  Preparation remains
-in :mod:`k200_mq.main` for now so the existing provenance and manifest steps
-stay in one place while the true walk-forward runner is still unwired.
+in :mod:`k200_mq.main` so the existing provenance and manifest steps stay in
+one place; the mechanical true walk-forward CLI reuses this adapter without
+re-preparing inputs for candidates or folds.
 """
 
 from __future__ import annotations
@@ -505,6 +506,69 @@ def _interval_price_data(
     return price_data.loc[mask].copy(deep=True)
 
 
+def _interval_frame_data(
+    frame: pd.DataFrame,
+    measured_start: date | pd.Timestamp | None,
+    measured_end: date | pd.Timestamp | None,
+    date_columns: tuple[str, ...],
+) -> pd.DataFrame:
+    """Slice a date-bearing prepared frame to one engine interval."""
+    copied = frame.copy(deep=True)
+    if copied.empty or (measured_start is None and measured_end is None):
+        return copied
+
+    raw_dates: Any = None
+    for column in date_columns:
+        if column in copied.columns:
+            raw_dates = copied[column]
+            break
+    if raw_dates is None and isinstance(copied.index, pd.MultiIndex):
+        for level_name in date_columns:
+            if level_name in copied.index.names:
+                raw_dates = copied.index.get_level_values(level_name)
+                break
+    if raw_dates is None and isinstance(copied.index, pd.DatetimeIndex):
+        raw_dates = copied.index
+    if raw_dates is None:
+        return copied
+
+    dates = pd.DatetimeIndex(pd.to_datetime(raw_dates, errors="coerce")).floor("D")
+    if dates.tz is not None:
+        dates = dates.tz_localize(None)
+    mask = ~dates.isna()
+    if measured_start is not None:
+        mask &= dates >= pd.Timestamp(measured_start).floor("D")
+    if measured_end is not None:
+        mask &= dates <= pd.Timestamp(measured_end).floor("D")
+    return copied.loc[mask].copy(deep=True)
+
+
+def _interval_regime_map(
+    regime_scale_map: Mapping[Any, float] | None,
+    measured_start: date | pd.Timestamp | None,
+    measured_end: date | pd.Timestamp | None,
+) -> dict[Any, float] | None:
+    """Return only regime observations inside one measured interval."""
+    if regime_scale_map is None:
+        return None
+    start = pd.Timestamp(measured_start).floor("D") if measured_start is not None else None
+    end = pd.Timestamp(measured_end).floor("D") if measured_end is not None else None
+    result: dict[Any, float] = {}
+    for raw_date, value in regime_scale_map.items():
+        try:
+            point_date = pd.Timestamp(raw_date).floor("D")
+        except (TypeError, ValueError):
+            continue
+        if point_date.tzinfo is not None:
+            point_date = point_date.tz_localize(None)
+        if start is not None and point_date < start:
+            continue
+        if end is not None and point_date > end:
+            continue
+        result[raw_date] = value
+    return result
+
+
 def execute_engine_interval(
     prepared: PreparedK200MQInputs,
     candidate_config: Any,
@@ -557,6 +621,24 @@ def execute_engine_interval(
             )
 
     price_data = _interval_price_data(prepared.price_data, start, end)
+    factor_data = _interval_frame_data(
+        prepared.factor_data,
+        start,
+        end,
+        ("date", "as_of"),
+    )
+    index_data = _interval_frame_data(
+        prepared.index_data,
+        start,
+        end,
+        ("date", "as_of"),
+    )
+    universe_history = _interval_frame_data(
+        prepared.universe_history,
+        start,
+        end,
+        ("as_of", "date"),
+    )
     regime_enabled = _config_bool(
         getattr(config, "REGIME_FILTER_ENABLED", True),
         default=True,
@@ -566,9 +648,8 @@ def execute_engine_interval(
             "REGIME_FILTER_ENABLED=True requires a prepared regime scale map"
         )
     regime_map = (
-        dict(prepared.regime_scale_map)
+        _interval_regime_map(prepared.regime_scale_map, start, end)
         if regime_enabled
-        and prepared.regime_scale_map is not None
         else None
     )
 
@@ -588,9 +669,9 @@ def execute_engine_interval(
         engine = PortfolioRebalanceEngine(config)
     return engine.run(
         price_data,
-        prepared.index_data.copy(deep=True),
-        prepared.factor_data.copy(deep=True),
-        prepared.universe_history.copy(deep=True),
+        index_data,
+        factor_data,
+        universe_history,
         regime_scale_map=regime_map,
         measured_start=start,
         measured_end=end,
