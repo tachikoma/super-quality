@@ -176,14 +176,18 @@ for each trading day:
 - 유효 subperiod만 사용한 기하 평균 수익률과 worst MDD
 - 비어 있거나 유효하지 않은 subperiod의 명시적 상태
 
-### 4.3 True expanding-window Walk-Forward (향후 작업)
-진정한 WF 검증은 별도 구현이 필요합니다.
+### 4.3 True expanding-window Walk-Forward (Phase 1 pure core)
+현재 pure core는 다음의 인접한 고정 fold 일정을 사용합니다.
 - Training window: 2015–2019 (expanding)
 - Test window: 2020, 2021, 2022, 2023, 2024
-- Purge: 각 fold 간 3개월 gap
-- Embargo: 각 fold 후 1개월 gap
+- Purge/embargo: 현재는 deferred/not applicable. 후보 신호가 과거 데이터만
+  사용하는 fixed-signal 후보이며, forward label이나 overlapping outcome을
+  사용한 피팅을 하지 않으므로 pure core에 purge/embargo를 구현하지 않았습니다.
 - 파라미터 피팅은 training 구간 내부에만 제한
 - train/test 성과 차이와 fold 간 안정성 분석
+
+향후 forward label 또는 overlapping outcome을 사용하는 후보 피팅을 추가하면
+그 시점에 purge/embargo를 포함하도록 fold schedule을 다시 설계해야 합니다.
 
 ### 4.4 트랜잭션 비용 모델
 - [ ] 명시적 비용: 수수료 0.015% + 세금 0.20%(매도) + 슬리피지 0.10%

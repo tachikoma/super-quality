@@ -1,0 +1,196 @@
+"""Tests for the pure K200MQ expanding-window validation core."""
+
+from datetime import date
+import json
+import math
+
+import pytest
+
+from k200_mq.validation.walk_forward import (
+    BASE_CANDIDATE,
+    DEFAULT_CANDIDATE_LIBRARY,
+    MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+    VALIDATED_EXPANDING_WALK_FORWARD_PIT,
+    CandidateScore,
+    CandidateSpec,
+    FoldSpec,
+    candidate_config_hash,
+    classify_walk_forward_result,
+    get_expanding_window_folds,
+    select_candidate,
+)
+
+
+def test_expanding_window_schedule_is_exact_and_immutable() -> None:
+    assert get_expanding_window_folds() == (
+        FoldSpec(date(2015, 1, 1), date(2019, 12, 31), date(2020, 1, 1), date(2020, 12, 31)),
+        FoldSpec(date(2015, 1, 1), date(2020, 12, 31), date(2021, 1, 1), date(2021, 12, 31)),
+        FoldSpec(date(2015, 1, 1), date(2021, 12, 31), date(2022, 1, 1), date(2022, 12, 31)),
+        FoldSpec(date(2015, 1, 1), date(2022, 12, 31), date(2023, 1, 1), date(2023, 12, 31)),
+        FoldSpec(date(2015, 1, 1), date(2023, 12, 31), date(2024, 1, 1), date(2024, 12, 31)),
+    )
+    with pytest.raises((AttributeError, TypeError)):
+        get_expanding_window_folds()[0].train_end = date(2020, 1, 1)  # type: ignore[misc]
+
+
+def test_candidate_library_is_versioned_and_conservative() -> None:
+    ids = [candidate.candidate_id for candidate in DEFAULT_CANDIDATE_LIBRARY]
+
+    assert ids == ["BASE", "TOP_N_10", "TOP_N_30", "REGIME_OFF"]
+    assert all(candidate.library_version for candidate in DEFAULT_CANDIDATE_LIBRARY)
+    assert all("MAX_HOLDINGS" not in candidate.parameters for candidate in DEFAULT_CANDIDATE_LIBRARY)
+    assert all("QUALITY_WEIGHT_ROE" not in candidate.parameters for candidate in DEFAULT_CANDIDATE_LIBRARY)
+
+
+def _scores(**sharpes: float) -> dict[str, dict[str, object]]:
+    return {
+        candidate_id: {"train_sharpe": sharpe, "n_exits": 10, "valid": True}
+        for candidate_id, sharpe in sharpes.items()
+    }
+
+
+def test_train_only_selection_is_deterministic() -> None:
+    scores = _scores(BASE=0.40, TOP_N_10=0.70, TOP_N_30=0.20, REGIME_OFF=0.30)
+    first = select_candidate(scores, "2019-12-31")
+    second = select_candidate(dict(reversed(list(scores.items()))), "2019-12-31")
+
+    assert first.selected_candidate_id == "TOP_N_10"
+    assert first.to_json() == second.to_json()
+    assert first.objective_name == "train_sharpe"
+    assert first.train_cutoff == "2019-12-31"
+
+
+def test_tie_within_five_hundredths_prefers_base_then_stable_id() -> None:
+    base_tie = select_candidate(_scores(BASE=0.50, TOP_N_10=0.54), min_exits=5)
+    assert base_tie.selected_candidate_id == "BASE"
+
+    without_base = (
+        CandidateSpec("Z_CANDIDATE", {"TOP_N": 20}),
+        CandidateSpec("A_CANDIDATE", {"TOP_N": 20}),
+    )
+    stable_tie = select_candidate(
+        {
+            "Z_CANDIDATE": {"train_sharpe": 0.50, "n_exits": 5},
+            "A_CANDIDATE": {"train_sharpe": 0.54, "n_exits": 5},
+        },
+        candidate_library=without_base,
+    )
+    assert stable_tie.selected_candidate_id == "A_CANDIDATE"
+
+    outside_tie = select_candidate(_scores(BASE=0.50, TOP_N_10=0.56))
+    assert outside_tie.selected_candidate_id == "TOP_N_10"
+
+
+def test_invalid_scores_and_minimum_exits_are_not_eligible() -> None:
+    result = select_candidate(
+        {
+            "BASE": {"train_sharpe": math.nan, "n_exits": 100},
+            "TOP_N_10": {"train_sharpe": 1.0, "n_exits": 2},
+            "TOP_N_30": {"train_sharpe": 0.2, "n_exits": 5, "valid": True},
+        },
+        minimum_exits=5,
+    )
+    statuses = {score.candidate_id: score.status for score in result.train_scores}
+
+    assert result.selected_candidate_id == "TOP_N_30"
+    assert statuses["BASE"] == "invalid_non_finite_train_sharpe"
+    assert statuses["TOP_N_10"] == "insufficient_exits"
+
+    with pytest.raises(ValueError, match="no candidate"):
+        select_candidate({"BASE": {"train_sharpe": None, "n_exits": 5}})
+
+
+def test_test_scores_cannot_influence_selection() -> None:
+    first = select_candidate(
+        {
+            "BASE": {"train_sharpe": 0.50, "test_sharpe": -10.0, "n_exits": 5},
+            "TOP_N_10": {"train_sharpe": 0.60, "test_sharpe": 10.0, "n_exits": 5},
+        }
+    )
+    second = select_candidate(
+        {
+            "BASE": {"train_sharpe": 0.50, "test_sharpe": 10_000.0, "n_exits": 5},
+            "TOP_N_10": {"train_sharpe": 0.60, "test_sharpe": -10_000.0, "n_exits": 5},
+        }
+    )
+
+    assert first.selected_candidate_id == second.selected_candidate_id == "TOP_N_10"
+    assert all("test" not in key for key in first.to_dict())
+
+
+@pytest.mark.parametrize("alias", ["sharpe", "sharpe_ratio", "score", "test_sharpe"])
+def test_ambiguous_score_aliases_are_rejected(alias: str) -> None:
+    with pytest.raises(TypeError, match="explicit train_sharpe"):
+        select_candidate(
+            {
+                "BASE": {alias: 10_000.0, "n_exits": 5},
+                "TOP_N_10": {"train_sharpe": 0.5, "n_exits": 5},
+            }
+        )
+
+
+def test_score_mappings_require_explicit_train_metric_and_exit_count() -> None:
+    with pytest.raises(TypeError, match="n_exits"):
+        select_candidate({"BASE": {"train_sharpe": 0.5}})
+    with pytest.raises(TypeError, match="train_sharpe"):
+        select_candidate({"BASE": {"n_exits": 5}})
+
+
+def test_invalid_train_metrics_serialize_as_null_in_strict_json() -> None:
+    result = select_candidate(
+        {
+            "BASE": {"train_sharpe": math.nan, "n_exits": 5},
+            "TOP_N_10": {"train_sharpe": math.inf, "n_exits": 5},
+            "TOP_N_30": {"train_sharpe": 0.5, "n_exits": 5},
+        }
+    )
+
+    payload = result.to_json()
+    decoded = json.loads(payload)
+    scores = {score["candidate_id"]: score for score in decoded["train_scores"]}
+
+    assert result.selected_candidate_id == "TOP_N_30"
+    assert scores["BASE"]["train_sharpe"] is None
+    assert scores["TOP_N_10"]["train_sharpe"] is None
+    assert scores["TOP_N_30"]["train_sharpe"] == 0.5
+    assert "NaN" not in payload
+    assert "Infinity" not in payload
+    assert json.loads(result.from_json(payload).to_json()) == decoded
+
+
+def test_selection_serialization_and_hash_are_stable() -> None:
+    first = CandidateSpec("CUSTOM", {"REGIME_FILTER_ENABLED": True, "TOP_N": 20})
+    second = CandidateSpec("CUSTOM", {"TOP_N": 20, "REGIME_FILTER_ENABLED": True})
+
+    assert candidate_config_hash(first) == candidate_config_hash(second)
+    assert first.to_dict() == second.to_dict()
+
+    result = select_candidate(
+        {"BASE": {"train_sharpe": 0.5, "n_exits": 5}},
+        date(2019, 12, 31),
+    )
+    restored = result.from_json(result.to_json())
+
+    assert json.loads(result.to_json()) == json.loads(restored.to_json())
+    assert result.config_hash == BASE_CANDIDATE.config_hash()
+    assert result.to_dict()["candidate_library_version"] == BASE_CANDIDATE.library_version
+
+
+def test_pit_classification_is_explicit() -> None:
+    assert classify_walk_forward_result(pit_valid=False) == (
+        MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
+    )
+    assert classify_walk_forward_result(pit_valid=True) == VALIDATED_EXPANDING_WALK_FORWARD_PIT
+    assert (
+        select_candidate(
+            {"BASE": {"train_sharpe": 0.5, "n_exits": 5}},
+            classification=VALIDATED_EXPANDING_WALK_FORWARD_PIT,
+        ).classification
+        == VALIDATED_EXPANDING_WALK_FORWARD_PIT
+    )
+
+
+def test_candidate_score_is_accepted_directly() -> None:
+    result = select_candidate([CandidateScore("BASE", 0.5, 5)])
+
+    assert result.selected_candidate == BASE_CANDIDATE

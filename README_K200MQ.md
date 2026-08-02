@@ -78,7 +78,21 @@ uv run python -m k200_mq.main robustness
 기존 사용자를 위해 `walkforward` 명령도 호환 alias로 유지되지만,
 출력과 `subperiod_robustness_summary.csv`는 독립 subperiod robustness 결과로
 표시됩니다. 학습 구간을 사용하는 expanding-window true walk-forward 검증은
-향후 작업입니다.
+아직 실행 파이프라인에 연결되지 않았습니다.
+
+### True expanding-window WF core (Phase 1)
+
+`src/k200_mq/validation/walk_forward.py`에 2015–2024 고정 5-fold expanding-window
+일정, 실제 의미가 있는 보수적 후보 라이브러리, train-only Sharpe 선택기와
+직렬화 결과가 구현되어 있습니다. 현재 결과는
+`mechanical_expanding_walk_forward_non_pit`으로 분류되며, 이 순수 core는
+아직 `robustness` 동작·전략 실행·live data pipeline에 연결되지 않았습니다.
+기본 후보는 `BASE` (TOP_N=20/regime on), `TOP_N_10`, `TOP_N_30`,
+`REGIME_OFF`이며, `BASE`와 동일한 `TOP_N_20` 및 `REGIME_ON`은 중복이므로
+포함하지 않습니다.
+현재 손절 설정에는 안전한 on/off 표현이 없어 후보 라이브러리에서도 제외했습니다.
+PIT 데이터 계약을 충족한 실행만 `validated_expanding_walk_forward_pit`로
+분류할 수 있습니다.
 
 ### 데이터 유효성 계약
 
@@ -172,7 +186,8 @@ src/k200_mq/
 
 - 이 전략은 **베타 (Beta)** 상태입니다. 파이프라인은 완성되었지만 결과는 검증되지 않았습니다.
 - 현재 `robustness` 명령은 고정된 독립 subperiod robustness test입니다. 학습/피팅이
-  포함된 expanding-window true walk-forward CV는 아직 구현되지 않았습니다.
+  포함된 expanding-window true walk-forward CV의 Phase 1 pure core는 구현됐지만,
+  실행 파이프라인에는 아직 연결되지 않았습니다.
 - 백테스트 결과는 아직 검증되지 않았습니다. 리짓 필터 적용, 리밸런싱 일자 통합,
   품질 팩터 커버리지 개선은 구현되었지만, PIT 유니버스와 filing-date 재무 데이터
   한계가 남아 있어 결과를 전략 성과로 해석할 수 없습니다.

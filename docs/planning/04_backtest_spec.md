@@ -24,7 +24,16 @@ cross-validation이 아닙니다. 파라미터 최적화와 expanding-window WF�
 
 각 기간에는 training window가 없으며 전략 파라미터는 고정됩니다.
 
-## True Walk-Forward 설계 (향후 작업)
+## True Walk-Forward 설계 (Phase 1 core 구현, 실행 연결 전)
+
+고정 fold 일정과 train-only 후보 선택/직렬화 core가
+`src/k200_mq/validation/walk_forward.py`에 구현되었습니다. 이 단계는
+순수한 validation primitive만 제공하며 기존 `robustness`, 전략 실행 및 live
+data pipeline은 변경하지 않습니다. 따라서 현재 분류는
+`mechanical_expanding_walk_forward_non_pit`이며, PIT 데이터 계약을 충족한
+실행만 `validated_expanding_walk_forward_pit`로 분류할 수 있습니다.
+
+실제 fold 실행과 결과 재실행은 후속 통합 작업입니다.
 
 ### 기본 구조 (Expanding Window)
 
@@ -37,9 +46,13 @@ Fold 5: Train [2015-01 ~ 2023-12] | Test [2024-01 ~ 2024-12]
 ```
 
 ### Purge & Embargo
-- **Purge window**: 3개월 — training set 끝에서 3개월 제거 (데이터 누수 방지)
-- **Embargo window**: 1개월 — test set 시작 전 1개월 buffer
-- **목적**: 팩터 계산 시 미래 데이터 유출 방지 (lookback window = 252일이므로 1년 전 data leak 가능)
+- **현재 상태: deferred/not applicable** — 이 pure core의 후보는 과거 데이터만
+  사용하는 backward-only fixed-signal 후보이며 forward label이나 overlapping
+  outcome을 사용한 피팅이 없습니다.
+- 따라서 위의 정확한 인접 fold schedule을 유지하고, 현재 구현에는 purge/embargo가
+  없습니다. 이 core를 purge/embargo가 구현된 것으로 해석하거나 주장하지 않습니다.
+- 향후 forward label 또는 overlapping outcome을 사용하는 후보 피팅을 연결하면
+  해당 누수 구조에 맞춰 fold schedule과 purge/embargo를 먼저 재설계해야 합니다.
 
 ### True WF 교차검증 지표 (구현 시 per fold)
 

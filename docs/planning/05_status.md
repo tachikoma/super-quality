@@ -123,8 +123,9 @@ Sharpe 비율: 0.244
 - [x] Phase 2 회귀 테스트 (전체 pytest 189개 통과)
 - [x] run manifest 저장 및 기계적 후보 실행
 - [x] PIT 유니버스 / filing-date 재무 데이터 계약의 bounded validation
+- [x] Phase 1: pure expanding-window WF core (folds, conservative candidates, train-only selector)
 - [ ] KRX 과거 유효일자별 구성종목 파일 및 raw DART filing metadata 확보·연결
-- [ ] True expanding-window WF CV 설계·구현·재실행 (현재 robustness test와 별개)
+- [ ] True expanding-window WF CV 실행 연결·재실행 (현재 robustness test와 별개)
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
 - [ ] 서바이버십 바이어스 테스트
