@@ -90,10 +90,12 @@ def test_disabled_regime_filter_skips_scaling_and_reports_manifest_status(
         lambda tickers, start, end, **kwargs: (price_data, empty_warmup),
     )
 
-    def unexpected_index_download(*args, **kwargs):
-        raise AssertionError("regime index data must not be loaded when disabled")
+    index_data = pd.DataFrame(
+        {"close": [100.0, 101.0, 102.0]},
+        index=dates,
+    )
 
-    monkeypatch.setattr(loader, "get_market_index", unexpected_index_download)
+    monkeypatch.setattr(loader, "get_market_index", lambda *args, **kwargs: index_data)
 
     class FakeMomentumFactor:
         def compute(self, data, **kwargs):
@@ -144,7 +146,7 @@ def test_disabled_regime_filter_skips_scaling_and_reports_manifest_status(
     main_module._run_pipeline(config)
 
     assert captured["regime_scale_map"] is None
-    assert captured["index_data"].empty
+    pd.testing.assert_frame_equal(captured["index_data"], index_data)
 
     context = saved["results"]["_manifest_context"]
     assert context["regime_map"] == {

@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from k200_mq.config import K200MQConfig
+from k200_mq.backtest.benchmark import benchmark_metadata, build_price_return_benchmark
 from k200_mq.strategies.momentum_quality import MomentumQualityStrategy
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class PortfolioRebalanceEngine:
     ) -> None:
         self.config = config
         self.strategy = MomentumQualityStrategy(config, kospi_mcap_ranking)
+        self._execution_stats = self._zero_execution_stats()
 
     def run(
         self,
@@ -82,35 +84,50 @@ class PortfolioRebalanceEngine:
         dict
             ``portfolio_snapshots``, ``trade_log``, ``daily_returns``.
         """
-        del index_data  # The regime map has already been formed by the pipeline.
-
-        if price_data.empty or not isinstance(price_data.index, pd.MultiIndex):
-            return self._empty_result()
-
-        all_dates = pd.DatetimeIndex(
-            pd.to_datetime(price_data.index.get_level_values("date")).normalize().unique()
-        ).sort_values()
+        self._execution_stats = self._zero_execution_stats()
         start_ts = pd.Timestamp(measured_start).normalize() if measured_start is not None else None
         end_ts = pd.Timestamp(measured_end).normalize() if measured_end is not None else None
+        all_dates = self._measured_price_dates(price_data)
+        if start_ts is not None:
+            all_dates = all_dates[all_dates >= start_ts]
+        if end_ts is not None:
+            all_dates = all_dates[all_dates <= end_ts]
+        if start_ts is None and len(all_dates):
+            start_ts = all_dates[0]
+        if end_ts is None and len(all_dates):
+            end_ts = all_dates[-1]
+
+        source = str(getattr(self.config, "MARKET_INDEX_TICKER", "KPI200"))
+        benchmark_returns = build_price_return_benchmark(
+            index_data,
+            source=source,
+            measured_start=(measured_start if measured_start is not None else start_ts),
+            measured_end=(measured_end if measured_end is not None else end_ts),
+        )
+        benchmark_info = benchmark_metadata(
+            source=source,
+            available=not benchmark_returns.empty,
+            observation_count=len(benchmark_returns),
+        )
+
+        if price_data.empty or not isinstance(price_data.index, pd.MultiIndex):
+            return self._empty_result(benchmark_returns, benchmark_info)
+
         active_start_ts = (
             pd.Timestamp(active_trading_start).normalize()
             if active_trading_start is not None
             else None
         )
-        if start_ts is not None:
-            all_dates = all_dates[all_dates >= start_ts]
-        if end_ts is not None:
-            all_dates = all_dates[all_dates <= end_ts]
 
         if len(all_dates) < 2:
-            return self._empty_result()
+            return self._empty_result(benchmark_returns, benchmark_info)
 
         # Make date lookups robust to a source using datetime.date and to
         # month-end dates that fall on weekends/holidays.
         rebalance_lookup = self._build_universe_lookup(universe_data, all_dates)
         if not rebalance_lookup:
             logger.warning("리밸런싱 일자가 없습니다.")
-            return self._empty_result()
+            return self._empty_result(benchmark_returns, benchmark_info)
 
         date_ordinal = {pd.Timestamp(d): i for i, d in enumerate(all_dates)}
         cash = float(self.config.INITIAL_CAPITAL)
@@ -184,6 +201,8 @@ class PortfolioRebalanceEngine:
                 "holdings_value": holdings_value,
                 "nav": nav,
                 "num_positions": len(positions),
+                "cumulative_cost": self._execution_stats["total_cost"],
+                "executed_turnover": self._execution_stats["executed_turnover"],
             })
 
         snapshots_df = pd.DataFrame(snapshots)
@@ -198,7 +217,36 @@ class PortfolioRebalanceEngine:
             "portfolio_snapshots": snapshots_df,
             "trade_log": trade_log_df,
             "daily_returns": daily_returns,
+            "benchmark_returns": benchmark_returns,
+            "benchmark": benchmark_info,
+            "execution_stats": {
+                **self._execution_stats,
+                "initial_capital": float(self.config.INITIAL_CAPITAL),
+            },
         }
+
+    @staticmethod
+    def _measured_price_dates(price_data: pd.DataFrame) -> pd.DatetimeIndex:
+        """Return normalized dates available to define the measured interval."""
+        if price_data is None or price_data.empty:
+            return pd.DatetimeIndex([])
+
+        raw_dates: Any = None
+        if "date" in price_data.columns:
+            raw_dates = price_data["date"]
+        elif isinstance(price_data.index, pd.MultiIndex) and "date" in price_data.index.names:
+            raw_dates = price_data.index.get_level_values("date")
+        elif price_data.index.name == "date" or isinstance(price_data.index, pd.DatetimeIndex):
+            raw_dates = price_data.index
+        if raw_dates is None:
+            return pd.DatetimeIndex([])
+
+        dates = pd.DatetimeIndex(pd.to_datetime(raw_dates, errors="coerce"))
+        if dates.tz is not None:
+            dates = dates.tz_localize(None)
+        dates = dates.normalize()
+        dates = dates[~dates.isna()]
+        return dates.unique().sort_values()
 
     def _build_universe_lookup(
         self,
@@ -483,7 +531,10 @@ class PortfolioRebalanceEngine:
             shares = min(shares, int(max(cash, 0.0) / unit_cost))
             if shares <= 0:
                 continue
-            cost = shares * unit_cost
+            entry_notional = shares * buy_price
+            entry_commission = entry_notional * self.config.COMMISSION_RATE
+            entry_slippage = entry_notional * self.config.SLIPPAGE
+            cost = entry_notional + entry_commission + entry_slippage
             cash = max(cash - cost, 0.0)
 
             if ticker in positions:
@@ -517,7 +568,22 @@ class PortfolioRebalanceEngine:
                 "exit_reason": None,
                 "signal_date": signal_date,
                 "execution_date": execution_date,
+                "entry_notional": entry_notional,
+                "exit_notional": 0.0,
+                "entry_commission": entry_commission,
+                "exit_commission": 0.0,
+                "entry_slippage": entry_slippage,
+                "exit_slippage": 0.0,
+                "exit_tax": 0.0,
+                "total_cost": entry_commission + entry_slippage,
             })
+            self._record_fill(
+                side="buy",
+                notional=entry_notional,
+                commission=entry_commission,
+                slippage=entry_slippage,
+                tax=0.0,
+            )
 
         return max(cash, 0.0)
 
@@ -541,13 +607,12 @@ class PortfolioRebalanceEngine:
         if shares_sold <= 0:
             return cash
         ret = sell_price / position["entry_price"] - 1.0
-        sell_factor = (
-            1.0
-            - self.config.COMMISSION_RATE
-            - self.config.TAX_RATE
-            - self.config.SLIPPAGE
-        )
-        cash += shares_sold * sell_price * sell_factor
+        exit_notional = shares_sold * sell_price
+        exit_commission = exit_notional * self.config.COMMISSION_RATE
+        exit_slippage = exit_notional * self.config.SLIPPAGE
+        exit_tax = exit_notional * self.config.TAX_RATE
+        total_cost = exit_commission + exit_slippage + exit_tax
+        cash += exit_notional - total_cost
         entry_date = pd.Timestamp(position["entry_date"])
         trade_log.append({
             "entry_date": position["entry_date"],
@@ -561,7 +626,22 @@ class PortfolioRebalanceEngine:
             "exit_reason": reason,
             "signal_date": signal_date,
             "execution_date": execution_date,
+            "entry_notional": 0.0,
+            "exit_notional": exit_notional,
+            "entry_commission": 0.0,
+            "exit_commission": exit_commission,
+            "entry_slippage": 0.0,
+            "exit_slippage": exit_slippage,
+            "exit_tax": exit_tax,
+            "total_cost": total_cost,
         })
+        self._record_fill(
+            side="sell",
+            notional=exit_notional,
+            commission=exit_commission,
+            slippage=exit_slippage,
+            tax=exit_tax,
+        )
         remaining_shares = int(position["shares"]) - shares_sold
         if remaining_shares > 0:
             position["shares"] = remaining_shares
@@ -569,14 +649,33 @@ class PortfolioRebalanceEngine:
             del positions[ticker]
         return cash
 
-    def _empty_result(self) -> dict[str, Any]:
+    def _empty_result(
+        self,
+        benchmark_returns: pd.Series | None = None,
+        benchmark_info: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
         """빈 결과를 반환합니다."""
+        source = str(getattr(self.config, "MARKET_INDEX_TICKER", "KPI200"))
+        if benchmark_returns is None:
+            benchmark_returns = pd.Series(dtype=float, name=f"{source}_price_return")
+            benchmark_returns.index.name = "date"
+        if benchmark_info is None:
+            benchmark_info = benchmark_metadata(source=source)
         return {
             "portfolio_snapshots": pd.DataFrame(
-                columns=["date", "cash", "holdings_value", "nav", "num_positions"],
+                columns=[
+                    "date", "cash", "holdings_value", "nav", "num_positions",
+                    "cumulative_cost", "executed_turnover",
+                ],
             ),
             "trade_log": pd.DataFrame(columns=self._trade_columns()),
             "daily_returns": pd.Series(dtype=float),
+            "benchmark_returns": benchmark_returns,
+            "benchmark": benchmark_info,
+            "execution_stats": {
+                **self._execution_stats,
+                "initial_capital": float(self.config.INITIAL_CAPITAL),
+            },
         }
 
     @staticmethod
@@ -586,4 +685,40 @@ class PortfolioRebalanceEngine:
             "entry_date", "exit_date", "ticker", "buy_price",
             "sell_price", "shares", "return_pct", "hold_days", "exit_reason",
             "signal_date", "execution_date",
+            "entry_notional", "exit_notional", "entry_commission",
+            "exit_commission", "entry_slippage", "exit_slippage", "exit_tax",
+            "total_cost",
         ]
+
+    @staticmethod
+    def _zero_execution_stats() -> dict[str, float]:
+        """Return counters for actual fills in one independent engine run."""
+        return {
+            "commission": 0.0,
+            "slippage": 0.0,
+            "tax": 0.0,
+            "total_cost": 0.0,
+            "buy_notional": 0.0,
+            "sell_notional": 0.0,
+            "executed_turnover": 0.0,
+        }
+
+    def _record_fill(
+        self,
+        side: str,
+        notional: float,
+        commission: float,
+        slippage: float,
+        tax: float,
+    ) -> None:
+        """Update cumulative counters using the filled, not requested, size."""
+        cost = commission + slippage + tax
+        self._execution_stats["commission"] += commission
+        self._execution_stats["slippage"] += slippage
+        self._execution_stats["tax"] += tax
+        self._execution_stats["total_cost"] += cost
+        self._execution_stats["executed_turnover"] += notional
+        if side == "buy":
+            self._execution_stats["buy_notional"] += notional
+        elif side == "sell":
+            self._execution_stats["sell_notional"] += notional

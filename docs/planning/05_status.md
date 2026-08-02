@@ -2,7 +2,7 @@
 
 ## 마지막 업데이트: 2026-08-03
 
-## 프로젝트 상태: Phase 4 검증 진행 중, 엔진·캐시·체결 시점 수정 완료, **PIT 데이터 검증 전**
+## 프로젝트 상태: Phase 4 검증 진행 중, 엔진·캐시·체결 시점·benchmark/cost attribution 수정 완료, **PIT 데이터 검증 전**
 
 ## 최근 업데이트: 2026-08-03 (true-walkforward result-integrity 수정)
 
@@ -34,6 +34,19 @@ future-row 방지일 뿐 PIT 보증이 아닙니다.
 > normalized DART 재무 데이터는 `non_pit_fiscal_period`입니다. 따라서 이번
 > 실행은 validated performance evidence가 아니며 canonical/production 결과로
 > 해석하지 않습니다.
+
+## Benchmark / cost attribution 구현 완료 (2026-08-03)
+
+- Benchmark는 `REGIME_FILTER_ENABLED`와 독립적으로 준비하며, 입력 지수의
+  실제 configured ticker와 `price_return` provenance를 manifest에 기록합니다.
+- 측정 구간 밖의 지수 close는 benchmark 수익률 계산 전에 제외하고, 첫
+  구간 close에는 이전 구간 수익률을 붙이지 않습니다.
+- 체결된 buy/sell별 commission, slippage, sell-only tax와 누적 비용을
+  trade log, execution stats, snapshot에서 상호 대조할 수 있습니다.
+- Benchmark는 **price return**이며 배당·분배금을 포함하지 않습니다. 따라서
+  total return benchmark가 아닙니다.
+- 전체 `pytest`의 legacy `src/super_quality/` 실패는 frozen legacy 코드와
+  관련된 별도 문제이며 K200MQ benchmark/cost attribution 검증과 무관합니다.
 
 ## 중요: 이전 백테스트 결과 모두 무효
 
@@ -167,7 +180,7 @@ Sharpe 비율: 0.244
 - [ ] 레짓 필터 교차 분석
 - [ ] 서바이버십 바이어스 테스트
 - [ ] 스트레스 테스트
-- [ ] Turnover / cost attribution
+- [x] Turnover / cost attribution (filled-trade totals, snapshot reconciliation)
 
 ---
 
@@ -255,7 +268,7 @@ contract/fingerprint가 없으면 `legacy_proxy_unknown`으로 분류합니다. 
 
 **다음 우선순위:**
 1. PIT KOSPI 200 유니버스와 공시일 기준 재무 데이터 확보 또는 proxy 한계 명시
-2. KOSPI 200 benchmark와 비용 attribution 추가
+2. KOSPI 200 benchmark와 비용 attribution의 PIT 데이터 범위·성과 해석 검증
 3. true expanding-window WF 실행 결과를 PIT 데이터 계약으로 재검증 (현재 독립 subperiod robustness와 구분)
 4. Momentum/Quality/Regime/Stop-loss ablation
 5. 그 후에만 regime·window·N 파라미터 재검토

@@ -9,6 +9,135 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from k200_mq.backtest.benchmark import (
+    benchmark_metadata,
+    build_price_return_benchmark,
+)
+
+# Compatibility names for callers that import benchmark construction from the
+# analysis module.  The implementation lives in backtest.benchmark so the
+# engine and metrics cannot drift apart.
+build_benchmark_returns = build_price_return_benchmark
+build_benchmark_price_returns = build_price_return_benchmark
+
+
+def compute_cost_attribution(
+    trade_log: pd.DataFrame | None = None,
+    snapshots: pd.DataFrame | None = None,
+    initial_capital: float | None = None,
+    net_return: float | None = None,
+) -> dict[str, float | None]:
+    """Aggregate actual fill costs and notionals from a trade log.
+
+    A buy fill contributes ``entry_*`` fields and a sell fill contributes
+    ``exit_*`` fields.  Older logs without the additive fields are accepted
+    and their buy/sell notionals are reconstructed from price and shares;
+    unavailable cost components remain zero.  ``snapshots`` is used as a
+    fallback for cumulative turnover when no fill log is available.
+
+    ``total_turnover`` is the sum of buy and sell notionals.  When both sides
+    are available, ``one_way_turnover`` is half of that amount.  If snapshots
+    carry ``cumulative_cost``, its final observed value is used as the
+    authoritative cumulative cost (including when the trade log is empty or
+    from an older schema).  This function does not alter either input frame.
+    """
+    zero: dict[str, float | None] = {
+        "commission": 0.0,
+        "slippage": 0.0,
+        "tax": 0.0,
+        "total_cost": 0.0,
+        "buy_notional": 0.0,
+        "sell_notional": 0.0,
+        "total_turnover": 0.0,
+        "turnover": 0.0,
+        "one_way_turnover": 0.0,
+        "cost_fraction_initial_capital": 0.0,
+        "net_return": net_return,
+    }
+    snapshot_cost: float | None = None
+    snapshot_turnover: float | None = None
+    if isinstance(snapshots, pd.DataFrame) and not snapshots.empty:
+        if "cumulative_cost" in snapshots.columns:
+            costs = pd.to_numeric(snapshots["cumulative_cost"], errors="coerce").dropna()
+            if not costs.empty:
+                snapshot_cost = float(costs.iloc[-1])
+        if "executed_turnover" in snapshots.columns:
+            turnover = pd.to_numeric(
+                snapshots["executed_turnover"], errors="coerce"
+            ).dropna()
+            if not turnover.empty:
+                snapshot_turnover = float(turnover.iloc[-1])
+
+    if trade_log is None or not isinstance(trade_log, pd.DataFrame) or trade_log.empty:
+        if snapshot_cost is not None:
+            zero["total_cost"] = snapshot_cost
+        if snapshot_turnover is not None:
+            zero["total_turnover"] = snapshot_turnover
+            zero["turnover"] = snapshot_turnover
+            zero["one_way_turnover"] = snapshot_turnover / 2.0
+        return _finalize_cost_attribution(zero, initial_capital)
+
+    def _sum_column(column: str) -> float:
+        if column not in trade_log.columns:
+            return 0.0
+        values = pd.to_numeric(trade_log[column], errors="coerce").fillna(0.0)
+        return float(values.sum())
+
+    zero["commission"] = _sum_column("entry_commission") + _sum_column("exit_commission")
+    zero["slippage"] = _sum_column("entry_slippage") + _sum_column("exit_slippage")
+    zero["tax"] = _sum_column("exit_tax")
+    zero["total_cost"] = _sum_column("total_cost")
+    zero["buy_notional"] = _sum_column("entry_notional")
+    zero["sell_notional"] = _sum_column("exit_notional")
+
+    # Keep attribution useful for pre-attribution trade logs.  New logs have
+    # the columns above and therefore take the exact-filled path.
+    if "entry_notional" not in trade_log.columns:
+        if {"buy_price", "shares"}.issubset(trade_log.columns):
+            buy_rows = trade_log[trade_log.get("sell_price", pd.Series(index=trade_log.index)).isna()]
+            zero["buy_notional"] = float(
+                (
+                    pd.to_numeric(buy_rows["buy_price"], errors="coerce")
+                    * pd.to_numeric(buy_rows["shares"], errors="coerce")
+                ).fillna(0.0).sum()
+            )
+    if "exit_notional" not in trade_log.columns:
+        if {"sell_price", "shares"}.issubset(trade_log.columns):
+            sell_rows = trade_log[trade_log["sell_price"].notna()]
+            zero["sell_notional"] = float(
+                (
+                    pd.to_numeric(sell_rows["sell_price"], errors="coerce")
+                    * pd.to_numeric(sell_rows["shares"], errors="coerce")
+                ).fillna(0.0).sum()
+            )
+    if "total_cost" not in trade_log.columns:
+        zero["total_cost"] = float(zero["commission"] + zero["slippage"] + zero["tax"])
+
+    zero["total_turnover"] = float(zero["buy_notional"] + zero["sell_notional"])
+    zero["turnover"] = zero["total_turnover"]
+    zero["one_way_turnover"] = zero["total_turnover"] / 2.0
+    if snapshot_cost is not None:
+        # The engine writes this running total from the same fill counters as
+        # execution_stats.  Prefer it when present so attribution cannot
+        # silently report zero for a schema that lacks per-fill cost columns.
+        zero["total_cost"] = snapshot_cost
+    return _finalize_cost_attribution(zero, initial_capital)
+
+
+def _finalize_cost_attribution(
+    values: dict[str, float | None],
+    initial_capital: float | None,
+) -> dict[str, float | None]:
+    """Add the initial-capital cost ratio without changing zero-safe values."""
+    try:
+        capital = float(initial_capital) if initial_capital is not None else 0.0
+    except (TypeError, ValueError):
+        capital = 0.0
+    values["cost_fraction_initial_capital"] = (
+        float(values["total_cost"]) / capital if capital > 0.0 else 0.0
+    )
+    return values
+
 
 class PerformanceMetrics:
     """포트폴리오 성과 지표 계산기.
@@ -29,10 +158,15 @@ class PerformanceMetrics:
         self.daily_returns = daily_returns.astype(float)
         self.risk_free_rate = risk_free_rate
         self._benchmark_returns: pd.Series | None = None
+        self._benchmark_metadata: dict[str, object] = {}
 
     # ── 공개 API ──────────────────────────────────────────────────────
 
-    def set_benchmark(self, benchmark_returns: pd.Series) -> None:
+    def set_benchmark(
+        self,
+        benchmark_returns: pd.Series,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         """비교를 위한 벤치마크 수익률 시리즈를 설정합니다.
 
         Parameters
@@ -40,11 +174,49 @@ class PerformanceMetrics:
         benchmark_returns : pd.Series
             벤치마크의 일별 수익률, index = date.
         """
-        self._benchmark_returns = benchmark_returns.astype(float)
+        returns = benchmark_returns.astype(float).copy()
+        if not isinstance(returns.index, pd.DatetimeIndex):
+            returns.index = pd.DatetimeIndex(pd.to_datetime(returns.index, errors="coerce"))
+        returns.index = returns.index.normalize()
+        returns = returns[~returns.index.isna()].dropna()
+        returns = returns[~returns.index.duplicated(keep="last")].sort_index()
+        self._benchmark_returns = returns
+        attrs = dict(getattr(benchmark_returns, "attrs", {}))
+        source = str(
+            (metadata or {}).get(
+                "source",
+                attrs.get("source", attrs.get("benchmark_source", "unknown")),
+            )
+        )
+        self._benchmark_metadata = benchmark_metadata(source=source)
+        self._benchmark_metadata.update(dict(metadata or {}))
+        self._benchmark_metadata.setdefault(
+            "benchmark_source", attrs.get("benchmark_source", source)
+        )
+        self._benchmark_metadata.setdefault(
+            "type", attrs.get("type", attrs.get("benchmark_type", "price_return"))
+        )
+        self._benchmark_metadata.setdefault(
+            "benchmark_type", attrs.get("benchmark_type", self._benchmark_metadata["type"])
+        )
+        self._benchmark_metadata.setdefault(
+            "is_total_return", bool(attrs.get("is_total_return", False))
+        )
+        self._benchmark_metadata.setdefault(
+            "total_return", bool(attrs.get("total_return", False))
+        )
+        self._benchmark_metadata.setdefault(
+            "description", attrs.get("description", benchmark_metadata(source=source)["description"])
+        )
+        self._benchmark_metadata["available"] = not returns.empty
+        self._benchmark_metadata["observation_count"] = int(len(returns))
 
     def compute_all(
         self,
         trade_log: pd.DataFrame | None = None,
+        snapshots: pd.DataFrame | None = None,
+        initial_capital: float | None = None,
+        net_return: float | None = None,
     ) -> dict:
         """모든 성과 지표를 계산합니다.
 
@@ -56,6 +228,13 @@ class PerformanceMetrics:
             ``sell_price``, ``shares``, ``return_pct``, ``hold_days``,
             ``exit_reason``입니다. 완료된 거래만(non-null
             ``exit_date``) 거래 통계에 사용됩니다.
+        snapshots : pd.DataFrame or None
+            Optional portfolio snapshots used as a turnover fallback.
+        initial_capital : float or None
+            Capital base for the cost fraction attribution.
+        net_return : float or None
+            Optional externally supplied net return.  If omitted, the
+            computed portfolio total return is recorded.
 
         Returns
         -------
@@ -66,8 +245,21 @@ class PerformanceMetrics:
             ``total_trades``, ``avg_hold_days``, ``monthly_returns``,
             ``yearly_returns``, ``benchmark_comparison``.
         """
+        attribution_return = net_return
+        if attribution_return is None and not self.daily_returns.empty:
+            attribution_return = float((1.0 + self.daily_returns).prod() - 1.0)
+        attribution = compute_cost_attribution(
+            trade_log,
+            snapshots=snapshots,
+            initial_capital=initial_capital,
+            net_return=attribution_return,
+        )
         if self.daily_returns.empty:
-            return self._empty_metrics()
+            empty_metrics = self._empty_metrics()
+            empty_metrics["cost_attribution"] = attribution
+            if self._benchmark_metadata:
+                empty_metrics["benchmark"] = dict(self._benchmark_metadata)
+            return empty_metrics
 
         # ── 수익률 기반 지표 ─────────────────────────────────────────
         n = len(self.daily_returns)
@@ -107,6 +299,8 @@ class PerformanceMetrics:
             "monthly_returns": monthly,
             "yearly_returns": yearly,
             "benchmark_comparison": bench,
+            "cost_attribution": attribution,
+            "benchmark": dict(self._benchmark_metadata),
         }
 
     # ── 내부 계산 ─────────────────────────────────────────────────────
@@ -357,4 +551,6 @@ class PerformanceMetrics:
             "monthly_returns": pd.DataFrame(columns=["return"]),
             "yearly_returns": pd.DataFrame(columns=["return"]),
             "benchmark_comparison": {},
+            "cost_attribution": compute_cost_attribution(),
+            "benchmark": {},
         }

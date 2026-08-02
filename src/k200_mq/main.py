@@ -22,7 +22,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from k200_mq.core.analysis.metrics import PerformanceMetrics
+from k200_mq.core.analysis.metrics import (
+    PerformanceMetrics,
+    benchmark_metadata,
+    compute_cost_attribution,
+)
 from k200_mq.validation.prepared import (
     PreparedK200MQInputs,
     execute_engine_interval,
@@ -729,6 +733,50 @@ def _build_run_manifest(
         "tax_rate": _manifest_safe(getattr(config, "TAX_RATE", None)),
         "slippage": _manifest_safe(getattr(config, "SLIPPAGE", None)),
     }
+    configured_source = str(getattr(config, "MARKET_INDEX_TICKER", "KPI200"))
+    supplied_benchmark = context.get("benchmark", {})
+    supplied_source = (
+        str(supplied_benchmark.get("source"))
+        if isinstance(supplied_benchmark, Mapping) and supplied_benchmark.get("source")
+        else None
+    )
+    benchmark_context = benchmark_metadata(source=configured_source)
+    if isinstance(supplied_benchmark, Mapping):
+        benchmark_context.update(dict(supplied_benchmark))
+        if supplied_source is not None and supplied_source != configured_source:
+            # Do not carry availability/counts across a context generated for
+            # a different ticker.  The configured source remains explicit,
+            # but the benchmark is unavailable until that source is prepared.
+            benchmark_context.update({"available": False, "observation_count": 0})
+    # Manifest provenance follows the configured ticker.  In particular, a
+    # custom index must never inherit a KPI200 label from a stale context.
+    benchmark_context.update({
+        "source": configured_source,
+        "source_ticker": configured_source,
+        "benchmark_source": configured_source,
+        "type": "price_return",
+        "benchmark_type": "price_return",
+        "is_total_return": False,
+        "total_return": False,
+        "source_type": (
+            "kpi200" if configured_source.upper() == "KPI200" else "configured_market_index"
+        ),
+        "is_kpi200": configured_source.upper() == "KPI200",
+    })
+    benchmark_context["description"] = benchmark_metadata(
+        source=configured_source,
+    )["description"]
+    supplied_attribution = context.get("cost_attribution", {})
+    cost_attribution = (
+        dict(supplied_attribution)
+        if isinstance(supplied_attribution, Mapping)
+        else compute_cost_attribution()
+    )
+    cost_attribution.setdefault(
+        "definition",
+        "Sum of actual filled buy/sell notionals multiplied by the configured "
+        "commission, slippage, and sell-only tax rates.",
+    )
     universe_context = dict(context.get(
         "universe",
         {"dates": [], "date_count": 0, "ticker_count": 0},
@@ -949,6 +997,8 @@ def _build_run_manifest(
             "exit_policy": "next open",
         },
         "costs": costs,
+        "cost_attribution": cost_attribution,
+        "benchmark": benchmark_context,
         "git": _git_manifest_state(),
         "limitations": limitations,
     }
@@ -1270,18 +1320,22 @@ def prepare_k200mq_inputs(
     else:
         logger.info("  4b. DART API/재무 데이터 없음 — 품질 팩터 건너뜀 (모멘텀 전용)")
 
-    # 4c. 리짓 필터 (KOSPI 200 지수)
+    # 4c. 시장 지수와 리짓 필터
+    # The benchmark is an independent output.  Load it even when regime
+    # scaling is disabled so REGIME_FILTER_ENABLED cannot accidentally make
+    # benchmark attribution unavailable.
     regime_filter_enabled = bool(getattr(config, "REGIME_FILTER_ENABLED", True))
-    if regime_filter_enabled:
-        logger.info("  3c. 리짓 필터 계산 중 (KOSPI 200 MA200)...")
-        index_ticker = config.MARKET_INDEX_TICKER  # KPI200
-        # MA200 needs roughly 200 trading observations before the first measured
-        # date.  Use a deliberately conservative calendar window so weekends and
-        # holidays do not leave the first measured regime silently incomplete.
-        regime_history_days = max(config.REGIME_MA_PERIOD * 2, 365)
-        regime_index_start = pd.Timestamp(start_date) - pd.Timedelta(days=regime_history_days)
-        index_raw = get_market_index(index_ticker, regime_index_start.date(), end_date)
+    index_ticker = str(getattr(config, "MARKET_INDEX_TICKER", "KPI200"))
+    logger.info("  3c. 시장 지수(%s) 준비 중...", index_ticker)
+    # MA200 needs roughly 200 trading observations before the first measured
+    # date.  Use a deliberately conservative calendar window so weekends and
+    # holidays do not leave the first measured regime silently incomplete.
+    regime_history_days = max(config.REGIME_MA_PERIOD * 2, 365) if regime_filter_enabled else 0
+    regime_index_start = pd.Timestamp(start_date) - pd.Timedelta(days=regime_history_days)
+    index_raw = get_market_index(index_ticker, regime_index_start.date(), end_date)
 
+    if regime_filter_enabled:
+        logger.info("  리짓 필터 계산 중 (%s MA200)...", index_ticker)
         if not index_raw.empty:
             regime_factor = RegimeFactor()
             index_for_regime = index_raw.reset_index()
@@ -1323,7 +1377,6 @@ def prepare_k200mq_inputs(
             }
     else:
         logger.info("  3c. REGIME_FILTER_ENABLED=False — 리짓 축소/스케일 적용 안 함")
-        index_raw = pd.DataFrame()
         regime_scale_map = None
         manifest_context["regime_map"] = {
             "enabled": False,
@@ -1485,7 +1538,13 @@ def _run_pipeline(config: Any) -> dict[str, Any] | None:
         measured_end=prepared.measured_end,
         active_trading_start=prepared.active_trading_start,
     )
-    results["_manifest_context"] = dict(prepared.manifest_context)
+    results["metrics"] = _compute_result_metrics(results)
+    manifest_context = dict(prepared.manifest_context)
+    manifest_context["cost_attribution"] = results["metrics"].get(
+        "cost_attribution", compute_cost_attribution()
+    )
+    manifest_context["benchmark"] = results.get("benchmark", {})
+    results["_manifest_context"] = manifest_context
 
     logger.info("6단계: 결과 저장")
     _save_results(results, config)
@@ -1553,6 +1612,43 @@ def _completed_exit_count(trade_log: Any) -> int:
     if not isinstance(trade_log, pd.DataFrame) or "return_pct" not in trade_log:
         return 0
     return int(trade_log["return_pct"].notna().sum())
+
+
+def _compute_result_metrics(
+    results: Mapping[str, Any],
+    returns: pd.Series | None = None,
+) -> dict[str, Any]:
+    """Compute shared metrics, including optional benchmark and cost data."""
+    daily_returns = returns if returns is not None else results.get("daily_returns")
+    if not isinstance(daily_returns, pd.Series):
+        daily_returns = pd.Series(dtype=float)
+    metric_returns = pd.to_numeric(daily_returns, errors="coerce").copy()
+    has_real_dates = isinstance(metric_returns.index, pd.DatetimeIndex)
+    if not has_real_dates:
+        metric_returns.index = pd.bdate_range("2000-01-03", periods=len(metric_returns))
+
+    calculator = PerformanceMetrics(metric_returns)
+    benchmark_returns = results.get("benchmark_returns")
+    if isinstance(benchmark_returns, pd.Series) and not benchmark_returns.empty and has_real_dates:
+        benchmark_metadata_value = results.get("benchmark")
+        metadata = (
+            dict(benchmark_metadata_value)
+            if isinstance(benchmark_metadata_value, Mapping)
+            else None
+        )
+        calculator.set_benchmark(benchmark_returns, metadata=metadata)
+
+    execution_stats = results.get("execution_stats")
+    initial_capital = (
+        execution_stats.get("initial_capital")
+        if isinstance(execution_stats, Mapping)
+        else None
+    )
+    return calculator.compute_all(
+        trade_log=results.get("trade_log"),
+        snapshots=results.get("portfolio_snapshots"),
+        initial_capital=initial_capital,
+    )
 
 
 def _evaluate_interval_result(
@@ -1627,9 +1723,7 @@ def _evaluate_interval_result(
     metric_returns = numeric_returns.copy()
     if not isinstance(metric_returns.index, pd.DatetimeIndex):
         metric_returns.index = pd.bdate_range("2000-01-03", periods=len(metric_returns))
-    metrics = PerformanceMetrics(metric_returns).compute_all(
-        trade_log=results.get("trade_log")
-    )
+    metrics = _compute_result_metrics(results, returns=metric_returns)
     sharpe = float(metrics["sharpe_ratio"])
     if not np.isfinite(sharpe):
         return {
@@ -2174,9 +2268,34 @@ def _save_results(results: dict[str, Any], config: Any) -> None:
         daily_returns.to_csv(ret_path, header=True)
         logger.info("일별 수익률 저장: %s", ret_path)
 
+    metrics = results.get("metrics")
+    if not isinstance(metrics, Mapping):
+        metrics = _compute_result_metrics(results)
+    metrics_path = output_dir / "metrics.json"
+    with metrics_path.open("w", encoding="utf-8") as metrics_file:
+        json.dump(
+            _true_walkforward_json_safe(dict(metrics)),
+            metrics_file,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        metrics_file.write("\n")
+    logger.info("성과 지표 저장: %s", metrics_path)
+
+    benchmark_returns = results.get("benchmark_returns")
+    if isinstance(benchmark_returns, pd.Series) and not benchmark_returns.empty:
+        benchmark_path = output_dir / "benchmark_returns.csv"
+        benchmark_returns.to_csv(benchmark_path, header=True)
+        logger.info("벤치마크 가격수익률 저장: %s", benchmark_path)
+
+    manifest_context = dict(results.get("_manifest_context") or {})
+    manifest_context.setdefault("cost_attribution", metrics.get("cost_attribution", {}))
+    manifest_context.setdefault("benchmark", results.get("benchmark", {}))
     manifest = _build_run_manifest(
         config,
-        results.get("_manifest_context"),
+        manifest_context,
     )
     manifest_path = output_dir / "run_manifest.json"
     with manifest_path.open("w", encoding="utf-8") as manifest_file:
@@ -2259,6 +2378,8 @@ _SUBPERIOD_ARTIFACT_FILENAMES = (
     "portfolio_snapshots.csv",
     "trade_log.csv",
     "daily_returns.csv",
+    "benchmark_returns.csv",
+    "metrics.json",
     "run_manifest.json",
 )
 
@@ -2315,6 +2436,9 @@ def _print_fold_metrics(
     daily_returns: pd.Series,
     trade_log: pd.DataFrame,
     invalid_reason: str | None = None,
+    benchmark_returns: pd.Series | None = None,
+    snapshots: pd.DataFrame | None = None,
+    initial_capital: float | None = None,
 ) -> dict[str, Any]:
     """Calculate one independent subperiod's metrics using shared definitions."""
     if invalid_reason is not None:
@@ -2338,8 +2462,17 @@ def _print_fold_metrics(
     metric_returns = numeric_returns.copy()
     if not isinstance(metric_returns.index, pd.DatetimeIndex):
         metric_returns.index = pd.bdate_range("2000-01-03", periods=len(metric_returns))
-    shared_metrics = PerformanceMetrics(metric_returns).compute_all(
-        trade_log=trade_log
+    calculator = PerformanceMetrics(metric_returns)
+    if (
+        isinstance(benchmark_returns, pd.Series)
+        and not benchmark_returns.empty
+        and isinstance(numeric_returns.index, pd.DatetimeIndex)
+    ):
+        calculator.set_benchmark(benchmark_returns)
+    shared_metrics = calculator.compute_all(
+        trade_log=trade_log,
+        snapshots=snapshots,
+        initial_capital=initial_capital,
     )
 
     completed = (
@@ -2518,7 +2651,28 @@ def _run_subperiod_robustness(config: Any) -> None:
                 # A missing trade log does not invalidate return metrics.
                 tl = pd.DataFrame()
 
-        metrics = _print_fold_metrics(label, dr, tl, invalid_reason=returns_error)
+        benchmark_returns = None
+        snapshots = None
+        initial_capital = None
+        if isinstance(pipeline_result, dict):
+            candidate_benchmark = pipeline_result.get("benchmark_returns")
+            if isinstance(candidate_benchmark, pd.Series):
+                benchmark_returns = candidate_benchmark
+            candidate_snapshots = pipeline_result.get("portfolio_snapshots")
+            if isinstance(candidate_snapshots, pd.DataFrame):
+                snapshots = candidate_snapshots
+            candidate_stats = pipeline_result.get("execution_stats")
+            if isinstance(candidate_stats, Mapping):
+                initial_capital = candidate_stats.get("initial_capital")
+        metrics = _print_fold_metrics(
+            label,
+            dr,
+            tl,
+            invalid_reason=returns_error,
+            benchmark_returns=benchmark_returns,
+            snapshots=snapshots,
+            initial_capital=initial_capital,
+        )
         metrics.update({"period_start": start_str, "period_end": end_str})
         fold_metrics_list.append(metrics)
 

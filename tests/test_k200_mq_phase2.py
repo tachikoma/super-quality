@@ -8,12 +8,18 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 from k200_mq.backtest.portfolio_engine import PortfolioRebalanceEngine
+from k200_mq.backtest.benchmark import build_price_return_benchmark
 from k200_mq.config import K200MQConfig
 from k200_mq.core.data import loader
+from k200_mq.core.analysis.metrics import compute_cost_attribution
 from k200_mq.data import universe as universe_module
 from k200_mq.factors.momentum import MomentumFactor
 from k200_mq.factors.regime import RegimeFactor
-from k200_mq.main import _save_results, _validate_first_rebalance_factor_readiness
+from k200_mq.main import (
+    _build_run_manifest,
+    _save_results,
+    _validate_first_rebalance_factor_readiness,
+)
 
 
 def _price_data(
@@ -75,6 +81,23 @@ def _run(
         price_data,
         pd.DataFrame(),
         factors,
+        pd.DataFrame(universe_rows),
+        **run_kwargs,
+    )
+
+
+def _run_with_config(
+    config: K200MQConfig,
+    price_data: pd.DataFrame,
+    universe_rows: list[dict[str, object]],
+    factor_tickers: list[str],
+    **run_kwargs: object,
+) -> dict[str, object]:
+    dates = list(pd.DatetimeIndex(price_data.index.get_level_values("date")).unique())
+    return PortfolioRebalanceEngine(config).run(
+        price_data,
+        run_kwargs.pop("index_data", pd.DataFrame()),
+        _factors(dates, factor_tickers),
         pd.DataFrame(universe_rows),
         **run_kwargs,
     )
@@ -885,3 +908,170 @@ def test_missing_next_open_skips_new_order_without_inventing_price() -> None:
     )
     assert result["trade_log"].empty
     assert result["portfolio_snapshots"]["cash"].eq(1_000.0).all()
+
+
+def test_exact_buy_and_partial_resize_cost_fields_reconcile() -> None:
+    dates = pd.date_range("2024-02-01", periods=5, freq="B")
+    prices = _price_data(dates, {"A": [(10.0, 10.0)] * len(dates)})
+    config = _config(
+        MAX_POSITION_WEIGHT=1.0,
+        COMMISSION_RATE=0.01,
+        SLIPPAGE=0.02,
+        TAX_RATE=0.03,
+    )
+    result = _run_with_config(
+        config,
+        prices,
+        [{"as_of": dates[0], "ticker": "A"}, {"as_of": dates[2], "ticker": "A"}],
+        ["A"],
+        regime_scale_map={dates[0]: 1.0, dates[2]: 0.5},
+    )
+
+    trades = result["trade_log"]
+    buy = trades[trades["sell_price"].isna()].iloc[0]
+    sell = trades[trades["sell_price"].notna()].iloc[0]
+    assert buy["shares"] == 97
+    assert buy["entry_notional"] == pytest.approx(970.0)
+    assert buy["entry_commission"] == pytest.approx(9.7)
+    assert buy["entry_slippage"] == pytest.approx(19.4)
+    assert buy["total_cost"] == pytest.approx(29.1)
+    assert sell["shares"] == 49
+    assert sell["exit_notional"] == pytest.approx(490.0)
+    assert sell["exit_commission"] == pytest.approx(4.9)
+    assert sell["exit_slippage"] == pytest.approx(9.8)
+    assert sell["exit_tax"] == pytest.approx(14.7)
+    assert sell["total_cost"] == pytest.approx(29.4)
+
+    attribution = compute_cost_attribution(
+        trades,
+        snapshots=result["portfolio_snapshots"],
+        initial_capital=1_000.0,
+    )
+    assert attribution["commission"] == pytest.approx(14.6)
+    assert attribution["slippage"] == pytest.approx(29.2)
+    assert attribution["tax"] == pytest.approx(14.7)
+    assert attribution["total_cost"] == pytest.approx(58.5)
+    assert result["execution_stats"]["total_cost"] == pytest.approx(58.5)
+    assert result["portfolio_snapshots"]["cumulative_cost"].iloc[-1] == pytest.approx(58.5)
+    assert trades["total_cost"].sum() == pytest.approx(58.5)
+
+
+def test_stop_loss_cost_fields_and_total() -> None:
+    dates = pd.date_range("2024-03-01", periods=4, freq="B")
+    prices = _price_data(
+        dates,
+        {"A": [(10.0, 10.0), (10.0, 10.0), (8.0, 8.0), (7.0, 7.0)]},
+    )
+    config = _config(
+        MAX_POSITION_WEIGHT=1.0,
+        COMMISSION_RATE=0.01,
+        SLIPPAGE=0.02,
+        TAX_RATE=0.03,
+    )
+    result = _run_with_config(
+        config,
+        prices,
+        [{"as_of": dates[0], "ticker": "A"}],
+        ["A"],
+    )
+
+    stop = result["trade_log"].query("exit_reason == 'stop_loss'").iloc[0]
+    assert stop["shares"] == 97
+    assert stop["exit_notional"] == pytest.approx(679.0)
+    assert stop["exit_commission"] == pytest.approx(6.79)
+    assert stop["exit_slippage"] == pytest.approx(13.58)
+    assert stop["exit_tax"] == pytest.approx(20.37)
+    assert stop["total_cost"] == pytest.approx(40.74)
+    assert result["execution_stats"]["total_cost"] == pytest.approx(69.84)
+    assert result["portfolio_snapshots"]["cumulative_cost"].iloc[-1] == pytest.approx(69.84)
+
+
+def test_benchmark_is_available_with_regime_disabled_and_preserves_source() -> None:
+    dates = pd.date_range("2024-04-01", periods=4, freq="B")
+    prices = _price_data(dates, {"A": [(10.0, 10.0)] * len(dates)})
+    index = pd.DataFrame(
+        {"close": [100.0, 105.0, 110.0, 120.0]},
+        index=dates,
+    )
+    config = _config(REGIME_FILTER_ENABLED=False, MARKET_INDEX_TICKER="KPI200")
+    result = _run_with_config(
+        config,
+        prices,
+        [{"as_of": dates[0], "ticker": "A"}],
+        ["A"],
+        index_data=index,
+    )
+    assert result["benchmark"]["available"] is True
+    assert result["benchmark"]["source"] == "KPI200"
+    assert result["benchmark"]["source_ticker"] == "KPI200"
+    assert result["benchmark"]["is_kpi200"] is True
+    assert result["benchmark"]["type"] == "price_return"
+
+    custom_config = config.model_copy(update={"MARKET_INDEX_TICKER": "KS11"})
+    custom = _run_with_config(
+        custom_config,
+        prices,
+        [{"as_of": dates[0], "ticker": "A"}],
+        ["A"],
+        index_data=index,
+    )
+    assert custom["benchmark"]["source"] == "KS11"
+    assert custom["benchmark"]["benchmark_source"] == "KS11"
+    assert custom["benchmark"]["is_kpi200"] is False
+    assert "KPI200" not in custom["benchmark"]["description"]
+    manifest = _build_run_manifest(custom_config, {"benchmark": custom["benchmark"]})
+    assert manifest["benchmark"]["source"] == "KS11"
+    assert manifest["benchmark"]["source_type"] == "configured_market_index"
+
+
+def test_benchmark_clipping_excludes_observations_outside_measured_range() -> None:
+    dates = pd.date_range("2024-05-01", periods=5, freq="B")
+    index = pd.DataFrame(
+        {"close": [90.0, 100.0, 110.0, 121.0, 150.0]},
+        index=dates,
+    )
+    returns = build_price_return_benchmark(
+        index,
+        measured_start=dates[1],
+        measured_end=dates[3],
+    )
+    assert returns.index.tolist() == [dates[2], dates[3]]
+    assert returns.tolist() == pytest.approx([0.10, 0.10])
+
+
+def test_engine_infers_benchmark_bounds_from_measured_price_dates() -> None:
+    price_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    prices = _price_data(price_dates, {"A": [(10.0, 10.0)] * len(price_dates)})
+    index_dates = pd.date_range("2024-01-01", periods=5, freq="D")
+    index = pd.DataFrame(
+        {"close": [90.0, 100.0, 110.0, 121.0, 150.0]},
+        index=index_dates,
+    )
+
+    result = _run_with_config(
+        _config(REGIME_FILTER_ENABLED=False),
+        prices,
+        [{"as_of": price_dates[0], "ticker": "A"}],
+        ["A"],
+        index_data=index,
+    )
+
+    benchmark = result["benchmark_returns"]
+    assert benchmark.index.tolist() == [price_dates[1], price_dates[2]]
+    assert benchmark.tolist() == pytest.approx([0.10, 0.10])
+    assert pd.Timestamp("2024-01-01") not in benchmark.index
+    assert pd.Timestamp("2024-01-05") not in benchmark.index
+
+
+def test_empty_cost_attribution_consumes_snapshot_cost_and_is_safe() -> None:
+    snapshots = pd.DataFrame({
+        "cumulative_cost": [0.0, 12.5],
+        "executed_turnover": [0.0, 250.0],
+    })
+    attribution = compute_cost_attribution(
+        pd.DataFrame(), snapshots=snapshots, initial_capital=1_000.0,
+    )
+    assert attribution["total_cost"] == pytest.approx(12.5)
+    assert attribution["cost_fraction_initial_capital"] == pytest.approx(0.0125)
+    assert attribution["total_turnover"] == pytest.approx(250.0)
+    assert compute_cost_attribution()["total_cost"] == 0.0
