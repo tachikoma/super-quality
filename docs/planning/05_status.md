@@ -17,7 +17,7 @@ NAV가 `cash + holdings`로 계산되므로 cash를 double-counting하여 수익
 **P1-5에서 버그 수정**: `_rebalance()`와 `_check_stop_losses()`가 모두 `(positions, cash)` 튜플을 반환하도록 변경.
 `run()`에서 반환값을 destructure하여 cash 변경이 올바르게 전파됩니다.
 
-**모든 이전 백테스트 결과(+207%, +244%, WF CV +245%)는 cash 변이 버그로 인해 무효입니다.**
+**모든 이전 백테스트 결과(+207%, +244%, 이전에 WF CV로 표기한 +245%)는 cash 변이 버그로 인해 무효입니다.**
 
 ## 수정 후 백테스트 결과 (2015-2024)
 
@@ -116,14 +116,15 @@ Sharpe 비율: 0.244
 - [x] P0-1: 리짓 필터 엔진 내 적용 (regime_scale → target_value at rebalance)
 - [x] P0-2: 리밸런싱 일자 통합 (universe_data as_of 사용)
 - [x] P0-3: 품질 팩터 커버리지 개선 (0 분모 → 1 대체 + coverage 로깅)
-- [x] Walk-forward CV (5-fold expanding, 비중첩 2-3년 윈도우 — **cash 변이 버그로 무효**)
+- [x] Independent subperiod robustness test (5개 고정 독립 기간 — **cash 변이 버그로 무효인 과거 실행**)
+- [x] `robustness` CLI 및 `walkforward` 호환 alias를 independent subperiod robustness로 명확화
 - [x] P1-5: trailing stop-loss + cash 변이 버그 픽스 (peak_price 추적, cash 반환)
 - [x] Phase 2: cache ticker/coverage, warmup, regime date, next-open execution, target-weight resize
-- [x] Phase 2 회귀 테스트 (전체 pytest 182개 통과)
+- [x] Phase 2 회귀 테스트 (전체 pytest 189개 통과)
 - [x] run manifest 저장 및 기계적 후보 실행
 - [x] PIT 유니버스 / filing-date 재무 데이터 계약의 bounded validation
 - [ ] KRX 과거 유효일자별 구성종목 파일 및 raw DART filing metadata 확보·연결
-- [ ] WF CV 재설계 및 재실행
+- [ ] True expanding-window WF CV 설계·구현·재실행 (현재 robustness test와 별개)
 - [ ] 파라미터 민감도 분석
 - [ ] 레짓 필터 교차 분석
 - [ ] 서바이버십 바이어스 테스트
@@ -135,8 +136,8 @@ Sharpe 비율: 0.244
 ## Phase 5: 마무리
 - [x] README_K200MQ.md (새 전략 문서)
 - [x] AGENTS.md 업데이트
-- [ ] README.md (새 전략 docs 섹션) — 진행 중
-- [x] Test 보강 (전체 pytest 182개 통과, PIT provenance/config strict-mode contract tests 추가)
+- [x] README.md (새 전략 docs 섹션)
+- [x] Test 보강 (전체 pytest 189개 통과, PIT provenance/config strict-mode 및 robustness tests 추가)
 - [x] 기계적 후보 백테스트 (2015-2024, 성과 확정 전)
 - [ ] 코드 리뷰
 - [ ] v0.1.0 release tag
@@ -162,10 +163,10 @@ Sharpe 비율: 0.244
 | 2026-07-28 | P0-1 해결: 리짓 필터 엔진 내 적용 | regime_scale → target_value at rebalance |
 | 2026-07-28 | P0-2 해결: 리밸런싱 일자 통합 | universe_data as_of 사용 |
 | 2026-07-28 | P0-3 해결: 품질 커버리지 개선 | 0 분모 → 1 대체 + coverage 로깅 |
-| 2026-07-28 | Walk-forward CV 완료 (5-fold) | 모든 접힘 양수, 기하평균 수익률 +245.82% |
+| 2026-07-28 | 독립 subperiod test 완료 (5개 기간) | 당시 WF CV로 잘못 표기됨; 모든 결과는 cash 버그로 무효 |
 | 2026-07-28 | **치명적 cash 변이 버그 발견** | `_rebalance()`의 cash가 local copy, `run()`에 반영 안 됨 |
 | 2026-07-28 | P1-5 해결: trailing stop-loss + cash 버그 픽스 | peak_price 추적, `(positions, cash)` 튜플 반환 |
-| 2026-07-28 | **이전 모든 결과 무효 선언** | cash 변이 버그로 +207%, +244%, WF CV 모두 부풀려짐 |
+| 2026-07-28 | **이전 모든 결과 무효 선언** | cash 변이 버그로 +207%, +244%, 당시 WF CV 표기 결과 모두 부풀려짐 |
 | 2026-07-28 | 수정 후 백테스트: +14.17%/10년, Sharpe 0.165 | 전략 유의미한 alpha 없음, 근본적 재검토 필요
 | 2026-08-02 | Phase 2 수정 완료 | next-open 체결, regime warmup, cache coverage, target-weight, readiness gate |
 | 2026-08-02 | Phase 2 후보 실행 | +26.97%, Sharpe 0.244 — mechanical candidate, 성과 확정 금지 |
@@ -178,7 +179,7 @@ Sharpe 비율: 0.244
 |--------|--------|-----------|------|
 | KOSPI 200 종속 이력 소스 부재 | **높음** | 프록시(mcap top 200)로 Fallback | 미해결 |
 | 모멘텀 크래시 리스크 | **높음** | Long-only + 리짓 필터로 부분 완화 | 미해결 |
-| 과적합 (walk-forward 미검증) | **높음** | Phase 4에서 반드시 수행 | 계획 중 |
+| 과적합 (true expanding-window walk-forward 미검증) | **높음** | 독립 subperiod test는 대체 검증이 아님 | 계획 중 |
 | 엔진 리모델링 과대 산정 | 중간 | 기존 BacktestEngine 보존, 별도 PortfolioRebalanceEngine | 계획됨 |
 | DART 계정 매핑 실패 | 중간 | 3-pass 기존 매칭 유지 + 새 팩터용 매핑 테이블 추가 | 계획됨 |
 | 한국 모멘텀 효과 크기 작음 | 중 | 포터블 1.34%/월 목표, net cost 고려 시 1.0% 이상 필요 | 미해결 |
@@ -217,6 +218,6 @@ contract/fingerprint가 없으면 `legacy_proxy_unknown`으로 분류합니다. 
 **다음 우선순위:**
 1. PIT KOSPI 200 유니버스와 공시일 기준 재무 데이터 확보 또는 proxy 한계 명시
 2. KOSPI 200 benchmark와 비용 attribution 추가
-3. 수정된 WF 검증 재실행
+3. true expanding-window WF 검증 설계·구현·재실행 (현재 독립 subperiod robustness와 구분)
 4. Momentum/Quality/Regime/Stop-loss ablation
 5. 그 후에만 regime·window·N 파라미터 재검토

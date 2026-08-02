@@ -79,6 +79,20 @@ uv run python -m k200_mq.main run \
     --weight-momentum 0.50 --weight-quality 0.50
 ```
 
+### 독립 subperiod robustness test
+
+```bash
+# 고정된 독립 기간별 견고성 테스트
+uv run python -m k200_mq.main robustness
+
+# 기존 walkforward 명령은 호환 alias
+uv run python -m k200_mq.main walkforward
+```
+
+현재 명령은 학습/파라미터 피팅이 없는 independent subperiod robustness
+test이며 true expanding-window walk-forward CV가 아닙니다. 진정한 WF 검증은
+향후 작업으로 남아 있습니다.
+
 ### 출력 파일
 
 K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리에 저장됩니다:
@@ -91,6 +105,7 @@ K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리�
 | `equity_curve.png` | 포트폴리오 NAV 추이 |
 | `drawdown.png` | 고점 대비 낙폭 차트 |
 | `monthly_returns.png` | 월별 수익률 히트맵 |
+| `subperiod_robustness_summary.csv` | 독립 subperiod robustness 결과 요약 |
 
 ## 프로젝트 구조
 
@@ -195,5 +210,5 @@ ruff check
 | [docs/planning/01_strategy_pivot.md](docs/planning/01_strategy_pivot.md) | 전략 전환 이유 및 폐기/유지 매핑 |
 | [docs/planning/02_architecture.md](docs/planning/02_architecture.md) | KOSPI 200 MQ 패키지 구조 및 팩터 설계 |
 | [docs/planning/03_implementation_plan.md](docs/planning/03_implementation_plan.md) | 5단계 구현 계획 |
-| [docs/planning/04_backtest_spec.md](docs/planning/04_backtest_spec.md) | 워크포워드 CV, 비용 모델, 스트레스 테스트 |
+| [docs/planning/04_backtest_spec.md](docs/planning/04_backtest_spec.md) | 독립 subperiod robustness, 향후 WF, 비용 모델, 스트레스 테스트 |
 | [docs/planning/05_status.md](docs/planning/05_status.md) | 실시간 진행 상황 |

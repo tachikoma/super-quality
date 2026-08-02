@@ -165,26 +165,33 @@ for each trading day:
 - [ ] argparse: `--start`, `--end`, `--output`, `--dart-api-key`, `--no-cache`, `--rebalance-freq`, `--top-n`
 - [ ] 기존 `super-quality` CLI 와 별도 실행
 
-### 4.2 Walk-Forward 검증
-**설계:**
-- Training window: 2015-2019 (expanding)
+### 4.2 독립 Subperiod Robustness Test (현재 구현)
+현재 CLI의 `robustness` 명령은 다음 고정 기간을 서로 독립적으로
+백테스트합니다: 2014–2016, 2017–2018, 2019–2020, 2021–2022,
+2023–현재. 학습 구간이나 파라미터 피팅은 없으므로 이는
+**independent subperiod robustness test**이지 walk-forward CV가 아닙니다.
+
+**출력:**
+- subperiod별 성과 지표 (CAGR, Sharpe, Max DD, Win Rate)
+- 유효 subperiod만 사용한 기하 평균 수익률과 worst MDD
+- 비어 있거나 유효하지 않은 subperiod의 명시적 상태
+
+### 4.3 True expanding-window Walk-Forward (향후 작업)
+진정한 WF 검증은 별도 구현이 필요합니다.
+- Training window: 2015–2019 (expanding)
 - Test window: 2020, 2021, 2022, 2023, 2024
 - Purge: 각 fold 간 3개월 gap
 - Embargo: 각 fold 후 1개월 gap
-- 교차검증: 5-fold expanding window
+- 파라미터 피팅은 training 구간 내부에만 제한
+- train/test 성과 차이와 fold 간 안정성 분석
 
-**출력:**
-- fold별 성과 지표 (CAGR, Sharpe, Max DD, Win Rate)
-- fold 간 안정성 분석 (std dev of metrics)
-- 과적합 진단 (train vs test 성과 차이)
-
-### 4.3 트랜잭션 비용 모델
+### 4.4 트랜잭션 비용 모델
 - [ ] 명시적 비용: 수수료 0.015% + 세금 0.20%(매도) + 슬리피지 0.10%
 - [ ] 시장 영향 비용: ADV 기반 동적 슬리피지
 - [ ] Net of cost alpha 산출
 - [ ] Turnover 비용 귀속 분석
 
-### 4.4 파라미터 민감도 분석
+### 4.5 파라미터 민감도 분석
 | 파라미터 | 범위 |
 |----------|------|
 | MOMENTUM_WINDOW | (252, 21), (252, 126), (126, 63), (252, 147) |
@@ -194,13 +201,13 @@ for each trading day:
 | STOP_LOSS | -10%, -15%, -20%, none |
 | REGIME_FILTER | on, off |
 
-### 4.5 레짓 필터 교차 분석
+### 4.6 레짓 필터 교차 분석
 - Regime ON vs OFF 성과 비교
 - Bear market (2022)에서의 성과
 - Sideways market (2017-2019)에서의 성과
 - Trend market (2020)에서의 성과
 
-### 4.6 서바이버십 바이어스 테스트
+### 4.7 서바이버십 바이어스 테스트
 - A) Current constituents backtested (point-in-time 미사용)
 - B) Point-in-time constituents backtested
 - 두 결과 차이 분석 → 편향 정량화

@@ -20,6 +20,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from k200_mq.core.analysis.metrics import PerformanceMetrics
+
 logger = logging.getLogger(__name__)
 
 _SECRET_FIELD_MARKERS = (
@@ -236,30 +238,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="최소 유동성 비율 (기본 0.01)",
     )
 
-    wf_parser = sub.add_parser("walkforward", help="5-fold walk-forward 교차 검증")
-    wf_parser.add_argument(
+    robustness_parser = sub.add_parser(
+        "robustness",
+        aliases=["walkforward"],
+        help="독립 subperiod robustness test (walk-forward CV 아님)",
+    )
+    robustness_parser.add_argument(
         "--dart-api-key",
         default=argparse.SUPPRESS,
         help="OpenDartReader API 키",
     )
-    wf_parser.add_argument(
+    robustness_parser.add_argument(
         "--output",
         "-o",
         default=argparse.SUPPRESS,
         help="결과 출력 디렉토리 (기본값: outputs_k200mq)",
     )
-    wf_parser.add_argument(
+    robustness_parser.add_argument(
         "--top-n",
         type=int,
         default=argparse.SUPPRESS,
         help="선택 종목 수 (기본 20)",
     )
-    wf_parser.add_argument(
+    robustness_parser.add_argument(
         "--rebalance-freq",
         default=argparse.SUPPRESS,
         help="리밸런싱 주기: M(월간) 또는 Q(분기)",
     )
-    wf_parser.add_argument(
+    robustness_parser.add_argument(
         "--strict-pit",
         action="store_true",
         default=argparse.SUPPRESS,
@@ -273,7 +279,7 @@ def _build_config(args: argparse.Namespace) -> Any:
     """CLI 인자를 기반으로 K200MQConfig를 구성합니다."""
     from k200_mq.config import K200MQConfig
 
-    if hasattr(args, "command") and args.command == "walkforward":
+    if getattr(args, "command", None) in {"robustness", "walkforward"}:
         config_kwargs: dict[str, Any] = {}
         if hasattr(args, "output"):
             config_kwargs["OUTPUT_DIR"] = args.output
@@ -809,7 +815,7 @@ def _enforce_strict_pit_validation(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _run_pipeline(config: Any) -> None:
+def _run_pipeline(config: Any) -> dict[str, Any]:
     """실제 백테스트 파이프라인을 실행합니다.
 
     Steps
@@ -1206,7 +1212,9 @@ def _run_pipeline(config: Any) -> None:
     _save_results(results, config)
 
     # ── 7. 요약 출력 ──────────────────────────────────────────
-    _print_summary(results, config)
+    if getattr(config, "PRINT_SUMMARY", True):
+        _print_summary(results, config)
+    return results
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1315,136 +1323,321 @@ def _print_summary(results: dict[str, Any], config: Any) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Walk-Forward CV
+# Independent subperiod robustness test
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _print_fold_metrics(label: str, daily_returns: pd.Series, trade_log: pd.DataFrame) -> dict[str, Any]:
-    """단일 fold의 메트릭을 계산하고 출력합니다."""
-    if daily_returns.empty or daily_returns.isna().all():
-        print(f"  {label}: 데이터 없음")
-        return {"label": label, "total_return": 0.0, "sharpe": 0.0, "max_dd": 0.0, "win_rate": 0.0, "n_trades": 0}
+_SUBPERIOD_ARTIFACT_FILENAMES = (
+    "portfolio_snapshots.csv",
+    "trade_log.csv",
+    "daily_returns.csv",
+    "run_manifest.json",
+)
 
-    cum = (1 + daily_returns).cumprod()
-    total_ret = cum.iloc[-1] - 1.0
-    vol = daily_returns.std()
-    n_years = len(daily_returns) / 252
-    ann_ret = (1 + total_ret) ** (1 / max(n_years, 0.01)) - 1
-    ann_vol = vol * (252 ** 0.5)
-    sharpe = ann_ret / ann_vol if ann_vol > 0 else 0.0
-    peak = cum.cummax()
-    dd = (cum - peak) / peak
-    max_dd = dd.min()
-    completed = trade_log[trade_log["return_pct"].notna()] if "return_pct" in trade_log.columns else pd.DataFrame()
-    win_rate = (completed["return_pct"] > 0).mean() * 100 if len(completed) > 0 else 0.0
 
-    print(f"  {label}: 수익률 {total_ret*100:+.2f}% | "
-          f"Sharpe {sharpe:.3f} | MDD {max_dd*100:.2f}% | "
-          f"승률 {win_rate:.1f}% | 거래 {len(completed)}건")
+def _clear_subperiod_artifacts(fold_output: Path) -> str | None:
+    """Remove outputs from a previous run before starting a subperiod."""
+    for filename in _SUBPERIOD_ARTIFACT_FILENAMES:
+        try:
+            (fold_output / filename).unlink(missing_ok=True)
+        except OSError as exc:
+            return f"could not clear previous {filename} ({exc})"
+    return None
+
+
+def _subperiods(as_of: date | None = None) -> list[tuple[str, str, str]]:
+    """Return the fixed periods used by the independent robustness test."""
+    effective_as_of = as_of or date.today()
+    return [
+        ("2014-01-01", "2016-12-31", "Subperiod 1: 2014-2016"),
+        ("2017-01-01", "2018-12-31", "Subperiod 2: 2017-2018"),
+        ("2019-01-01", "2020-12-31", "Subperiod 3: 2019-2020"),
+        ("2021-01-01", "2022-12-31", "Subperiod 4: 2021-2022"),
+        (
+            "2023-01-01",
+            effective_as_of.isoformat(),
+            f"Subperiod 5: 2023-{effective_as_of.year}",
+        ),
+    ]
+
+
+def _invalid_fold_metrics(label: str, reason: str) -> dict[str, Any]:
+    """Create an explicitly invalid result without zero-valued performance."""
+    print(f"  {label}: INVALID subperiod ({reason})")
+    return {
+        "validation_type": "independent_subperiod_robustness",
+        "label": label,
+        "status": "invalid",
+        "valid": False,
+        "reason": reason,
+        "total_return": np.nan,
+        "cagr": np.nan,
+        "ann_return": np.nan,
+        "sharpe": np.nan,
+        "sharpe_ratio": np.nan,
+        "max_dd": np.nan,
+        "max_drawdown": np.nan,
+        "win_rate": np.nan,
+        "n_trades": 0,
+    }
+
+
+def _print_fold_metrics(
+    label: str,
+    daily_returns: pd.Series,
+    trade_log: pd.DataFrame,
+    invalid_reason: str | None = None,
+) -> dict[str, Any]:
+    """Calculate one independent subperiod's metrics using shared definitions."""
+    if invalid_reason is not None:
+        return _invalid_fold_metrics(label, invalid_reason)
+    if daily_returns is None or daily_returns.empty:
+        return _invalid_fold_metrics(label, "daily returns are empty")
+
+    numeric_returns = pd.to_numeric(daily_returns, errors="coerce")
+    if numeric_returns.isna().any():
+        return _invalid_fold_metrics(label, "daily returns contain missing or non-numeric values")
+    if not np.isfinite(numeric_returns.to_numpy(dtype=float)).all():
+        return _invalid_fold_metrics(label, "daily returns contain non-finite values")
+    if (numeric_returns <= -1.0).any():
+        return _invalid_fold_metrics(label, "daily returns contain a loss of 100% or more")
+    if isinstance(numeric_returns.index, pd.DatetimeIndex) and numeric_returns.index.isna().any():
+        return _invalid_fold_metrics(label, "daily returns contain invalid dates")
+
+    # PerformanceMetrics expects a date index for its period-return reports.
+    # Pipeline output already has one; a deterministic business-day index keeps
+    # this helper usable in unit tests with a plain Series as well.
+    metric_returns = numeric_returns.copy()
+    if not isinstance(metric_returns.index, pd.DatetimeIndex):
+        metric_returns.index = pd.bdate_range("2000-01-03", periods=len(metric_returns))
+    shared_metrics = PerformanceMetrics(metric_returns).compute_all()
+
+    completed = (
+        trade_log[trade_log["return_pct"].notna()]
+        if isinstance(trade_log, pd.DataFrame) and "return_pct" in trade_log.columns
+        else pd.DataFrame()
+    )
+    win_rate = (
+        (completed["return_pct"] > 0).mean() * 100
+        if len(completed) > 0
+        else 0.0
+    )
+    total_return = float(shared_metrics["total_return"])
+    cagr = float(shared_metrics["cagr"])
+    sharpe = float(shared_metrics["sharpe_ratio"])
+    max_dd = float(shared_metrics["max_drawdown"])
+
+    print(f"  {label}: 수익률 {total_return*100:+.2f}% | "
+          f"CAGR {cagr*100:+.2f}% | Sharpe {sharpe:.3f} | "
+          f"MDD {max_dd*100:.2f}% | 승률 {win_rate:.1f}% | "
+          f"거래 {len(completed)}건")
 
     return {
+        "validation_type": "independent_subperiod_robustness",
         "label": label,
-        "total_return": total_ret,
-        "ann_return": ann_ret,
+        "status": "valid",
+        "valid": True,
+        "reason": "",
+        "total_return": total_return,
+        "cagr": cagr,
+        "ann_return": cagr,
         "sharpe": sharpe,
+        "sharpe_ratio": sharpe,
         "max_dd": max_dd,
-        "win_rate": win_rate,
+        "max_drawdown": max_dd,
+        "win_rate": float(win_rate),
         "n_trades": len(completed),
     }
 
 
-def _run_walkforward(config: Any) -> None:
-    """5-fold walk-forward cross validation.
+def _aggregate_subperiod_metrics(fold_metrics_list: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate only valid independent subperiod results."""
+    valid_metrics: list[dict[str, Any]] = []
+    for metrics in fold_metrics_list:
+        if not metrics.get("valid", True):
+            continue
+        values = [
+            metrics.get("total_return"),
+            metrics.get("sharpe", metrics.get("sharpe_ratio")),
+            metrics.get("max_dd", metrics.get("max_drawdown")),
+            metrics.get("win_rate"),
+        ]
+        try:
+            values_are_finite = all(
+                value is not None and np.isfinite(float(value))
+                for value in values
+            )
+        except (TypeError, ValueError):
+            values_are_finite = False
+        if values_are_finite:
+            valid_metrics.append(metrics)
 
-    각 fold는 독립적인 기간에 대해 백테스트를 실행하고,
-    모든 fold의 결과를 집계하여 보고합니다.
+    result: dict[str, Any] = {
+        "validation_type": "independent_subperiod_robustness",
+        "valid_folds": len(valid_metrics),
+        "invalid_folds": len(fold_metrics_list) - len(valid_metrics),
+        "geo_mean_return": None,
+        "mean_sharpe": None,
+        "worst_mdd": None,
+        "mean_mdd": None,
+        "mean_win_rate": None,
+        "total_trades": None,
+    }
+    if not valid_metrics:
+        return result
+
+    returns = np.asarray([float(m["total_return"]) for m in valid_metrics])
+    result.update({
+        "geo_mean_return": float(np.prod(1.0 + returns) ** (1.0 / len(returns)) - 1.0),
+        "mean_sharpe": float(np.mean([float(m["sharpe"]) for m in valid_metrics])),
+        "worst_mdd": float(min(float(m["max_dd"]) for m in valid_metrics)),
+        "mean_mdd": float(np.mean([float(m["max_dd"]) for m in valid_metrics])),
+        "mean_win_rate": float(np.mean([float(m["win_rate"]) for m in valid_metrics])),
+        "total_trades": int(sum(int(m["n_trades"]) for m in valid_metrics)),
+    })
+    return result
+
+
+def _run_subperiod_robustness(config: Any) -> None:
+    """Run fixed independent subperiod robustness tests.
+
+    These periods have no training window or parameter fitting.  This is not
+    expanding-window walk-forward cross-validation; that validation remains
+    future work.
     """
     base_output = Path(config.OUTPUT_DIR)
-    wf_dir = base_output / "walkforward"
-
-    today_str = date.today().isoformat()
-    folds = [
-        ("2014-01-01", "2016-12-31", "Fold 1: 2014-2016"),
-        ("2017-01-01", "2018-12-31", "Fold 2: 2017-2018"),
-        ("2019-01-01", "2020-12-31", "Fold 3: 2019-2020"),
-        ("2021-01-01", "2022-12-31", "Fold 4: 2021-2022"),
-        ("2023-01-01", today_str,     "Fold 5: 2023-2026"),
-    ]
-
-    all_daily_returns: list[pd.Series] = []
-    all_trade_logs: list[pd.DataFrame] = []
+    robustness_dir = base_output / "subperiod_robustness"
+    base_output.mkdir(parents=True, exist_ok=True)
+    robustness_dir.mkdir(parents=True, exist_ok=True)
+    periods = _subperiods()
     fold_metrics_list: list[dict[str, Any]] = []
 
-    for start_str, end_str, label in folds:
+    for period_number, (start_str, end_str, label) in enumerate(periods, start=1):
         print(f"\n{'=' * 60}")
         print(f"  {label} ({start_str} ~ {end_str})")
         print(f"{'=' * 60}")
 
-        fold_output = wf_dir / label.replace(":", "").replace(" ", "_")
+        fold_output = robustness_dir / f"subperiod_{period_number}"
+        fold_output.mkdir(parents=True, exist_ok=True)
         fold_config = config.model_copy(update={
             "START_DATE": start_str,
             "END_DATE": end_str,
             "OUTPUT_DIR": str(fold_output),
+            "PRINT_SUMMARY": False,
         })
 
-        _run_pipeline(fold_config)
+        clear_error = _clear_subperiod_artifacts(fold_output)
+        pipeline_result: Any = None
+        pipeline_error: str | None = None
+        if clear_error is None:
+            try:
+                pipeline_result = _run_pipeline(fold_config)
+            except Exception as exc:  # noqa: BLE001 - one failed fold must be reported
+                pipeline_error = f"pipeline failed ({exc})"
+        else:
+            pipeline_error = clear_error
 
         trade_path = fold_output / "trade_log.csv"
         returns_path = fold_output / "daily_returns.csv"
 
         dr = pd.Series(dtype=float)
-        if returns_path.exists():
-            dr_df = pd.read_csv(returns_path)
-            if "daily_return" in dr_df.columns:
-                dr = dr_df["daily_return"]
-                dr.index = pd.to_datetime(dr_df.iloc[:, 0]) if "date" in dr_df.columns else dr.index
+        returns_error: str | None = None
+        tl = pd.DataFrame()
 
-        tl = pd.read_csv(trade_path) if trade_path.exists() else pd.DataFrame()
+        # _run_pipeline returns its current in-memory results.  Do not fall
+        # back to files when it returned an empty result: those files may be
+        # leftovers from an earlier run, even if a caller failed to clear
+        # them.  The normal pipeline is covered by this branch; the file
+        # branch remains for compatibility with lightweight test runners and
+        # older pipeline adapters that return None after saving.
+        if pipeline_error is not None:
+            returns_error = pipeline_error
+        elif pipeline_result is not None:
+            if not isinstance(pipeline_result, dict):
+                returns_error = "pipeline returned no result mapping"
+            elif "daily_returns" not in pipeline_result:
+                returns_error = "pipeline result has no daily returns"
+            else:
+                current_returns = pipeline_result["daily_returns"]
+                if isinstance(current_returns, pd.Series):
+                    dr = current_returns.copy()
+                elif current_returns is not None:
+                    returns_error = "pipeline daily returns are not a Series"
+                current_trade_log = pipeline_result.get("trade_log")
+                if isinstance(current_trade_log, pd.DataFrame):
+                    tl = current_trade_log.copy()
+        elif returns_path.exists():
+            try:
+                dr_df = pd.read_csv(returns_path)
+                if "daily_return" not in dr_df.columns:
+                    returns_error = "daily returns file has no daily_return column"
+                elif "date" not in dr_df.columns:
+                    returns_error = "daily returns file has no date column"
+                else:
+                    dr = dr_df["daily_return"]
+                    dr.index = pd.to_datetime(dr_df["date"], errors="coerce")
+            except (OSError, ValueError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+                returns_error = f"could not read daily returns ({exc})"
+        else:
+            returns_error = "daily returns file is missing"
 
-        all_daily_returns.append(dr)
-        all_trade_logs.append(tl)
+        if pipeline_error is None and pipeline_result is None and trade_path.exists():
+            try:
+                tl = pd.read_csv(trade_path)
+            except (OSError, ValueError, pd.errors.EmptyDataError, pd.errors.ParserError):
+                # A missing trade log does not invalidate return metrics.
+                tl = pd.DataFrame()
 
-        metrics = _print_fold_metrics(label, dr, tl)
+        metrics = _print_fold_metrics(label, dr, tl, invalid_reason=returns_error)
+        metrics.update({"period_start": start_str, "period_end": end_str})
         fold_metrics_list.append(metrics)
 
     # ── 종합 집계 ──────────────────────────────────────────
     print(f"\n{'=' * 60}")
-    print("  Walk-Forward CV — 접힘별 결과")
+    print("  Subperiod robustness test — independent subperiod results")
     print(f"{'=' * 60}")
-    print(f"  {'Fold':<22} {'수익률':>10} {'Sharpe':>8} {'MDD':>8} {'승률':>8} {'거래':>6}")
-    print(f"  {'-'*22} {'-'*10} {'-'*8} {'-'*8} {'-'*8} {'-'*6}")
+    print(f"  {'Subperiod':<22} {'수익률':>10} {'CAGR':>10} "
+          f"{'Sharpe':>8} {'MDD':>8} {'승률':>8} {'거래':>6}")
+    print("  Sharpe: PerformanceMetrics 정의 (연율화 초과수익률 / 표본 변동성)")
+    print(f"  {'-'*22} {'-'*10} {'-'*10} {'-'*8} {'-'*8} {'-'*8} {'-'*6}")
 
     for m in fold_metrics_list:
+        if not m["valid"]:
+            print(f"  {m['label']:<22} INVALID ({m['reason']})")
+            continue
         print(f"  {m['label']:<22} {m['total_return']*100:>+9.2f}% "
-              f"{m['sharpe']:>8.3f} {m['max_dd']*100:>7.2f}% "
-              f"{m['win_rate']:>7.1f}% {m['n_trades']:>6d}")
+              f"{m['cagr']*100:>+9.2f}% {m['sharpe']:>8.3f} "
+              f"{m['max_dd']*100:>7.2f}% {m['win_rate']:>7.1f}% "
+              f"{m['n_trades']:>6d}")
 
-    print(f"  {'─' * 22} {'─' * 10} {'─' * 8} {'─' * 8} {'─' * 8} {'─' * 6}")
+    print(f"  {'─' * 22} {'─' * 10} {'─' * 10} {'─' * 8} {'─' * 8} {'─' * 8} {'─' * 6}")
 
-    returns = [m["total_return"] for m in fold_metrics_list]
-    sharpes = [m["sharpe"] for m in fold_metrics_list]
-    mdds = [m["max_dd"] for m in fold_metrics_list]
-    wins = [m["win_rate"] for m in fold_metrics_list]
-    trades = [m["n_trades"] for m in fold_metrics_list]
+    aggregate = _aggregate_subperiod_metrics(fold_metrics_list)
+    if aggregate["valid_folds"]:
+        print(f"  유효 subperiod 기하 평균 수익률: "
+              f"{aggregate['geo_mean_return']*100:+.2f}%")
+        print(f"  유효 subperiod 평균 Sharpe: {aggregate['mean_sharpe']:.3f}")
+        print(f"  Worst MDD (유효 subperiod): {aggregate['worst_mdd']*100:.2f}%")
+        print(f"  Mean MDD (참고용): {aggregate['mean_mdd']*100:.2f}%")
+        print(f"  Sharpe 범위: {min(m['sharpe'] for m in fold_metrics_list if m['valid']):.3f} ~ "
+              f"{max(m['sharpe'] for m in fold_metrics_list if m['valid']):.3f}")
+        print(f"  총 거래: {aggregate['total_trades']}건")
+    else:
+        print("  집계 불가: 유효한 independent subperiod가 없습니다.")
+    print(f"  유효/무효 subperiod: {aggregate['valid_folds']}/{aggregate['invalid_folds']}")
 
-    geo_mean_return = (1 + np.prod([1 + r for r in returns]) ** (1 / len(returns))) - 1 if returns else 0.0
-    mean_sharpe = np.mean(sharpes)
-    mean_mdd = np.min(mdds)
-    mean_win = np.mean(wins)
-    total_trades = sum(trades)
-
-    print(f"  {'기하 평균':<22} {geo_mean_return*100:>+9.2f}% "
-          f"{mean_sharpe:>8.3f} {mean_mdd*100:>7.2f}% "
-          f"{mean_win:>7.1f}% {total_trades:>6d}")
-    print(f"  {'Sharpe 범위':22} {min(sharpes):>7.3f} ~ {max(sharpes):>7.3f}")
-
-    print(f"\n  전체 결과 저장: {base_output / 'walkforward_summary.csv'}")
+    summary_path = base_output / "subperiod_robustness_summary.csv"
+    print(f"\n  Subperiod robustness summary 저장: {summary_path}")
     print(f"{'=' * 60}")
 
     # ── 요약 저장 ──────────────────────────────────────────
     summary_df = pd.DataFrame(fold_metrics_list)
-    summary_path = base_output / "walkforward_summary.csv"
     summary_df.to_csv(summary_path, index=False)
+
+
+def _run_walkforward(config: Any) -> None:
+    """Compatibility alias for the independent subperiod robustness test."""
+    _run_subperiod_robustness(config)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1466,12 +1659,12 @@ def main() -> None:
         _run_pipeline(config)
         logger.info("파이프라인 완료.")
 
-    elif args.command == "walkforward":
+    elif args.command in {"robustness", "walkforward"}:
         config = _build_config(args)
         _print_config_summary(config)
-        logger.info("Walk-forward CV 시작...")
-        _run_walkforward(config)
-        logger.info("Walk-forward CV 완료.")
+        logger.info("Independent subperiod robustness test 시작...")
+        _run_subperiod_robustness(config)
+        logger.info("Independent subperiod robustness test 완료.")
 
     else:
         parser.print_help()

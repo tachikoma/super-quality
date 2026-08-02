@@ -64,6 +64,22 @@ uv run python -m k200_mq.main run \
     --weight-momentum 0.50 --weight-quality 0.50
 ```
 
+### 독립 subperiod robustness test
+
+고정된 5개 독립 기간(2014–2016, 2017–2018, 2019–2020, 2021–2022,
+2023–현재)을 각각 별도 백테스트하여 기간별 결과의 견고성을 확인합니다.
+이 명령은 학습/파라미터 피팅이 없는 **subperiod robustness test**이며,
+walk-forward CV가 아닙니다.
+
+```bash
+uv run python -m k200_mq.main robustness
+```
+
+기존 사용자를 위해 `walkforward` 명령도 호환 alias로 유지되지만,
+출력과 `subperiod_robustness_summary.csv`는 독립 subperiod robustness 결과로
+표시됩니다. 학습 구간을 사용하는 expanding-window true walk-forward 검증은
+향후 작업입니다.
+
 ### 데이터 유효성 계약
 
 기본 실행은 기존의 탐색적 성과 동작을 유지하지만, `run_manifest.json`에
@@ -110,7 +126,7 @@ metadata를 확보하고, 그 공시일을 재무 데이터 가용일로 사용�
 ```
 src/k200_mq/
 ├── __init__.py
-├── main.py                  # CLI 진입점
+├── main.py                  # CLI 진입점 및 subperiod robustness test
 ├── config.py                # K200MQConfig
 ├── core/                    # 공통 인프라 (레거시에서 재사용)
 │   ├── cache.py
@@ -152,13 +168,17 @@ src/k200_mq/
 - Kim (2018): 한국 장-only 모멘텀 +1.15%/월
 - Bae & Lee (2021): 한국 모멘텀 0.50~1.06%/월 (장기 포트폴리오)
 
-## 참고 사항
+## 검증 상태 및 참고 사항
 
 - 이 전략은 **베타 (Beta)** 상태입니다. 파이프라인은 완성되었지만 결과는 검증되지 않았습니다.
-- 백테스트 결과는 아직 검증되지 않았습니다. P0 이슈(리짓 필터 미적용, 리밸런싱 일자 불일치, 품질 팩터 커버리지) 수정 후 재검증 필요.
+- 현재 `robustness` 명령은 고정된 독립 subperiod robustness test입니다. 학습/피팅이
+  포함된 expanding-window true walk-forward CV는 아직 구현되지 않았습니다.
+- 백테스트 결과는 아직 검증되지 않았습니다. 리짓 필터 적용, 리밸런싱 일자 통합,
+  품질 팩터 커버리지 개선은 구현되었지만, PIT 유니버스와 filing-date 재무 데이터
+  한계가 남아 있어 결과를 전략 성과로 해석할 수 없습니다.
 - 기존 Super Quality 2.0 레거시 코드는 `src/super_quality/`에 frozen 상태로 보존됩니다.
 
-## 초기 백테스트 결과 (2024-07-26, 2020-2024)
+## 초기 백테스트 결과 (2026-07-26, 2020-2024; P0 수정 전)
 
 ```
 초기 자본: 100,000,000원 → 최종 자본: 307,063,900원
@@ -172,4 +192,6 @@ Sharpe 비율: 0.596
 평균 보유 종목: 9.2개
 ```
 
-> **⚠️ 주의**: 이 결과는 P0 이슈(리짓 필터가 백테스트 후 post-processing으로만 적용, 리밸런싱 50% 누락, 품질 팩터 9.5% 커버리지)가 있는 상태에서 실행되었습니다. 신뢰할 수 있는 결과는 P0 수정 완료 후 재실행 필요.
+> **⚠️ 주의**: 위 수치는 P0 수정 전의 과거 실행 결과이므로 무효입니다. 현재 P0
+> 수정은 반영되었지만, PIT 유니버스와 filing-date 재무 데이터가 없는 한 재실행
+> 결과도 탐색적 후보로만 취급해야 합니다.

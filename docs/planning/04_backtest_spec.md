@@ -2,11 +2,29 @@
 
 ## 검증 철학
 
-단일 10년 백테스트는 과적합 위험이 높습니다. **Walk-Forward Cross-Validation**으로 검증하며, 파라미터 최적화는 training fold 내부에만 제한합니다.
+단일 10년 백테스트는 과적합 위험이 높습니다. 현재 CLI는 고정된 기간을
+나누어 실행하는 **independent subperiod robustness test**를 제공합니다.
+이는 학습/파라미터 피팅이 없는 기간별 견고성 점검이며, true walk-forward
+cross-validation이 아닙니다. 파라미터 최적화와 expanding-window WF는
+향후 작업으로 남아 있습니다.
 
 ---
 
-## Walk-Forward 설계
+## 현재 Subperiod Robustness 설계
+
+현재 `robustness` 명령은 다음 독립 기간을 실행합니다.
+
+| Subperiod | 기간 |
+|-----------|------|
+| 1 | 2014–2016 |
+| 2 | 2017–2018 |
+| 3 | 2019–2020 |
+| 4 | 2021–2022 |
+| 5 | 2023–현재 |
+
+각 기간에는 training window가 없으며 전략 파라미터는 고정됩니다.
+
+## True Walk-Forward 설계 (향후 작업)
 
 ### 기본 구조 (Expanding Window)
 
@@ -23,7 +41,7 @@ Fold 5: Train [2015-01 ~ 2023-12] | Test [2024-01 ~ 2024-12]
 - **Embargo window**: 1개월 — test set 시작 전 1개월 buffer
 - **목적**: 팩터 계산 시 미래 데이터 유출 방지 (lookback window = 252일이므로 1년 전 data leak 가능)
 
-### 교차검증 지표 (per fold)
+### True WF 교차검증 지표 (구현 시 per fold)
 
 | 지표 | 목표 | 비고 |
 |------|------|------|
@@ -135,13 +153,16 @@ Fold 5: Train [2015-01 ~ 2023-12] | Test [2024-01 ~ 2024-12]
 | Buy & Hold KOSPI 200 TR | 2015년 초 KOSPI 200 TR 지수 매수 & 보유 |
 
 ### 보고 형식
-모든 워크포워드 fold의 결과를 아래 표 형식으로 정리:
+현재 robustness CLI가 출력하는 지표는 CAGR, Sharpe, MaxDD, WinRate,
+Tradecount입니다. Profit Factor와 CAGR vs Benchmark는 현재 runner에서
+계산하거나 출력하지 않으며, 향후 거래 지표/벤치마크 구현 후 추가합니다.
+True walk-forward가 구현되면 train/test 결과를 별도 표로 추가합니다.
 
-| Fold | Period | CAGR | Sharpe | MaxDD | WinRate | ProfitFactor | Tradecount | CAGR vs Benchmark |
-|------|--------|------|--------|-------|---------|--------------|------------|-------------------|
-| 1 | 2020 | ... | ... | ... | ... | ... | ... | ... |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| **Avg ± SD** | | | | | | | | |
+| Subperiod | Period | CAGR | Sharpe | MaxDD | WinRate | Tradecount |
+|------|--------|------|--------|-------|---------|------------|
+| 1 | 2014–2016 | ... | ... | ... | ... | ... |
+| ... | ... | ... | ... | ... | ... | ... |
+| **Geometric mean / Worst MDD** | | | | | | |
 
 ---
 

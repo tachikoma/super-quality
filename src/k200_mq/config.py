@@ -224,3 +224,7 @@ class K200MQConfig(BacktestConfig):
         default="outputs_k200mq",
         description="백테스트 결과 출력 디렉토리",
     )
+    PRINT_SUMMARY: bool = Field(
+        default=True,
+        description="백테스트 완료 후 대화형 요약을 출력할지 여부",
+    )
