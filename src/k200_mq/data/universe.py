@@ -12,10 +12,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -26,6 +23,16 @@ import pandas as pd
 
 from k200_mq.core.cache import DataCache
 from k200_mq.core.data.loader import get_krx_listings
+from k200_mq.data.provenance import (
+    LEGACY_PROXY_UNKNOWN as LEGACY_PROXY_UNKNOWN,
+    PIT_EFFECTIVE_DATE_CONTRACT as PIT_EFFECTIVE_DATE_CONTRACT,
+    PIT_SCHEMA_CONTRACT as PIT_SCHEMA_CONTRACT,
+    PROXY_CONTRACTS as PROXY_CONTRACTS,
+    _constituent_fingerprint as _constituent_fingerprint,
+    _metadata_label as _metadata_label,
+    _metadata_matches as _metadata_matches,
+    validate_universe_provenance as _validate_universe_provenance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +41,6 @@ _CACHE = DataCache(cache_dir="data/universe")
 KOSPI200_CACHE_DIR = Path("data/universe/kospi200")
 
 UniverseSource = Literal["pit", "proxy_current", "mcap_proxy", "legacy_proxy_unknown"]
-
-LEGACY_PROXY_UNKNOWN = "legacy_proxy_unknown"
-PIT_EFFECTIVE_DATE_CONTRACT = "constituents_effective_on_or_before_as_of"
-PIT_SCHEMA_CONTRACT = {
-    "as_of": "date",
-    "ticker": "string",
-}
-PROXY_CONTRACTS = {
-    "proxy_current": "current_listing_ignores_as_of",
-    "mcap_proxy": "current_market_cap_snapshot",
-}
 
 
 class ConstituentList(list[str]):
@@ -90,13 +86,6 @@ def _ensure_cache_dir() -> None:
     KOSPI200_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _constituent_fingerprint(tickers: list[str]) -> str:
-    """Return a reproducible fingerprint for one cached constituent set."""
-    canonical = sorted({str(ticker) for ticker in tickers})
-    payload = json.dumps(canonical, ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def _provenance_metadata(
     label: str,
     as_of: date,
@@ -116,67 +105,6 @@ def _provenance_metadata(
         ),
         "fingerprint": _constituent_fingerprint(tickers),
     }
-
-
-def _metadata_label(metadata: Any) -> str | None:
-    """Read a label only from a structured provenance record."""
-    if not isinstance(metadata, dict):
-        return None
-    label = metadata.get("label", metadata.get("provenance"))
-    return str(label) if isinstance(label, str) else None
-
-
-def _metadata_matches(
-    metadata: Any,
-    label: str,
-    as_of: date | None,
-    tickers: list[str],
-) -> bool:
-    """Validate a cache provenance record, including its data fingerprint."""
-    if not isinstance(metadata, dict) or _metadata_label(metadata) != label:
-        return False
-    if not isinstance(metadata.get("source"), str) or not metadata["source"].strip():
-        return False
-    if label == "pit":
-        schema = metadata.get("schema")
-        schema_valid = (
-            isinstance(schema, str) and bool(schema.strip())
-        ) or (
-            isinstance(schema, Mapping)
-            and bool(schema)
-            and all(
-                isinstance(key, str) and str(value).strip()
-                for key, value in schema.items()
-            )
-        )
-        if not schema_valid:
-            return False
-    if "effective_date" not in metadata:
-        return False
-    try:
-        effective_date = pd.Timestamp(metadata["effective_date"])
-        if not isinstance(effective_date, pd.Timestamp) or pd.isna(effective_date):
-            return False
-        effective_day = effective_date.to_pydatetime().date()
-    except (TypeError, ValueError, OverflowError):
-        return False
-    if as_of is not None and effective_day > as_of:
-        return False
-    expected_fingerprint = _constituent_fingerprint(tickers)
-    if metadata.get("fingerprint") not in {
-        expected_fingerprint,
-        f"sha256:{expected_fingerprint}",
-    }:
-        return False
-    if label == "pit":
-        # ``pit`` is only a classification.  It is not itself a source or a
-        # contract, so a sidecar containing just that string is never enough.
-        if metadata["source"] in {
-            "pit", "proxy_current", "mcap_proxy", LEGACY_PROXY_UNKNOWN,
-        }:
-            return False
-        return metadata.get("contract") == PIT_EFFECTIVE_DATE_CONTRACT
-    return label in PROXY_CONTRACTS and metadata.get("contract") == PROXY_CONTRACTS[label]
 
 
 def _classify_cached_provenance(
@@ -410,158 +338,8 @@ def get_kospi200_history_with_provenance(
 def validate_universe_provenance(
     universe_history: pd.DataFrame | UniverseHistoryResult,
 ) -> dict[str, Any]:
-    """Report whether a universe history is PIT-valid.
-
-    A missing provenance attribute is deliberately treated as invalid.  This
-    prevents an arbitrary or legacy DataFrame from being upgraded to PIT data
-    merely because its columns are named ``as_of`` and ``ticker``.
-    """
-    if isinstance(universe_history, UniverseHistoryResult):
-        history_data = universe_history.data
-        raw_sources = universe_history.provenance_by_as_of
-        provenance = universe_history.provenance
-        raw_metadata = universe_history.provenance_metadata_by_as_of
-    else:
-        history_data = universe_history
-        raw_sources = universe_history.attrs.get(
-            "provenance_by_as_of",
-            universe_history.attrs.get("source_by_as_of", {}),
-        )
-        provenance = str(
-            universe_history.attrs.get(
-                "provenance",
-                universe_history.attrs.get("source", "unknown"),
-            )
-        )
-        raw_metadata = universe_history.attrs.get("provenance_metadata_by_as_of", {})
-
-    def _date_key(value: Any) -> str | None:
-        try:
-            timestamp = pd.Timestamp(value)
-        except (TypeError, ValueError, OverflowError):
-            return None
-        if pd.isna(timestamp):
-            return None
-        return timestamp.date().isoformat()
-
-    history_dates: set[str] = set()
-    invalid_as_of = (
-        "as_of" not in history_data.columns
-        or "ticker" not in history_data.columns
-    )
-    tickers_by_date: dict[str, list[str]] = {}
-    if "as_of" in history_data.columns:
-        for index, value in enumerate(history_data["as_of"].tolist()):
-            key = _date_key(value)
-            if key is None:
-                invalid_as_of = True
-                continue
-            history_dates.add(key)
-            if "ticker" in history_data.columns:
-                ticker = history_data.iloc[index]["ticker"]
-                if pd.notna(ticker):
-                    tickers_by_date.setdefault(key, []).append(str(ticker))
-
-    # Normalize caller keys to the same canonical date representation as the
-    # history.  Unknown and duplicate keys are retained as invalid evidence;
-    # silently dropping them would allow an aggregate or malformed claim to
-    # look complete.
-    supplied_sources: dict[str, str] = {}
-    duplicate_source_keys = False
-    if isinstance(raw_sources, Mapping):
-        for raw_key, raw_source in raw_sources.items():
-            key = str(raw_key) if raw_key == "history" else _date_key(raw_key)
-            if key is None:
-                key = str(raw_key)
-            if key in supplied_sources:
-                duplicate_source_keys = True
-                supplied_sources[key] = LEGACY_PROXY_UNKNOWN
-            else:
-                supplied_sources[key] = str(raw_source)
-
-    if not supplied_sources and provenance in {"proxy_current", "mcap_proxy", LEGACY_PROXY_UNKNOWN}:
-        supplied_sources = {key: provenance for key in sorted(history_dates)}
-
-    metadata_by_as_of: dict[str, dict[str, Any]] = {}
-    duplicate_metadata_keys = False
-    if isinstance(raw_metadata, Mapping):
-        for raw_key, metadata in raw_metadata.items():
-            key = str(raw_key) if raw_key == "history" else _date_key(raw_key)
-            if key is None:
-                key = str(raw_key)
-            if key in metadata_by_as_of:
-                duplicate_metadata_keys = True
-                continue
-            if isinstance(metadata, dict):
-                metadata_by_as_of[key] = metadata
-
-    # A PIT label without a per-date key is never a valid history claim.  In
-    # particular, ``{"history": "pit"}`` is an aggregate assertion and must
-    # not be used as a fallback for every row in the history.
-    aggregate_pit_claim = (
-        supplied_sources.get("history") == "pit"
-        or _metadata_label(metadata_by_as_of.get("history")) == "pit"
-    )
-
-    resolved_sources: dict[str, str] = {}
-    for key in sorted(history_dates):
-        source = supplied_sources.get(key, LEGACY_PROXY_UNKNOWN)
-        resolved_source = source
-        if source == "pit":
-            as_of = pd.Timestamp(key).date()
-            metadata = metadata_by_as_of.get(key)
-            tickers = tickers_by_date.get(key, [])
-            if not _metadata_matches(metadata, "pit", as_of, tickers):
-                resolved_source = LEGACY_PROXY_UNKNOWN
-        elif source not in {"proxy_current", "mcap_proxy", LEGACY_PROXY_UNKNOWN}:
-            resolved_source = LEGACY_PROXY_UNKNOWN
-        resolved_sources[key] = resolved_source
-
-    # Preserve non-date/aggregate evidence in the result so callers can see
-    # why a supplied claim was rejected.  These entries also make the exact
-    # per-date coverage check below fail closed.
-    for key, source in supplied_sources.items():
-        if key not in history_dates:
-            resolved_sources[key] = (
-                LEGACY_PROXY_UNKNOWN if source == "pit" else str(source)
-            )
-
-    provenance_by_as_of = resolved_sources
-    unique_sources = set(provenance_by_as_of.values())
-    if len(unique_sources) == 1:
-        provenance = next(iter(unique_sources))
-    elif len(unique_sources) > 1:
-        provenance = "mixed"
-
-    exact_date_coverage = (
-        bool(history_dates)
-        and set(supplied_sources) == history_dates
-        and set(metadata_by_as_of) == history_dates
-        and not invalid_as_of
-        and not duplicate_source_keys
-        and not duplicate_metadata_keys
-        and not aggregate_pit_claim
-    )
-    pit_valid = exact_date_coverage and all(
-        provenance_by_as_of.get(key) == "pit" for key in history_dates
-    )
-    if pit_valid:
-        reason = "all constituent sets have PIT provenance"
-    elif not provenance_by_as_of:
-        reason = "universe provenance is missing"
-    elif LEGACY_PROXY_UNKNOWN in unique_sources:
-        reason = "universe provenance metadata is missing or untrusted"
-    else:
-        reason = "universe uses a current-list or market-cap proxy, not PIT data"
-
-    return {
-        "provenance": provenance,
-        "source": provenance,
-        "provenance_by_as_of": provenance_by_as_of,
-        "provenance_metadata_by_as_of": metadata_by_as_of,
-        "pit_valid": pit_valid,
-        "reason": reason,
-    }
+    """Delegate to the side-effect-free prepared-data validator."""
+    return _validate_universe_provenance(universe_history)
 
 
 def is_pit_valid_universe(

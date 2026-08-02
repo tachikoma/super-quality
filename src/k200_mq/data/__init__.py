@@ -1,17 +1,5 @@
 """Data layer for KOSPI 200 Momentum + Quality strategy."""
 
-from k200_mq.data.universe import (
-    exclude_kospi_top_n as exclude_kospi_top_n,
-    get_kospi200_constituents as get_kospi200_constituents,
-    get_kospi200_history as get_kospi200_history,
-    get_kospi200_history_with_provenance as get_kospi200_history_with_provenance,
-    get_universe_provenance as get_universe_provenance,
-    is_kospi200_constituent as is_kospi200_constituent,
-    is_pit_valid_universe as is_pit_valid_universe,
-    apply_exclusions as apply_exclusions,
-    validate_universe_provenance as validate_universe_provenance,
-)
-
 from k200_mq.data.provenance import (
     FINANCIAL_PROVENANCE_CONTRACT_ATTR as FINANCIAL_PROVENANCE_CONTRACT_ATTR,
     NEXT_SESSION_POLICY as NEXT_SESSION_POLICY,
@@ -26,3 +14,44 @@ from k200_mq.data.provenance import (
     normalize_filing_timestamp as normalize_filing_timestamp,
     validate_financial_provenance as validate_financial_provenance,
 )
+
+
+_UNIVERSE_EXPORTS = frozenset({
+    "apply_exclusions",
+    "exclude_kospi_top_n",
+    "get_kospi200_constituents",
+    "get_kospi200_history",
+    "get_kospi200_history_with_provenance",
+    "get_universe_provenance",
+    "is_kospi200_constituent",
+    "is_pit_valid_universe",
+    "validate_universe_provenance",
+})
+
+
+def __getattr__(name: str):
+    """Load cache-backed universe APIs only when a caller actually uses them."""
+    if name not in _UNIVERSE_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from k200_mq.data import universe
+
+    value = getattr(universe, name)
+    globals()[name] = value
+    return value
+
+
+__all__ = [
+    "FINANCIAL_PROVENANCE_CONTRACT_ATTR",
+    "NEXT_SESSION_POLICY",
+    "classify_financial_provenance",
+    "find_filing_date_field",
+    "filing_to_trading_session",
+    "get_financial_provenance",
+    "get_filing_availability_policy",
+    "has_usable_filing_dates",
+    "has_meaningful_filing_timestamp",
+    "is_pit_valid_financial_data",
+    "normalize_filing_timestamp",
+    "validate_financial_provenance",
+    *_UNIVERSE_EXPORTS,
+]

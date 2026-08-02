@@ -659,6 +659,19 @@ def get_price_data(
                 _cache.put(y_cache_key, y_df.reset_index())
             logger.info("mcap 캐시 영속화 완료")
 
+    # Preserve the listing-based ranking already loaded for price assembly so
+    # an in-memory prepared simulation can apply the configured exclusion
+    # without re-entering the data-loader/network boundary.
+    if isinstance(listing, pd.DataFrame) and not listing.empty:
+        ranking = listing.copy()
+        if {"market", "Marcap", "ticker"}.issubset(ranking.columns):
+            ranking["Marcap"] = pd.to_numeric(ranking["Marcap"], errors="coerce")
+            ranking = ranking[ranking["market"] == "KOSPI"].sort_values(
+                "Marcap", ascending=False,
+            )
+            result.attrs["kospi_mcap_ranking"] = tuple(
+                ranking["ticker"].dropna().astype(str).tolist()
+            )
     return result
 
 

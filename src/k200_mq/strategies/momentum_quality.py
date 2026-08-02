@@ -23,8 +23,13 @@ class MomentumQualityStrategy:
     리밸런싱 일자에 포트폴리오를 재구성합니다.
     """
 
-    def __init__(self, config: K200MQConfig) -> None:
+    def __init__(
+        self,
+        config: K200MQConfig,
+        kospi_mcap_ranking: tuple[str, ...] | None = None,
+    ) -> None:
         self.config = config
+        self._kospi_mcap_ranking = kospi_mcap_ranking
 
     def select_portfolio(
         self,
@@ -145,13 +150,17 @@ class MomentumQualityStrategy:
     def _exclude_kospi_top(
         self, selected: pd.DataFrame
     ) -> pd.DataFrame:
-        """KOSPI 상위 N개 시가총액 종목을 제외합니다."""
-        from k200_mq.data.universe import exclude_kospi_top_n
+        """Exclude KOSPI mega-caps using the prepared ranking artifact.
 
-        tickers = selected["ticker"].tolist()
-        filtered = exclude_kospi_top_n(
-            tickers,
-            n=self.config.EXCLUDE_KOSPI_TOP_N,
-            strict_pit=bool(getattr(self.config, "STRICT_PIT_VALIDATION", False)),
+        Interval execution is deliberately an in-memory boundary.  Falling
+        back to ``exclude_kospi_top_n`` here would re-enter the loader/cache
+        layer and make a candidate run depend on an unprepared snapshot.
+        """
+        n = self.config.EXCLUDE_KOSPI_TOP_N
+        if self._kospi_mcap_ranking is not None:
+            excluded = set(self._kospi_mcap_ranking[:n])
+            return selected[~selected["ticker"].isin(excluded)]
+        raise RuntimeError(
+            "EXCLUDE_KOSPI_TOP_N requires a prepared KOSPI market-cap ranking "
+            "artifact; interval execution cannot perform loader/cache fallback"
         )
-        return selected[selected["ticker"].isin(filtered)]

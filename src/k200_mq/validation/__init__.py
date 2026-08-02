@@ -1,5 +1,9 @@
 """Pure validation helpers for the K200MQ strategy."""
 
+from k200_mq.validation.prepared import (
+    PreparedK200MQInputs,
+    execute_engine_interval,
+)
 from k200_mq.validation.walk_forward import (
     BASE_CANDIDATE,
     CANDIDATE_LIBRARY,
@@ -34,6 +38,8 @@ from k200_mq.validation.runner import (
 )
 
 __all__ = [
+    "PreparedK200MQInputs",
+    "execute_engine_interval",
     "BASE_CANDIDATE",
     "CANDIDATE_LIBRARY",
     "CANDIDATE_LIBRARY_VERSION",

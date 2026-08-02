@@ -9,11 +9,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,29 +22,72 @@ import numpy as np
 import pandas as pd
 
 from k200_mq.core.analysis.metrics import PerformanceMetrics
+from k200_mq.validation.prepared import (
+    PreparedK200MQInputs,
+    execute_engine_interval,
+)
 
 logger = logging.getLogger(__name__)
 
-_SECRET_FIELD_MARKERS = (
-    "api",
-    "credential",
-    "key",
-    "password",
-    "passwd",
-    "pw",
-    "pwd",
-    "private",
-    "secret",
-    "token",
-)
+_CREDENTIAL_FIELD_NAMES = frozenset({
+    "ACCESS_TOKEN",
+    "API_KEY",
+    "API_TOKEN",
+    "AUTH_TOKEN",
+    "CLIENT_SECRET",
+    "DART_API_KEY",
+    "KRX_ID",
+    "KRX_PW",
+    "PASSWD",
+    "PASSWORD",
+    "PRIVATE_KEY",
+    "PWD",
+    "SECRET",
+    "SECRET_KEY",
+    "TOKEN",
+})
 
 
 def _is_secret_field(name: str) -> bool:
     """Return whether a config key should be excluded from the manifest."""
-    lowered = name.lower()
-    if lowered in {"krx_id", "krx_pw"}:
-        return True
-    return any(marker in lowered for marker in _SECRET_FIELD_MARKERS)
+    return str(name).upper() in _CREDENTIAL_FIELD_NAMES
+
+
+def _ranking_fingerprint(ranking: tuple[str, ...]) -> str | None:
+    """Return a stable fingerprint for one prepared ranking order."""
+    if not ranking:
+        return None
+    payload = json.dumps(list(ranking), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _ranking_from_price_data(price_data: pd.DataFrame) -> tuple[str, ...]:
+    """Build a no-I/O mechanical ranking when the price loader omitted attrs.
+
+    This is a prepared snapshot derived from the supplied frame, not a
+    historical/PIT ranking.  It exists only to keep the extraction boundary
+    self-contained when a test or older loader returns plain OHLCV data.
+    """
+    if price_data.empty or "mcap" not in price_data.columns:
+        return ()
+    if isinstance(price_data.index, pd.MultiIndex):
+        frame = price_data.reset_index()
+    else:
+        frame = price_data.copy()
+    if not {"ticker", "mcap"}.issubset(frame.columns):
+        return ()
+    frame["mcap"] = pd.to_numeric(frame["mcap"], errors="coerce")
+    frame = frame.dropna(subset=["ticker", "mcap"])
+    if frame.empty:
+        return ()
+    if "date" in frame.columns:
+        latest = frame.sort_values("date").drop_duplicates("ticker", keep="last")
+    else:
+        latest = frame.drop_duplicates("ticker", keep="last")
+    latest = latest[latest["mcap"] > 0].sort_values(
+        ["mcap", "ticker"], ascending=[False, True],
+    )
+    return tuple(latest["ticker"].astype(str).tolist())
 
 
 def _manifest_safe(value: Any) -> Any:
@@ -711,6 +755,61 @@ def _build_run_manifest(
     quality_context.setdefault("data_mode", financial_mode)
     quality_context.setdefault("financial_provenance", financial_validity)
 
+    supplied_ranking = context.get(
+        "ranking",
+        context.get("kospi_mcap_ranking", {}),
+    )
+    ranking_context = dict(supplied_ranking) if isinstance(supplied_ranking, dict) else {}
+    try:
+        excluded_top_n = int(getattr(config, "EXCLUDE_KOSPI_TOP_N", 0))
+    except (TypeError, ValueError):
+        excluded_top_n = 0
+    ranking_context.setdefault("required", excluded_top_n > 0)
+    if not ranking_context:
+        ranking_context = {
+            "required": excluded_top_n > 0,
+            "status": "unavailable" if excluded_top_n > 0 else "disabled",
+            "provenance": "unavailable" if excluded_top_n > 0 else "not_required",
+            "effective_date": None,
+            "fingerprint": None,
+            "pit_valid": False,
+            "artifact_available": False,
+        }
+    else:
+        ranking_context.setdefault(
+            "status",
+            "unavailable" if excluded_top_n > 0 else "disabled",
+        )
+        ranking_context.setdefault(
+            "provenance",
+            "unavailable" if excluded_top_n > 0 else "not_required",
+        )
+        ranking_context.setdefault("effective_date", None)
+        ranking_context.setdefault("fingerprint", None)
+        ranking_context.setdefault("pit_valid", False)
+        ranking_context.setdefault(
+            "artifact_available",
+            ranking_context.get("fingerprint") is not None,
+        )
+
+    # The current prepared path supplies only a static ranking tuple.  Do not
+    # preserve caller-provided PIT booleans, status, or classification: a
+    # date-indexed artifact and validator-backed effective-date/fingerprint
+    # contract do not exist yet.
+    ranking_available = bool(ranking_context.get("artifact_available"))
+    ranking_context["pit_valid"] = False
+    ranking_context["classification"] = (
+        "non_pit_mechanical" if ranking_available else "not_required"
+    )
+    if ranking_available:
+        ranking_context["status"] = "non_pit_mechanical"
+        ranking_context["provenance"] = "current_market_cap_snapshot"
+        ranking_context["effective_date"] = None
+    else:
+        ranking_context["status"] = "disabled" if excluded_top_n <= 0 else "unavailable"
+        ranking_context["provenance"] = "not_required" if excluded_top_n <= 0 else "unavailable"
+        ranking_context["effective_date"] = None
+
     limitations = {
         "universe": (
             "legacy_proxy_unknown universe; cache provenance metadata is missing or untrusted"
@@ -731,6 +830,12 @@ def _build_run_manifest(
             "missing DART mode: quality disabled and missing quality values filled with 0"
             if not dart_configured
             else "missing DART mode: not applicable; DART was configured"
+        ),
+        "ranking": (
+            "KOSPI exclusion ranking is a prepared non-PIT mechanical snapshot; "
+            "historical ranking is not claimed"
+            if not ranking_context.get("pit_valid", False)
+            else "KOSPI exclusion ranking has explicit PIT provenance"
         ),
     }
     return {
@@ -757,6 +862,7 @@ def _build_run_manifest(
         "regime_map": context.get(
             "regime_map", {"covered_date_count": 0, "measured_date_count": 0},
         ),
+        "ranking": ranking_context,
         "quality": quality_context,
         "data_validity": {
             "strict_pit_validation": bool(
@@ -764,6 +870,7 @@ def _build_run_manifest(
             ),
             "universe": universe_validity,
             "financials": financial_validity,
+            "ranking": ranking_context,
         },
         "execution": {
             "signal_policy": "close signal",
@@ -780,6 +887,7 @@ def _enforce_strict_pit_validation(
     universe_provenance: dict[str, Any],
     financial_provenance: dict[str, Any] | None = None,
     config: Any | None = None,
+    ranking_provenance: dict[str, Any] | None = None,
 ) -> None:
     """Raise an actionable error when a strict PIT input contract is unmet."""
     if config is not None:
@@ -808,6 +916,12 @@ def _enforce_strict_pit_validation(
             "a meaningful timestamp, or a documented conservative next-session "
             "policy; do not infer it from fiscal quarter ends."
         )
+    if ranking_provenance is not None and not ranking_provenance.get("pit_valid", False):
+        raise RuntimeError(
+            "STRICT_PIT_VALIDATION failed before factor/backtest execution: "
+            "KOSPI exclusion ranking is non-PIT. Provide effective-date PIT "
+            "ranking data; current market-cap snapshots are mechanical only."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -815,18 +929,26 @@ def _enforce_strict_pit_validation(
 # ═══════════════════════════════════════════════════════════════════
 
 
-def _run_pipeline(config: Any) -> dict[str, Any]:
-    """실제 백테스트 파이프라인을 실행합니다.
+def prepare_k200mq_inputs(
+    config: Any,
+    overall_start: date | str | None = None,
+    overall_end: date | str | None = None,
+    warmup_days: int = 252,
+) -> PreparedK200MQInputs | None:
+    """Load and calculate one shared, measured K200MQ input bundle.
 
     Steps
     -----
     1. 유니버스 구성 (KOSPI 200 종속 이력)
     2. 가격 데이터 로드 (lookback 포함)
     3. 팩터 계산 (Momentum, Quality, Regime)
-    4. PortfolioRebalanceEngine로 백테스트 실행
-    5. 결과 저장
+    4. The returned bundle is executed separately by the in-memory interval
+       adapter below.
+
+    The existing loader, provenance, and factor steps remain here as the one
+    preparation path.  Warmup rows are used for factor calculation only and
+    are never included in the bundle's measured price frame.
     """
-    from k200_mq.backtest.portfolio_engine import PortfolioRebalanceEngine
     from k200_mq.core.data.loader import (
         get_financial_data,
         get_market_index,
@@ -842,8 +964,10 @@ def _run_pipeline(config: Any) -> dict[str, Any]:
     from k200_mq.factors.quality import QualityFactor
     from k200_mq.factors.regime import RegimeFactor
 
-    start_date = _parse_date(config.START_DATE) if isinstance(config.START_DATE, str) else config.START_DATE
-    end_date = _parse_date(config.END_DATE) if isinstance(config.END_DATE, str) else config.END_DATE
+    supplied_start = overall_start if overall_start is not None else config.START_DATE
+    supplied_end = overall_end if overall_end is not None else config.END_DATE
+    start_date = _parse_date(supplied_start) if isinstance(supplied_start, str) else supplied_start
+    end_date = _parse_date(supplied_end) if isinstance(supplied_end, str) else supplied_end
     if start_date is None or end_date is None:
         logger.error("시작일/종료일 파싱 실패")
         return
@@ -889,8 +1013,8 @@ def _run_pipeline(config: Any) -> dict[str, Any]:
     )
 
     # ── 2. 가격 데이터 로드 ───────────────────────────────────
-    logger.info("2단계: 가격 데이터 로드 (252d lookback + ADV)")
-    lookback_days = 252
+    lookback_days = max(int(warmup_days), 1)
+    logger.info("2단계: 가격 데이터 로드 (%dd lookback + ADV)", lookback_days)
     required_momentum_observations = max(
         config.MOMENTUM_WINDOW_LONG - config.MOMENTUM_SKIP_DAYS,
         config.MOMENTUM_WINDOW_SHORT,
@@ -941,6 +1065,40 @@ def _run_pipeline(config: Any) -> dict[str, Any]:
         "가격 데이터: backtest=%d행 (%d 티커), lookback=%d행",
         len(backtest_data), n_tickers_price, len(lookback_data),
     )
+    kospi_mcap_ranking = tuple(
+        str(ticker)
+        for ticker in backtest_data.attrs.get("kospi_mcap_ranking", ())
+    )
+    if not kospi_mcap_ranking:
+        kospi_mcap_ranking = _ranking_from_price_data(backtest_data)
+    try:
+        excluded_top_n = int(getattr(config, "EXCLUDE_KOSPI_TOP_N", 0))
+    except (TypeError, ValueError):
+        excluded_top_n = 0
+    if excluded_top_n <= 0:
+        # Exclusion is disabled, so do not carry or rank an unnecessary
+        # artifact into the prepared interval bundle.
+        kospi_mcap_ranking = ()
+    ranking_status = (
+        "non_pit_mechanical"
+        if kospi_mcap_ranking
+        else ("unavailable" if excluded_top_n > 0 else "disabled")
+    )
+    ranking_provenance = (
+        "current_market_cap_snapshot"
+        if kospi_mcap_ranking
+        else ("unavailable" if excluded_top_n > 0 else "not_required")
+    )
+    ranking_context = {
+        "required": excluded_top_n > 0,
+        "status": ranking_status,
+        "provenance": ranking_provenance,
+        "effective_date": None,
+        "fingerprint": _ranking_fingerprint(kospi_mcap_ranking),
+        "pit_valid": False,
+        "artifact_available": bool(kospi_mcap_ranking),
+    }
+    manifest_context["ranking"] = ranking_context
 
     # 전체 가격 데이터 (팩터 계산용 — lookback 포함).  The loader's
     # contract makes warmup half-open, but de-duplicate here as a safe guard
@@ -1195,26 +1353,81 @@ def _run_pipeline(config: Any) -> dict[str, Any]:
     manifest_context["quality"] = quality_coverage
     manifest_context["financial_provenance"] = financial_provenance
 
-    # ── 5. 백테스트 실행 ──────────────────────────────────────
-    logger.info("5단계: PortfolioRebalanceEngine로 백테스트 실행")
-    engine = PortfolioRebalanceEngine(config)
-    results = engine.run(
-        backtest_data, index_raw, factor_data, universe_history,
+    logger.info("입력 준비 완료: 측정 구간 %s ~ %s", start_date, end_date)
+    runtime_config = config
+    if hasattr(config, "model_copy"):
+        runtime_config = config.model_copy(deep=True, update={
+            "DART_API_KEY": "",
+            "KRX_ID": "",
+            "KRX_PW": "",
+        })
+
+    return PreparedK200MQInputs(
+        price_data=backtest_data,
+        factor_data=factor_data,
+        index_data=index_raw,
+        universe_history=universe_history,
+        financial_data=financial_data,
         regime_scale_map=regime_scale_map,
+        kospi_mcap_ranking=kospi_mcap_ranking,
+        ranking_status=ranking_status,
+        ranking_provenance=ranking_provenance,
+        ranking_effective_date=None,
+        ranking_fingerprint=ranking_context["fingerprint"],
+        ranking_pit_valid=False,
+        manifest_context=manifest_context,
+        provenance={
+            "universe": universe_provenance,
+            "financials": financial_provenance,
+            "ranking": ranking_context,
+        },
+        coverage={
+            "quality": quality_coverage,
+            "rebalance_readiness": rebalance_readiness,
+        },
         measured_start=start_date,
         measured_end=end_date,
+        warmup_start=(
+            pd.Timestamp(all_full_dates.min()).date()
+            if len(all_full_dates)
+            else None
+        ),
+        warmup_end=start_date - timedelta(days=1),
+        measured_dates=tuple(pd.Timestamp(value) for value in backtest_dates),
         active_trading_start=rebalance_readiness["measured_trading_readiness_date"],
+        runtime_config=runtime_config,
     )
-    results["_manifest_context"] = manifest_context
 
-    # ── 6. 결과 저장 ──────────────────────────────────────────
+
+def _run_pipeline(config: Any) -> dict[str, Any] | None:
+    """Run the existing pipeline using one prepared input bundle."""
+    logger.info("1~4단계: 공유 입력 준비")
+    prepared = prepare_k200mq_inputs(config)
+    if prepared is None:
+        return None
+
+    logger.info("5단계: PortfolioRebalanceEngine로 백테스트 실행")
+    results = execute_engine_interval(
+        prepared,
+        config,
+        measured_start=prepared.measured_start,
+        measured_end=prepared.measured_end,
+        active_trading_start=prepared.active_trading_start,
+    )
+    results["_manifest_context"] = dict(prepared.manifest_context)
+
     logger.info("6단계: 결과 저장")
     _save_results(results, config)
 
-    # ── 7. 요약 출력 ──────────────────────────────────────────
     if getattr(config, "PRINT_SUMMARY", True):
         _print_summary(results, config)
     return results
+
+
+# Private aliases keep the extraction easy to discover for internal callers
+# while the public names above remain the preferred integration boundary.
+_prepare_inputs = prepare_k200mq_inputs
+_execute_engine_interval = execute_engine_interval
 
 
 # ═══════════════════════════════════════════════════════════════════

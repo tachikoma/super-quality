@@ -35,9 +35,13 @@ class PortfolioRebalanceEngine:
     * no order is created from the final close because it has no next bar.
     """
 
-    def __init__(self, config: K200MQConfig) -> None:
+    def __init__(
+        self,
+        config: K200MQConfig,
+        kospi_mcap_ranking: tuple[str, ...] | None = None,
+    ) -> None:
         self.config = config
-        self.strategy = MomentumQualityStrategy(config)
+        self.strategy = MomentumQualityStrategy(config, kospi_mcap_ranking)
 
     def run(
         self,
