@@ -2,7 +2,7 @@
 
 Provides
 --------
-- :class:`MomentumFactor` — 12-7개월 수익률 (마지막 2개월 skip)
+- :class:`MomentumFactor` — skipped-return 12-2개월 수익률
 - :class:`YearHighFactor` — 52주 고점 비율
 """
 
@@ -13,16 +13,25 @@ import pandas as pd
 from k200_mq.core.factors.base import Factor
 
 
+MOMENTUM_FORMULA_VERSION = "k200mq-momentum-skipped-return-v4"
+MOMENTUM_FORMULA = "close[t-skip_days] / close[t-long_window] - 1"
+MOMENTUM_FORMULA_DEFAULT = "close[t-42] / close[t-252] - 1"
+
+
 class MomentumFactor(Factor):
-    """12-7개월 수익률 모멘텀 팩터.
+    """Skipped-return momentum factor.
 
-    과거 12개월 수익률 중 마지막 2개월을 제외한
-    10개월 수익률을 계산합니다. 이는 한국 시장의
-    2개월 반전 현상을 회피하기 위한 설계입니다
-    (Sim & Kim 2021).
+    The long feature is the current skipped-return formula
+    ``close[t-skip_days] / close[t-long_window] - 1``.  With the default
+    values this is ``close[t-42] / close[t-252] - 1``.  The separately exposed
+    ``momentum_6m`` feature remains the current-price-to-short-lookback return;
+    it is not used for the ranking score.
 
-    교차섹셔널 z-score로 정규화하여 반환합니다.
+    The long feature is normalized to a cross-sectional z-score for ranking.
     """
+
+    formula_version = MOMENTUM_FORMULA_VERSION
+    formula = MOMENTUM_FORMULA
 
     @property
     def name(self) -> str:
@@ -35,7 +44,7 @@ class MomentumFactor(Factor):
         short_window: int = 126,
         skip_days: int = 42,
     ) -> pd.DataFrame:
-        """모멘텀 점수를 계산합니다.
+        """Calculate the long and exposed short momentum features.
 
         Parameters
         ----------
@@ -44,9 +53,9 @@ class MomentumFactor(Factor):
         long_window : int
             장기 룩백 일수 (기본 252, 약 12개월).
         short_window : int
-            단기 룩백 일수, long_window에서 차감 (기본 126, 약 6개월).
+            Exposed short-feature lookback 일수 (기본 126, 약 6개월).
         skip_days : int
-            long_window 끝에서 skip할 일수 (기본 42, 약 2개월).
+            현재 시점에서 제외할 최근 일수 (기본 42, 약 2개월).
 
         Returns
         -------
@@ -56,11 +65,21 @@ class MomentumFactor(Factor):
         df = data[["ticker", "date", "close"]].copy()
         df = df.sort_values(["ticker", "date"])
 
-        # 12개월 전 종가 (skip_days 포함, long_window에서 차감)
-        lag_long = long_window - skip_days
+        if long_window <= 0 or short_window <= 0:
+            raise ValueError("long_window and short_window must be positive")
+        if skip_days < 0 or skip_days >= long_window:
+            raise ValueError("skip_days must satisfy 0 <= skip_days < long_window")
+
+        # Skipped return: close[t-skip_days] / close[t-long_window] - 1.
+        # Keep the endpoint and origin shifts separate: the skipped endpoint
+        # is not the same as shortening the lookback window.
+        df["price_skip_ago"] = (
+            df.groupby("ticker")["close"]
+            .shift(skip_days)
+        )
         df["price_long_ago"] = (
             df.groupby("ticker")["close"]
-            .shift(lag_long)
+            .shift(long_window)
         )
 
         # 6개월 전 종가
@@ -69,12 +88,14 @@ class MomentumFactor(Factor):
             .shift(short_window)
         )
 
-        # 수익률 계산 (12-7개월 = 10개월)
-        df["momentum"] = (df["close"] / df["price_long_ago"]) - 1.0
+        df["momentum"] = (df["price_skip_ago"] / df["price_long_ago"]) - 1.0
+        # Preserve the existing short feature as a diagnostic/exposed column.
         df["momentum_6m"] = (df["close"] / df["price_short_ago"]) - 1.0
 
-        # NaN 行 제거
-        df = df.dropna(subset=["momentum", "momentum_6m"])
+        # The skipped-return feature drives ranking.  Keep rows when only the
+        # exposed short return is unavailable so the diagnostic window cannot
+        # alter factor readiness or the measured trading universe.
+        df = df.dropna(subset=["momentum"])
 
         # 교차섹셔널 z-score 정규화
         df["momentum_z"] = (

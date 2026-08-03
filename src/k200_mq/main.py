@@ -13,6 +13,7 @@ from collections.abc import Mapping
 import hashlib
 import json
 import logging
+import math
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
@@ -42,6 +43,13 @@ from k200_mq.validation.walk_forward import (
     get_candidate_library,
     get_expanding_window_folds,
 )
+from k200_mq.factors.momentum import (
+    MOMENTUM_FORMULA,
+    MOMENTUM_FORMULA_DEFAULT,
+    MOMENTUM_FORMULA_VERSION,
+)
+from k200_mq.factors.quality import QUALITY_FORMULA, QUALITY_FORMULA_VERSION
+from k200_mq.factors.regime import REGIME_FORMULA, REGIME_FORMULA_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +81,23 @@ _TRUE_WALKFORWARD_LIMITATIONS = (
     "Candidates are restricted to safe runtime overrides; factor preparation is not recomputed per candidate.",
     "Exact OOS date coverage is enforced when the prepared trading calendar is available; otherwise structural and non-empty OOS checks apply.",
 )
+
+
+class _UnsupportedCLIOption(argparse.Action):
+    """Reject a retained compatibility option instead of silently ignoring it."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        option = option_string or self.option_strings[0]
+        raise argparse.ArgumentError(
+            self,
+            f"{option} is unsupported/deferred by the K200MQ runtime and cannot be used",
+        )
 
 
 def _is_secret_field(name: str) -> bool:
@@ -155,6 +180,102 @@ def _manifest_config(config: Any) -> dict[str, Any]:
     }
 
 
+def _quality_weight_metadata(config: Any) -> dict[str, Any]:
+    """Return configured and effective quality component weights.
+
+    Configuration stores raw component weights, while ``QualityFactor``
+    normalizes them before constructing its composite.  Keep both forms in
+    preparation and result artifacts so the weights used by a score are clear.
+    """
+    raw_weights = {
+        "roe": float(getattr(config, "QUALITY_WEIGHT_ROE", 0.35)),
+        "de": float(getattr(config, "QUALITY_WEIGHT_DE", 0.25)),
+        "opmargin": float(getattr(config, "QUALITY_WEIGHT_OPMARGIN", 0.20)),
+        "cashconv": float(getattr(config, "QUALITY_WEIGHT_CASHCONV", 0.20)),
+    }
+    total = sum(raw_weights.values())
+    if not all(math.isfinite(value) for value in raw_weights.values()) or total <= 0:
+        raise ValueError("quality component weights must have a finite positive sum")
+    effective_weights = {
+        name: value / total for name, value in raw_weights.items()
+    }
+    return {
+        # ``weights`` is retained as a compatibility alias for configured
+        # values; the explicit names below remove any ambiguity.
+        "weights": dict(raw_weights),
+        "configured_raw_weights": dict(raw_weights),
+        "effective_normalized_weights": effective_weights,
+        "weights_used": "effective_normalized_weights",
+    }
+
+
+def _factor_manifest_definitions(config: Any) -> dict[str, Any]:
+    """Return versioned factor semantics for every run manifest."""
+    quality_weights = _quality_weight_metadata(config)
+    return {
+        "momentum": {
+            "version": MOMENTUM_FORMULA_VERSION,
+            "formula": MOMENTUM_FORMULA,
+            "default_formula": MOMENTUM_FORMULA_DEFAULT,
+            "ranking_column": "momentum_z",
+            "diagnostic_column": "momentum_6m",
+            "diagnostic_only": True,
+        },
+        "quality": {
+            "version": QUALITY_FORMULA_VERSION,
+            "formula": QUALITY_FORMULA,
+            **quality_weights,
+            "ttm_filter": "unsupported/inert",
+        },
+        "regime": {
+            "version": REGIME_FORMULA_VERSION,
+            "formula": REGIME_FORMULA,
+            "min_return": getattr(config, "REGIME_MIN_RETURN", 0.0),
+            "return_window_days": 20,
+            "threshold_semantics": (
+                "bullish iff close > rolling MA and the 20-trading-day cumulative "
+                "return is greater than REGIME_MIN_RETURN"
+            ),
+        },
+    }
+
+
+def _merge_factor_manifest_definitions(
+    authoritative: Mapping[str, Any],
+    supplied: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge only additive caller metadata into authoritative factor definitions.
+
+    A prepared-input context can outlive the factor implementation that created
+    it.  Existing factor names therefore keep every field emitted by the current
+    implementation; stale context may add only new, non-authoritative fields.
+    Unknown factor names are preserved as additive metadata, but never replace a
+    current definition.
+    """
+    merged = {
+        str(name): dict(definition)
+        for name, definition in authoritative.items()
+        if isinstance(definition, Mapping)
+    }
+    if not isinstance(supplied, Mapping):
+        return merged
+
+    for name, supplied_definition in supplied.items():
+        factor_name = str(name)
+        if not isinstance(supplied_definition, Mapping):
+            continue
+        if factor_name not in merged:
+            merged[factor_name] = dict(supplied_definition)
+            continue
+        current_definition = merged[factor_name]
+        for key, value in supplied_definition.items():
+            # Presence in the current definition makes the field authoritative.
+            # Only genuinely new metadata can be carried from a stale context.
+            if key not in current_definition:
+                current_definition[str(key)] = value
+    return merged
+
+
 def _git_manifest_state() -> dict[str, Any]:
     """Best-effort local git state; failure never blocks a backtest save."""
     repo_root = Path(__file__).resolve().parents[2]
@@ -216,6 +337,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run_parser = sub.add_parser("run", help="전체 백테스트 파이프라인 실행")
+    run_parser.epilog = (
+        "Compatibility settings EXCLUDE_MANAGEMENT, EXCLUDE_INVESTMENT_NOTICE, "
+        "EXCLUDE_PREFERRED, and EXCLUDE_ETF_ETN are unsupported/inert: they have "
+        "no runtime consumer and are retained only for compatibility."
+    )
     run_parser.add_argument(
         "--dart-api-key",
         default=argparse.SUPPRESS,
@@ -239,9 +365,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--no-cache",
-        action="store_true",
-        default=False,
-        help="팩터 캐시를 건너뛰고 재계산",
+        action=_UnsupportedCLIOption,
+        nargs=0,
+        help="[unsupported/deferred] 현재 K200MQ 런타임에는 캐시 우회 기능이 없음",
     )
     run_parser.add_argument(
         "--strict-pit",
@@ -263,8 +389,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--rebalance-lookback",
         type=int,
-        default=argparse.SUPPRESS,
-        help="모멘텀 계산용 선행 일수 (기본 252)",
+        action=_UnsupportedCLIOption,
+        help=(
+            "[unsupported/deferred] 리밸런싱 lookback은 현재 런타임에서 "
+            "CLI로 변경할 수 없음"
+        ),
     )
     run_parser.add_argument(
         "--weight-momentum",
@@ -288,25 +417,41 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stop-loss",
         type=float,
         default=argparse.SUPPRESS,
-        help="일일 손절 기준 (기본 -15%)",
+        help="enabled일 때 -1.0 < 기준 < 0.0인 trailing 손절 (기본 -15%%; disabled면 미사용)",
+    )
+    stop_loss_group = run_parser.add_mutually_exclusive_group()
+    stop_loss_group.add_argument(
+        "--enable-stop-loss",
+        dest="enable_stop_loss",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="[run 전용] trailing stop-loss 주문 활성화 (기본값: 활성화)",
+    )
+    stop_loss_group.add_argument(
+        "--disable-stop-loss",
+        "--no-stop-loss",
+        dest="enable_stop_loss",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="[run 전용] trailing stop-loss 주문 비활성화",
     )
     run_parser.add_argument(
         "--max-holdings",
         type=int,
         default=argparse.SUPPRESS,
-        help="최대 동시 보유 종목 수 (기본 20)",
+        help="[unsupported/deferred] 최대 동시 보유 종목 수 (현재 엔진에 적용하지 않음)",
     )
     run_parser.add_argument(
         "--sector-cap",
         type=float,
         default=argparse.SUPPRESS,
-        help="섹션별 최대 노출 비율 (기본 0.30)",
+        help="[unsupported/deferred] 섹터별 최대 노출 (현재 엔진에 적용하지 않음)",
     )
     run_parser.add_argument(
         "--min-adv-ratio",
         type=float,
         default=argparse.SUPPRESS,
-        help="최소 유동성 비율 (기본 0.01)",
+        help="[unsupported/deferred] ADV 대비 최소 유동성 비율 (현재 엔진에 적용하지 않음)",
     )
 
     robustness_parser = sub.add_parser(
@@ -426,6 +571,7 @@ def _build_config(args: argparse.Namespace) -> Any:
         "weight_quality": "WEIGHT_QUALITY",
         "exclude_kospi_top_n": "EXCLUDE_KOSPI_TOP_N",
         "stop_loss": "SL_STOP_LOSS",
+        "enable_stop_loss": "ENABLE_STOP_LOSS",
         "max_holdings": "MAX_HOLDINGS",
         "sector_cap": "SECTOR_CAP",
         "min_adv_ratio": "MIN_ADV_RATIO",
@@ -450,12 +596,25 @@ def _print_config_summary(config: Any) -> None:
     print(f"  기간: {config.START_DATE} ~ {config.END_DATE}")
     print(f"  리밸런싱: {config.REBALANCE_FREQ}")
     print(f"  선택 종목: {config.TOP_N}")
-    print(f"  최대 보유: {config.MAX_HOLDINGS}")
+    print(f"  손절: {'활성' if config.ENABLE_STOP_LOSS else '비활성'} ({config.SL_STOP_LOSS:.1%})")
     print(f"  모멘텀 가중치: {config.WEIGHT_MOMENTUM}")
     print(f"  품질 가중치: {config.WEIGHT_QUALITY}")
     print(f"  KOSPI 상위 제외: {config.EXCLUDE_KOSPI_TOP_N}")
     print(f"  DART API: {'설정됨' if config.DART_API_KEY else '미설정 (품질 팩터 비활성)'}")
     print(f"  Strict PIT 검증: {'활성' if config.STRICT_PIT_VALIDATION else '비활성'}")
+    print(
+        "  미지원/deferred (미적용): SECTOR_CAP, MIN_ADV_RATIO, MIN_CASH_RATIO, "
+        "MAX_HOLDINGS, UNIVERSE_SIZE, USE_52WEEK_HIGH, QUALITY_MIN_TTM_QUARTERS"
+    )
+    print(
+        "  unsupported/inert (runtime consumer 없음): EXCLUDE_MANAGEMENT, "
+        "EXCLUDE_INVESTMENT_NOTICE, EXCLUDE_PREFERRED, EXCLUDE_ETF_ETN"
+    )
+    print(
+        f"  Regime: MA{config.REGIME_MA_PERIOD} and 20일 return > "
+        f"REGIME_MIN_RETURN ({config.REGIME_MIN_RETURN:.4f})"
+    )
+    print("  MOMENTUM_WINDOW_SHORT: diagnostic-only momentum_6m (ranking/readiness 미사용)")
     print(f"  출력 디렉토리: {config.OUTPUT_DIR}")
     print("=" * 60)
 
@@ -873,6 +1032,8 @@ def _build_run_manifest(
     quality_context.setdefault("financial_data_mode", financial_mode)
     quality_context.setdefault("data_mode", financial_mode)
     quality_context.setdefault("financial_provenance", financial_validity)
+    quality_context["weights"] = _quality_weight_metadata(config)
+    quality_context.setdefault("weights_applied", None)
 
     supplied_ranking = context.get(
         "ranking",
@@ -942,9 +1103,33 @@ def _build_run_manifest(
             if financial_mode != "pit_filing_date"
             else "financial quality data uses filing/publication dates"
         ),
-        "momentum": "existing momentum definition retained; not changed in this pass",
-        "adv": "ADV status: configured in K200MQ settings but not applied by the current engine",
-        "sector_cap": "sector-cap status: configured in K200MQ settings but not applied by the current engine",
+        "momentum": (
+            f"{MOMENTUM_FORMULA_VERSION}: {MOMENTUM_FORMULA}; "
+            f"default {MOMENTUM_FORMULA_DEFAULT}; ranking uses momentum_z"
+        ),
+        "adv": "unsupported/deferred: MIN_ADV_RATIO is configured but not applied by the current engine",
+        "sector_cap": "unsupported/deferred: SECTOR_CAP is configured but not applied by the current engine",
+        "portfolio_limits": (
+            "unsupported/deferred: MAX_HOLDINGS and MIN_CASH_RATIO are configured but "
+            "not applied by the current engine"
+        ),
+        "universe_size": (
+            "unsupported/deferred: UNIVERSE_SIZE is configured but the current universe "
+            "loader determines the KOSPI 200 history without consuming this setting"
+        ),
+        "year_high": (
+            "unsupported/deferred: USE_52WEEK_HIGH is configured but the year-high "
+            "feature is not used for ranking"
+        ),
+        "quality_ttm": (
+            "unsupported/deferred: QUALITY_MIN_TTM_QUARTERS is inert; no TTM-quarter "
+            "filter is applied"
+        ),
+        "instrument_exclusions": (
+            "unsupported/inert: EXCLUDE_MANAGEMENT, EXCLUDE_INVESTMENT_NOTICE, "
+            "EXCLUDE_PREFERRED, and EXCLUDE_ETF_ETN have no runtime consumer; "
+            "fields are retained for compatibility"
+        ),
         "dart": (
             "missing DART mode: quality disabled and missing quality values filled with 0"
             if not dart_configured
@@ -957,6 +1142,19 @@ def _build_run_manifest(
             else "KOSPI exclusion ranking has explicit PIT provenance"
         ),
     }
+    factor_context = context.get(
+        "factors",
+        {"row_count": 0, "ticker_count": 0},
+    )
+    if not isinstance(factor_context, dict):
+        factor_context = {"row_count": 0, "ticker_count": 0}
+    factor_context = dict(factor_context)
+    authoritative_factor_definitions = _factor_manifest_definitions(config)
+    supplied_definitions = factor_context.get("definitions")
+    factor_context["definitions"] = _merge_factor_manifest_definitions(
+        authoritative_factor_definitions,
+        supplied_definitions if isinstance(supplied_definitions, Mapping) else None,
+    )
     return {
         "schema_version": 3,
         "command": context.get("command", "run"),
@@ -970,9 +1168,7 @@ def _build_run_manifest(
             {"date_range": {"start": None, "end": None}, "ticker_count": 0},
         ),
         "universe": universe_context,
-        "factors": context.get(
-            "factors", {"row_count": 0, "ticker_count": 0},
-        ),
+        "factors": factor_context,
         # ``first_scheduled_rebalance`` is the calendar schedule we inspect;
         # ``first_ready_rebalance`` is the first schedule allowed to trade.
         # Keep this distinction explicit because the first schedule may have
@@ -1135,11 +1331,13 @@ def prepare_k200mq_inputs(
 
     # ── 2. 가격 데이터 로드 ───────────────────────────────────
     lookback_days = max(int(warmup_days), 1)
-    logger.info("2단계: 가격 데이터 로드 (%dd lookback + ADV)", lookback_days)
-    required_momentum_observations = max(
-        config.MOMENTUM_WINDOW_LONG - config.MOMENTUM_SKIP_DAYS,
-        config.MOMENTUM_WINDOW_SHORT,
-    ) + 1
+    logger.info(
+        "2단계: 가격 데이터 로드 (%dd lookback; ADV unsupported/deferred)",
+        lookback_days,
+    )
+    # The long skipped-return is the ranking feature.  The exposed short
+    # return is diagnostic only and must not determine cache/readiness coverage.
+    required_momentum_observations = config.MOMENTUM_WINDOW_LONG + 1
     backtest_data, lookback_data = get_price_data_with_lookback(
         all_tickers,
         start_date,
@@ -1287,9 +1485,14 @@ def prepare_k200mq_inputs(
 
     # ── 4. 팩터 계산 ──────────────────────────────────────────
     logger.info("4단계: 팩터 계산 (Momentum, Quality, Regime)")
+    quality_weight_metadata = _quality_weight_metadata(config)
 
     # 4a. 모멘텀 팩터
-    logger.info("  3a. 모멘텀 팩터 (12-7개월) 계산 중...")
+    logger.info(
+        "  3a. 모멘텀 팩터 (skipped-return: %s; default %s) 계산 중...",
+        MOMENTUM_FORMULA,
+        MOMENTUM_FORMULA_DEFAULT,
+    )
     momentum_factor = MomentumFactor()
     momentum_df = momentum_factor.compute(
         full_price,
@@ -1304,7 +1507,19 @@ def prepare_k200mq_inputs(
     if config.DART_API_KEY and not daily_financial.empty:
         logger.info("  4b. 품질 팩터 계산 중 (DART API)...")
         try:
-            quality_factor = QualityFactor()
+            quality_factor = QualityFactor(
+                weight_roe=config.QUALITY_WEIGHT_ROE,
+                weight_de=config.QUALITY_WEIGHT_DE,
+                weight_opmargin=config.QUALITY_WEIGHT_OPMARGIN,
+                weight_cashconv=config.QUALITY_WEIGHT_CASHCONV,
+            )
+            quality_weight_metadata["configured_raw_weights"] = dict(
+                quality_factor.raw_weights
+            )
+            quality_weight_metadata["effective_normalized_weights"] = dict(
+                quality_factor.weights
+            )
+            quality_weight_metadata["weights"] = dict(quality_factor.raw_weights)
             quality_df = quality_factor.compute(
                 daily_financial,
                 min_ttm_quarters=config.QUALITY_MIN_TTM_QUARTERS,
@@ -1343,6 +1558,7 @@ def prepare_k200mq_inputs(
                 index_for_regime,
                 ma_period=config.REGIME_MA_PERIOD,
                 min_return_days=20,
+                min_return=config.REGIME_MIN_RETURN,
                 reduction=config.REGIME_REDUCTION,
             )
             measured_regime = regime_df[
@@ -1360,6 +1576,7 @@ def prepare_k200mq_inputs(
                 "enabled": True,
                 "status": "applied",
                 "applied": True,
+                "min_return_threshold": config.REGIME_MIN_RETURN,
                 "covered_date_count": int(len(regime_scale_map)),
                 "measured_date_count": int(len(backtest_dates)),
                 "coverage_ratio": len(regime_scale_map) / max(len(backtest_dates), 1),
@@ -1455,6 +1672,8 @@ def prepare_k200mq_inputs(
         "mode", "non_pit_fiscal_period",
     )
     quality_coverage["financial_provenance"] = financial_provenance
+    quality_coverage["weights"] = quality_weight_metadata
+    quality_coverage["weights_applied"] = bool(not quality_df.empty)
 
     factor_data = factor_data[
         factor_data["date"].isin(pd.to_datetime(backtest_dates))
@@ -1472,6 +1691,7 @@ def prepare_k200mq_inputs(
     manifest_context["factors"] = {
         "row_count": int(len(factor_data)),
         "ticker_count": int(factor_data["ticker"].nunique()),
+        "definitions": _factor_manifest_definitions(config),
     }
     manifest_context["rebalance_readiness"] = rebalance_readiness
     manifest_context["quality"] = quality_coverage

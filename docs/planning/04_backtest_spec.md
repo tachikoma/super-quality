@@ -10,6 +10,17 @@ cross-validation이 아닙니다. 학습/선택이 포함된 expanding-window WF
 
 ---
 
+## 공식 버전과 역사적 결과의 비교 경계
+
+현재 모멘텀 공식은 `k200mq-momentum-skipped-return-v4`이며
+`close[t-skip_days] / close[t-long_window] - 1`입니다. 기본값에서는
+`close[t-42] / close[t-252] - 1`을 사용합니다. 이 factor 의미론 변경 이전에
+생성된 수치는 `obsolete_pre_momentum_v4` / non-current diagnostic으로
+분류합니다. 보존된 **+26.97%**, 이전 **+207%/+245-era** 결과와 pre-v4
+independent robustness 및 WF 결과는 현재 공식의 결과와 비교해서는 안 됩니다.
+이 문서에 남은 과거 수치는 감사 기록으로 유지할 뿐이며, v4 semantic change 뒤에는
+모든 robustness/WF 결과를 obsolete로 취급하고 fresh true-WF run을 수행해야 합니다.
+
 ## 현재 Subperiod Robustness 설계
 
 현재 `robustness` 명령은 다음 독립 기간을 실행합니다.
@@ -23,6 +34,9 @@ cross-validation이 아닙니다. 학습/선택이 포함된 expanding-window WF
 | 5 | 2023–현재 |
 
 각 기간에는 training window가 없으며 전략 파라미터는 고정됩니다.
+모멘텀·품질·regime 등 factor 의미론이 변경되면 다섯 기간을 모두 fresh run으로
+재실행해야 합니다. 변경 전 산출물은 `obsolete_pre_momentum_v4` non-current
+diagnostic이며 현재 공식과 비교하지 않습니다.
 
 ## True Walk-Forward 실행 규격
 
@@ -48,13 +62,39 @@ Fold 4: Train [2015-01 ~ 2022-12] | Test [2023-01 ~ 2023-12]
 Fold 5: Train [2015-01 ~ 2023-12] | Test [2024-01 ~ 2024-12]
 ```
 
-### 완료된 기계적 진단 실행 (2026-08-03)
+### Fresh v4 기계적 True-WF 진단 실행 (2026-08-03; current formula, non-PIT)
+
+명령:
+
+```bash
+DART_API_KEY="" uv run python -m k200_mq.main true-walkforward --output /tmp/k200mq_true_wf_v4_no_dart
+```
+
+- 모멘텀 공식: v4 skipped return `close[t-42] / close[t-252] - 1`
+- 분류: `mechanical_expanding_walk_forward_non_pit`
+- DART API key가 unset되어 quality factor를 비활성화한 **momentum-only diagnostic**입니다.
+- 5개 fold가 모두 유효했고, fold 1–4는 `TOP_N_10`, fold 5는 `BASE`를 선택했습니다.
+- OOS는 1,231개 포인트(2020–2024)이며 stitched 누적 수익률은 **+4.0408%**,
+  stitched MDD는 **-32.0408%**입니다.
+- Fold별 test 수익률: 2020 **+27.1147%**, 2021 **-16.2567%**, 2022
+  **-5.5386%**, 2023 **-0.4543%**, 2024 **+3.9396%**입니다.
+
+산출물은 `/tmp/k200mq_true_wf_v4_no_dart/true_walkforward/`의
+`selection_and_folds.json`, `summary.csv`, `oos_returns.csv`이며 저장소에 복사하거나
+커밋하지 않습니다. v4 공식 모멘텀을 사용한 fresh run이지만, KOSPI 200 유니버스와
+ranking이 non-PIT proxy이고 DART unset으로 financial data가 missing이며 통상 품질
+경로도 non-PIT이므로 **validated performance evidence가 아닙니다.** 이 수치는
+momentum-only diagnostic일 뿐 canonical/production 성과로 해석하지 않습니다.
+
+### 이전 pre-v4 기계적 진단 실행 (2026-08-03; `obsolete_pre_momentum_v4`)
 
 명령: `uv run python -m k200_mq.main true-walkforward --output
 /tmp/k200mq_true_wf`
 분류: `mechanical_expanding_walk_forward_non_pit`
 
-5개 fold가 모두 유효했고 모두 `TOP_N_10`을 선택했습니다. 2020–2024 test
+다음 수치는 v4 공식 적용 전의 `obsolete_pre_momentum_v4` 보존용 감사 기록이다.
+현재 성과가 아니며, 현재 공식과 비교하거나 성과 주장에 사용할 수 없다. 5개 fold가
+모두 유효했고 모두 `TOP_N_10`을 선택했습니다. 2020–2024 test
 기간의 OOS는 1,231개 포인트이며, stitched 누적 수익률은 **+44.6426%**,
 stitched MDD는 **-32.5935%**입니다. Fold별 test 수익률은 2020
 **+60.4528%**, 2021 **-2.0225%**, 2022 **-20.2042%**, 2023
@@ -64,8 +104,9 @@ stitched MDD는 **-32.5935%**입니다. Fold별 test 수익률은 2020
 `selection_and_folds.json`, `summary.csv`, `oos_returns.csv`입니다. 현재
 KOSPI 200 membership/ranking은 non-PIT proxy이고 normalized DART 재무 데이터는
 `non_pit_fiscal_period`이므로, 이 진단은 **validated performance evidence가
-아니며 canonical/production 결과로 취급하지 않습니다.** 산출물은 저장소에
-복사하거나 커밋하지 않습니다.
+아니며 canonical/production 결과로 취급하지 않습니다.** 또한 현재 공식 이전의
+실행이므로 non-current diagnostic입니다. 현재 공식과 비교하려면 fresh
+true-WF를 다시 실행해야 합니다. 산출물은 저장소에 복사하거나 커밋하지 않습니다.
 
 ### Purge & Embargo
 - **현재 상태: deferred/not applicable** — 이 pure core의 후보는 과거 데이터만
@@ -105,8 +146,10 @@ KOSPI 200 membership/ranking은 non-PIT proxy이고 normalized DART 재무 데�
 | 슬리피지 | 0.10% | 0.10% |
 | **1회 거래 (매수+매도)** | **0.43%** | **0.43%** |
 
-### 시장 영향 비용 (Implicit)
-- ADV 기반 동적 슬리피지 모델:
+### 시장 영향 비용 (Implicit) — deferred/unsupported
+- 다음 ADV 기반 동적 슬리피지 모델은 향후 규격이며 현재 엔진에는 적용하지
+  않는다. 현재 결과는 configured explicit commission, sell tax, and slippage만
+  사용한다.
   ```
   impact = k × (size / ADV) ^ alpha
   ```
@@ -114,14 +157,14 @@ KOSPI 200 membership/ranking은 non-PIT proxy이고 normalized DART 재무 데�
   - alpha = 0.5 (Korea market specific)
   - size = 포지션 금액 (KRW)
   - ADV = 해당 종목 일평균 거래대금
-- 대형주 (KOSPI 200): impact ≈ 0.01-0.05%
-- 중소형주: impact ≈ 0.05-0.30%
+- 대형주 (KOSPI 200): prospective impact ≈ 0.01-0.05%
+- 중소형주: prospective impact ≈ 0.05-0.30%
 
 ### 총 비용 추정 (월 리밸런싱, 20종목)
 - 월 거래: ~3-6종목 매도(리밸런싱) + ~3-6종목 매수 = 6-12건
 - 연간 거래: 72-144건
 - 연간 비용: 72 × 0.43% ~ 144 × 0.43% = **0.31% ~ 0.62% (avg 0.46%)**
-- 시장 영향 추가: +0.05~0.10%
+- 시장 영향 추가: 향후 적용 시에만 +0.05~0.10% (현재 미적용)
 
 ### 비용 제약
 - 순수 alpha(수수료 전)에서 연 0.5~2.0% 기대 시
@@ -131,6 +174,11 @@ KOSPI 200 membership/ranking은 non-PIT proxy이고 normalized DART 재무 데�
 ---
 
 ## 레짓 필터 교차 분석
+
+레짓 bullish 조건은 `KPI200 > MA(REGIME_MA_PERIOD)`이고 **20거래일 누적 수익률이
+`REGIME_MIN_RETURN`(기본값 0.0)보다 큰 경우**입니다. 수익률 window는 20거래일로
+유지되며, threshold 의미론이 바뀌면 아래 교차 분석도 fresh run으로 갱신해야
+합니다.
 
 ### 시나리오별 분류
 | 시나리오 | 기간 | 특징 |
@@ -145,6 +193,29 @@ KOSPI 200 membership/ranking은 non-PIT proxy이고 normalized DART 재무 데�
 - 각 시나리오에서 전략 성과 개별 산출
 - 레짓 필터 ON/OFF 각 시나리오별 비교
 - 레짓 필터 효과 = Sharpe 차이 + MDD 개선도
+
+## Sensitivity 입력 계약
+
+Sensitivity 실행 전 runtime 의미가 검증된 파라미터만 후보로 사용한다.
+현재 candidate library에서 `SECTOR_CAP`, `MIN_ADV_RATIO`, `MIN_CASH_RATIO`,
+`UNIVERSE_SIZE`, `USE_52WEEK_HIGH`, `MAX_HOLDINGS`, `QUALITY_MIN_TTM_QUARTERS`는
+**unsupported/deferred** 또는 inert이므로 제외한다. 특히
+`QUALITY_MIN_TTM_QUARTERS`는 이름만 보존된 compatibility setting이며 TTM
+분기 필터를 적용하지 않는다. `EXCLUDE_MANAGEMENT`,
+`EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`, `EXCLUDE_ETF_ETN`도
+**unsupported/inert**이고 runtime consumer가 없으므로 sensitivity 후보에
+포함하지 않는다.
+`MOMENTUM_WINDOW_SHORT`는 `momentum_6m` diagnostic-only 표시용이며 랭킹,
+readiness, sensitivity 차원이 아니다.
+
+`--enable-stop-loss`, `--disable-stop-loss`, `--stop-loss`는 `run` 명령 전용이다.
+`true-walkforward`는 이 플래그들을 노출하지 않고 config/environment 또는 기본값을
+사용한다.
+
+Momentum, quality, regime, execution 또는 cost semantics가 바뀐 뒤에는
+sensitivity/ablation을 포함한 WF와 robustness 산출물을 모두 삭제하지 않고
+`obsolete_pre_momentum_v4` 같은 non-current 진단으로 보존하되, 현재 공식과
+비교하지 말고 fresh run으로 다시 생성한다.
 
 ### 기대 결과
 - 레짓 필터는 추세 시장에서 성능 개선
@@ -174,7 +245,7 @@ KOSPI 200 membership/ranking은 non-PIT proxy이고 normalized DART 재무 데�
 |-----------|------|
 | 모멘텀 디케이 (rebalance 후) | 리밸런링 후 1m/3m/6m 누적 수익률 변화 |
 | 품질 디케이 | 리밸런링 후 품질 팩터 순위 변화율 |
-| 팩터 중요도 | Shapley value 또는 simple ablation (모멘텀 only vs quality only vs combined) |
+| 팩터 중요도 | Shapley value 또는 simple ablation (모멘텀 only vs quality only vs combined); factor semantic change 후 fresh rerun 필수 |
 
 ---
 

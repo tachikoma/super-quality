@@ -38,7 +38,7 @@ Super Quality 2.0은 여덟 가지 조건(A-H)으로 KOSPI 및 KOSDAQ 종목을 
 ### 사전 요구사항
 
 - Python 3.12+
-- [DART API 키](https://opendart.fss.or.kr) — OpenDartReader를 통한 재무 데이터 조회에 필요
+- [DART API 키](https://opendart.fss.or.kr) — K200MQ 품질 데이터 사용 시 필요; 미설정/불가 시 momentum-only/non-PIT 모드로 계속 실행
 
 ### 설정
 
@@ -116,12 +116,12 @@ K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리�
 
 | 파일 | 설명 |
 |------|------|
-| `tearsheet.html` | 차트가 포함된 자체 HTML 성과 리포트 |
-| `trade_log.csv` | 모든 거래 내역 (진입/종료일, 손익, 보유일, 종료 사유) |
-| `portfolio_snapshots.csv` | 일별 포트폴리오 가치, 현금, 보유종목, NAV |
-| `equity_curve.png` | 포트폴리오 NAV 추이 |
-| `drawdown.png` | 고점 대비 낙폭 차트 |
-| `monthly_returns.png` | 월별 수익률 히트맵 |
+| `portfolio_snapshots.csv` | 일별 포트폴리오 가치, 현금, 보유종목, NAV (데이터가 있을 때) |
+| `trade_log.csv` | 모든 거래 내역 (진입/종료일, 손익, 보유일, 종료 사유; 거래가 있을 때) |
+| `daily_returns.csv` | 일별 포트폴리오 수익률 (데이터가 있을 때) |
+| `metrics.json` | 성과 지표 및 비용 attribution |
+| `benchmark_returns.csv` | 설정된 KPI200 가격수익률 벤치마크 (사용 가능할 때) |
+| `run_manifest.json` | 설정, 데이터 provenance, 비용/벤치마크 및 알려진 제한사항 |
 | `subperiod_robustness_summary.csv` | 독립 subperiod robustness 결과 요약 |
 | `true_walkforward/selection_and_folds.json` | expanding-WF 선택, fold 결과 및 provenance |
 | `true_walkforward/summary.csv` | fold별 OOS 지표와 config/git/preparation provenance |
@@ -167,7 +167,7 @@ src/
 | KOSPI / KOSDAQ 종목 리스트 | FinanceDataReader | 아니요 | - | Universe screening |
 | 일별 OHLCV 가격 | FinanceDataReader | 아니요 | - | 가격 데이터 |
 | 시가총액 | FinanceDataReader | 아니요 | - | 유니버스 구성 |
-| 재무제표 (K-IFRS) | OpenDartReader | 예 | 프리스크리닝 6 workers | 팩터 계산 |
+| 재무제표 (K-IFRS) | OpenDartReader | 품질 사용 시 | 프리스크리닝 6 workers | 품질 팩터 계산 (미설정/불가 시 momentum-only) |
 | 개인 투자자 순매수 | pykrx | 아니요 | 8 workers | Supply factor (legacy) |
 | 유상증자 일정 | OpenDartReader | 예 | 4 workers | Share change tracking |
 | KOSDAQ 지수 (KQ11) | FinanceDataReader | 아니요 | - | 레짓 필터 (legacy) |
@@ -189,7 +189,12 @@ DART(Data Analysis, Retrieval and Transfer) 시스템은 한국 상장 기업의
    export DART_API_KEY=your_40_character_api_key_here
    ```
 
-`DART_API_KEY`가 설정되지 않은 경우 시스템은 경고를 출력하며 재무 데이터 조회가 런타임에 실패합니다.
+`DART_API_KEY`가 없거나 DART 품질 데이터가 unavailable인 경우에도 기본 K200MQ
+실행은 실패하지 않습니다. 품질 팩터를 비활성화하고 누락 품질 값을 0으로 처리하여
+**momentum-only/non-PIT 모드**로 계속 실행하며, 결과 `run_manifest.json`에 DART
+unavailable 및 품질 비활성화/재무 데이터 provenance를 명시합니다. `--strict-pit`는
+별도의 PIT 계약 검증 모드이므로 필요한 provenance가 없으면 의도적으로 중단할 수
+있습니다.
 
 ## 테스트
 

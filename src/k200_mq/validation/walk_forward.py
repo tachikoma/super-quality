@@ -3,8 +3,9 @@
 This module deliberately does not run a backtest or load data.  It defines the
 fixed fold schedule, the small candidate library whose parameters have current
 runtime semantics, and deterministic selection/serialization for a later
-pipeline integration.  Stop-loss on/off candidates are intentionally absent:
-the current execution config has a threshold but no explicit safe enable flag.
+pipeline integration.  Stop-loss enable/disable and threshold settings have
+explicit runtime semantics, but are not included in the default candidate
+library.
 """
 
 from __future__ import annotations
@@ -127,8 +128,9 @@ class CandidateSpec:
     """Immutable versioned candidate configuration.
 
     ``parameters`` contains only overrides with current runtime semantics.  It
-    intentionally excludes quality sub-weights, ``MAX_HOLDINGS`` and the short
-    momentum window because those are not safe candidate dimensions here.
+    intentionally excludes quality sub-weights, unsupported portfolio/liquidity
+    settings, ``MAX_HOLDINGS`` and the short momentum window because those are
+    not safe candidate dimensions here.
     """
 
     candidate_id: str

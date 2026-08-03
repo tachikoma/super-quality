@@ -12,16 +12,24 @@ import pandas as pd
 from k200_mq.core.factors.base import Factor
 
 
+REGIME_FORMULA_VERSION = "k200mq-regime-ma-return-threshold-v2"
+REGIME_FORMULA = "close > rolling_ma(ma_period) and cum_return(min_return_days) > min_return"
+
+
 class RegimeFactor(Factor):
     """KOSPI 200 시장 리짓 팩터.
 
     시장 추세를 판단하여 포트폴리오의 노출을 조절합니다.
 
-    * **Bullish** — KOSPI 200 > MA200 AND 20일 수익률 > 0
+    * **Bullish** — KOSPI 200 > MA200 AND 20거래일 누적 수익률 >
+      ``REGIME_MIN_RETURN`` (기본값 0.0)
         → 포지션 100% 유지
     * **Bearish** — 위 조건 미충족
         → 포지션 축소 (config.REDUCTION 비율)
     """
+
+    formula_version = REGIME_FORMULA_VERSION
+    formula = REGIME_FORMULA
 
     @property
     def name(self) -> str:
@@ -32,6 +40,7 @@ class RegimeFactor(Factor):
         data: pd.DataFrame,
         ma_period: int = 200,
         min_return_days: int = 20,
+        min_return: float = 0.0,
         reduction: float = 0.50,
     ) -> pd.DataFrame:
         """리짓 신호를 계산합니다.
@@ -44,6 +53,8 @@ class RegimeFactor(Factor):
             이동 평균 기간 (기본 200).
         min_return_days : int
             수익률 계산 기간 (기본 20일).
+        min_return : float
+            Bullish 판정에 필요한 최소 누적 수익률 (기본 0.0).
         reduction : float
             Bearish 시 포지션 축소 비율 (기본 0.5 = 50%).
 
@@ -79,7 +90,7 @@ class RegimeFactor(Factor):
         # 일별 수익률
         df["daily_return"] = df["close"].pct_change()
 
-        # 20일 누적 수익률
+        # 20거래일 누적 수익률; the return window remains fixed at 20 days
         df["cum_return_20d"] = (
             df["daily_return"]
             .rolling(min_return_days, min_periods=min_return_days)
@@ -94,7 +105,7 @@ class RegimeFactor(Factor):
         df["regime"] = pd.Series(pd.NA, index=df.index, dtype="boolean")
         df.loc[valid, "regime"] = (
             (df.loc[valid, "close"] > df.loc[valid, "ma"])
-            & (df.loc[valid, "cum_return_20d"] > 0)
+            & (df.loc[valid, "cum_return_20d"] > min_return)
         )
 
         # Missing regime values are intentionally left without a scale.  The

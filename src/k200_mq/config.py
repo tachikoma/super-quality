@@ -4,7 +4,9 @@ pydantic-settings를 사용하여 환경 변수와 .env 파일에서 설정을 �
 """
 
 from pathlib import Path
-from pydantic import Field
+import math
+
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,7 +49,7 @@ class BacktestConfig(BaseSettings):
     )
     MAX_HOLDINGS: int = Field(
         default=20,
-        description="동시 보유 가능한 최대 종목 수",
+        description="미지원/Deferred: 동시 보유 최대 종목 수 (현재 엔진에 적용하지 않음)",
     )
 
     # ── 비용 ─────────────────────────────────────────────────
@@ -65,8 +67,36 @@ class BacktestConfig(BaseSettings):
     )
     SL_STOP_LOSS: float = Field(
         default=-0.15,
-        description="고점 대비 trailing stop 기준 (기본 -15%)",
+        description="활성화 시 고점 대비 trailing stop 기준 (-1.0 초과, 0 미만; 기본 -15%)",
     )
+    ENABLE_STOP_LOSS: bool = Field(
+        default=True,
+        description="trailing stop-loss 주문 생성 여부 (기본 활성화)",
+    )
+
+    @field_validator("SL_STOP_LOSS")
+    @classmethod
+    def validate_stop_loss_threshold(cls, value: float) -> float:
+        """Reject non-finite thresholds; the active-domain check is conditional."""
+        if not math.isfinite(value):
+            raise ValueError("SL_STOP_LOSS must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def validate_stop_loss_domain(self) -> "BacktestConfig":
+        """Require a usable fractional loss threshold when stops are enabled.
+
+        A disabled stop-loss retains its configured value for reproducibility,
+        but the execution engine must not interpret that value as an order
+        trigger.  This lets callers preserve an existing threshold while
+        explicitly disabling the feature.
+        """
+        if self.ENABLE_STOP_LOSS and not -1.0 < self.SL_STOP_LOSS < 0.0:
+            raise ValueError(
+                "SL_STOP_LOSS must satisfy -1.0 < SL_STOP_LOSS < 0.0 "
+                "when ENABLE_STOP_LOSS=True"
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent.parent / ".env",
@@ -85,7 +115,10 @@ class K200MQConfig(BacktestConfig):
     # ── 유니버스 ───────────────────────────────────────────────
     UNIVERSE_SIZE: int = Field(
         default=200,
-        description="KOSPI 200 종목 수 (상위 200 by market cap)",
+        description=(
+            "미지원/Deferred: 현재 유니버스 로더가 KOSPI 200 이력을 직접 결정하며 "
+            "이 설정을 소비하지 않음"
+        ),
     )
     EXCLUDE_KOSPI_TOP_N: int = Field(
         default=50,
@@ -96,13 +129,16 @@ class K200MQConfig(BacktestConfig):
     )
     MIN_ADV_RATIO: float = Field(
         default=0.01,
-        description="최소 유동성 비율 (포지션 크기 / ADV)",
+        description="미지원/Deferred: 최소 유동성 비율 (현재 엔진에 적용하지 않음)",
     )
 
     # ── 모멘텀 팩터 ────────────────────────────────────────────
     MOMENTUM_WINDOW_SHORT: int = Field(
         default=126,
-        description="단기 모멘텀 룩백 (거래일, 6개월)",
+        description=(
+            "진단 전용: momentum_6m 표시용 룩백 (거래일, 6개월); "
+            "랭킹·민감도·readiness에는 사용하지 않음"
+        ),
     )
     MOMENTUM_WINDOW_LONG: int = Field(
         default=252,
@@ -114,7 +150,7 @@ class K200MQConfig(BacktestConfig):
     )
     USE_52WEEK_HIGH: bool = Field(
         default=True,
-        description="52주 고점 비율을 보조 시그널로 사용",
+        description="미지원/Deferred: 52주 고점 보조 시그널 (현재 랭킹에 적용하지 않음)",
     )
 
     # ── 품질 팩터 ──────────────────────────────────────────────
@@ -136,8 +172,23 @@ class K200MQConfig(BacktestConfig):
     )
     QUALITY_MIN_TTM_QUARTERS: int = Field(
         default=3,
-        description="품질 팩터 계산에 필요한 최소 TTM 분기 수",
+        description="미지원/Deferred: TTM 분기 필터 (현재 inert; 필터링하지 않음)",
     )
+
+    @model_validator(mode="after")
+    def validate_quality_weights(self) -> "K200MQConfig":
+        """Validate the quality composite weight contract at config load time."""
+        weights = (
+            self.QUALITY_WEIGHT_ROE,
+            self.QUALITY_WEIGHT_DE,
+            self.QUALITY_WEIGHT_OPMARGIN,
+            self.QUALITY_WEIGHT_CASHCONV,
+        )
+        if any(not math.isfinite(weight) or weight < 0 for weight in weights):
+            raise ValueError("quality component weights must be finite and nonnegative")
+        if sum(weights) <= 0:
+            raise ValueError("quality component weights must have a positive sum")
+        return self
 
     # ── 리짓 필터 ──────────────────────────────────────────────
     REGIME_FILTER_ENABLED: bool = Field(
@@ -150,7 +201,10 @@ class K200MQConfig(BacktestConfig):
     )
     REGIME_MIN_RETURN: float = Field(
         default=0.0,
-        description="리짓 활성화 시 최소 20일 수익률 (0=MA200 위에 있으면 활성)",
+        description=(
+            "리짓 활성화 시 최소 20거래일 누적 수익률 threshold "
+            "(기본 0.0; return window는 20일로 고정)"
+        ),
     )
     REGIME_REDUCTION: float = Field(
         default=0.50,
@@ -174,11 +228,11 @@ class K200MQConfig(BacktestConfig):
     )
     SECTOR_CAP: float = Field(
         default=0.30,
-        description="섹션별 최대 노출 비율 (30%)",
+        description="미지원/Deferred: 섹터별 최대 노출 (현재 엔진에 적용하지 않음)",
     )
     MIN_CASH_RATIO: float = Field(
         default=0.05,
-        description="최소 현금 버퍼 비율 (5%)",
+        description="미지원/Deferred: 최소 현금 버퍼 (현재 엔진에 적용하지 않음)",
     )
     MAX_POSITION_WEIGHT: float = Field(
         default=0.10,
@@ -188,19 +242,19 @@ class K200MQConfig(BacktestConfig):
     # ── 종목 제외 ──────────────────────────────────────────────
     EXCLUDE_MANAGEMENT: bool = Field(
         default=True,
-        description="관리종목 제외",
+        description="unsupported/inert: runtime consumer 없음; 호환성을 위해 유지",
     )
     EXCLUDE_INVESTMENT_NOTICE: bool = Field(
         default=True,
-        description="투자주의 종목 제외",
+        description="unsupported/inert: runtime consumer 없음; 호환성을 위해 유지",
     )
     EXCLUDE_PREFERRED: bool = Field(
         default=True,
-        description="우선주 제외",
+        description="unsupported/inert: runtime consumer 없음; 호환성을 위해 유지",
     )
     EXCLUDE_ETF_ETN: bool = Field(
         default=True,
-        description="ETF/ETN 제외",
+        description="unsupported/inert: runtime consumer 없음; 호환성을 위해 유지",
     )
 
     # ── 모멘텀+품질 가중치 ─────────────────────────────────────

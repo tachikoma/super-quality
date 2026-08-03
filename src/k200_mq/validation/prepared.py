@@ -368,15 +368,14 @@ _SAFE_RUNTIME_FIELDS = frozenset({
     "WEIGHT_METHOD",
     "MAX_POSITION_WEIGHT",
     "INITIAL_CAPITAL",
-    "MAX_HOLDINGS",
     "COMMISSION_RATE",
     "TAX_RATE",
     "SLIPPAGE",
     "SL_STOP_LOSS",
-    "MIN_CASH_RATIO",
-    "SECTOR_CAP",
+    "ENABLE_STOP_LOSS",
     "STRICT_PIT_VALIDATION",
 })
+_DIAGNOSTIC_ONLY_FIELDS = frozenset({"MOMENTUM_WINDOW_SHORT"})
 
 
 def _validate_candidate_overrides(
@@ -388,6 +387,12 @@ def _validate_candidate_overrides(
     normalised = {str(key).upper(): value for key, value in overrides.items()}
     ignored_credentials = credential_fields.intersection(normalised)
     requested = set(normalised).difference(ignored_credentials)
+    diagnostic_only = sorted(requested.intersection(_DIAGNOSTIC_ONLY_FIELDS))
+    if diagnostic_only:
+        fields = ", ".join(diagnostic_only)
+        raise ValueError(
+            f"diagnostic-only field(s) are not runtime candidate dimensions: {fields}"
+        )
     unsafe = sorted(requested.difference(_SAFE_RUNTIME_FIELDS))
     if unsafe:
         fields = ", ".join(unsafe)

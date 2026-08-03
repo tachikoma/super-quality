@@ -320,6 +320,8 @@ class PortfolioRebalanceEngine:
         pending_stops: dict[str, dict[str, Any]],
     ) -> None:
         """Queue close-based stops for execution on the next bar open."""
+        if not bool(getattr(self.config, "ENABLE_STOP_LOSS", True)):
+            return
         for ticker, position in positions.items():
             current_close = self._price(price_data, ticker, signal_date, "close")
             if current_close is None or current_close <= 0:

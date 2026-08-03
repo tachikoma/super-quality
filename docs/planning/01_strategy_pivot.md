@@ -45,7 +45,8 @@ Super Quality 2.0 전략(KOSDAQ 소형주 밸류+품질)을 폐기하고, KOSPI 
 
 ### KOSPI 200에서의 설계 포인트
 - **상위 50개 제외**: Choi, Choi & Kang (2013) — 메가캡이 모멘텀 성능을 저하
-- **룩백 12-7개월**: 마지막 2개월 skip (한국 2개월 반전 특성 회피)
+- **skipped-return (current v4)**: `close[t-skip_days] / close[t-long_window] - 1`
+  (기본 `close[t-42] / close[t-252] - 1`; 한국 2개월 반전 회피)
 - **포인트인트임 유니버스**: 종속 이력 오염 방지
 
 ## 폐기 대상 (코드)

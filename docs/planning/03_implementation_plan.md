@@ -5,7 +5,7 @@
 | 위상 | 일수 | 누적 | 마일스톤 |
 |------|------|------|----------|
 | **0: 준비** | 2 | 2 | 레거시 태깅, 새 패키지, 공통 인프라 추출 |
-| **1: 데이터/유니버스** | 7 | 9 | 종속 이력, ADV, 선행 가격 |
+| **1: 데이터/유니버스** | 7 | 9 | 종속 이력, 선행 가격 (ADV 적용은 deferred) |
 | **2: 팩터 모듈** | 10 | 19 | 모멘텀, 품질, 리짓 필터 |
 | **3: 전략 & 엔진** | 14 | 33 | PortfolioRebalanceEngine, 전략 로직 |
 | **4: 통합 & 검증** | 14 | 47 | 워크포워드, 비용 모델, 검증 |
@@ -60,10 +60,11 @@
 - [ ] KS11 (KOSPI composite) 지원 — 레짓 필터용
 - [ ] `get_market_index(ticker, start, end)` 에 KPI200/KS11 옵션 추가
 
-### 1.4 ADV (Average Daily Volume)
+### 1.4 ADV (Average Daily Volume) — deferred/unsupported
 - [ ] `compute_adv(price_data, window=20) -> DataFrame`
   - ticker × date 기준 20일 평균 거래대금
 - [ ] 유동성 필터: 일평균거래대금 대비 포지션 크기 비율
+  - 현재 helper가 있어도 portfolio engine에는 연결하지 않음
 
 ### 1.5 종속 이력 점검
 - [ ] 2015-2024 기간 KOSPI 200 종속의 정확성 검증
@@ -74,30 +75,31 @@
 ## Phase 2: 팩터 모듈 (10일)
 
 ### 2.1 Momentum Factor (`factors/momentum.py`)
-- [ ] `MomentumFactor.compute(data, lookback=(252, 147), skip=42)`:
-  - `returns = (price[t-lookback[1]] / price[t-lookback[0]]) - 1`
+- [x] `MomentumFactor.compute(data, long_window=252, skip_days=42)`:
+      `close[t-skip_days] / close[t-long_window] - 1` skipped-return formula
+  - default definition: `close[t-42] / close[t-252] - 1`
   - 교차섹셔널 z-score 정규화
-- [ ] `YearHighFactor.compute(data)`:
+- [ ] `YearHighFactor.compute(data)` — deferred as a ranking input:
   - 52주 고점 비율: `(close - 52w_low) / (52w_high - 52w_low)`
-  - 대안 시그널로 사용
+  - `USE_52WEEK_HIGH` is currently unsupported/inert
 - [ ] unit test: synthetic data → 알려진 출력
 - [ ] factor_data merge (ticker × date)
 
 ### 2.2 Quality Factor (`factors/quality.py`)
-- [ ] ROE 계산: `net_income / total_equity` (TTM)
-- [ ] Debt/Equity 계산: `total_debt / total_equity`
-- [ ] Operating Margin 계산: `operating_income / revenue` (TTM)
-- [ ] Cash Conversion 계산: `operating_cf / net_income` (TTM)
-- [ ] 각 팩터 cross-sectional z-score 정규화
-- [ ] **DART Account Mapping 테이블**: 각 팩터별 계정 코드 매핑
+- [x] ROE 계산: `net_income / total_equity` (current normalized input)
+- [x] Debt/Equity 계산: `total_debt / total_equity`
+- [x] Operating Margin 계산: `operating_income / revenue` (현재 normalized 입력; TTM 필터 없음)
+- [x] Cash Conversion 계산: `operating_cf / net_income` (현재 normalized 입력; TTM 필터 없음)
+- [x] 각 팩터 cross-sectional z-score 정규화
+- [ ] **DART Account Mapping 테이블**: 각 팩터별 계정 코드 매핑 (deferred)
   - 기존 `_find_account()` 3-pass 매칭과 별도
-- [ ] NaN 처리: TTM 4분기 미달 시 NaN (보수적 처리 유지)
+- [ ] NaN 처리: TTM 4분기 미달 시 필터링 — deferred; `QUALITY_MIN_TTM_QUARTERS` is inert
 - [ ] unit test
 
 ### 2.3 Regime Factor (`factors/regime.py`)
 - [ ] `RegimeFactor.compute(index_data, as_of_date)`:
-  - KOSPI 200 종가 > MA200 → True
-  - 20일 수익률 > 0 → True (이중 조건)
+  - `KPI200 > MA(REGIME_MA_PERIOD)` AND 20일 수익률 > `REGIME_MIN_RETURN` → True
+    (이중 조건; return threshold default 0.0)
   - 둘 다 True → full exposure, else → 50% exposure
 - [ ] daily 시계열로 반환 (ticker × date 아님, date only)
 - [ ] unit test
@@ -115,10 +117,10 @@
 - [ ] `MomentumQualityStrategy.evaluate(portfolio_data) -> list[ticker, weight]`
   - 입력: 현재 보유 포지션 + 스크리닝 대상 유니버스 + 팩터 점수
   - 로직:
-    1. 유니버스 스크리닝 (유동성, 제외 리스트)
+    1. 유니버스 스크리닝 (제외 리스트; ADV 유동성 필터는 deferred)
     2. 모멘텀 + 품질 z-score 합산 → composite score
     3. 종속 이력 내 TOP N 선택
-    4. 섹션별 노출 캡 적용 (30% per sector)
+    4. 섹터별 노출 캡 적용 — deferred/unsupported; 현재 적용하지 않음
     5. Equal weight 또는 rank-weighted 반환
 - [ ] unit test
 
@@ -142,8 +144,10 @@ for each trading day:
 **주요 설계 결정:**
 - 리밸런싱 스케줄러: 월말/분기말 business day
 - 거래 비용: 명시적 0.23% + 슬리피지
-- 시장 영향: ADV 비율 기반 모델 (소형주 = 더 큰 슬리피지)
-- Stop-loss: 일일 -15%, trailing 옵션 없음 (모멘텀이 트렌드를 타야 하므로)
+- 시장 영향: ADV 비율 기반 모델 — deferred/unsupported; 현재 explicit cost만 적용
+- Stop-loss: `run` 명령에서 enabled일 때 일일 trailing stop-loss, 기본 -15%;
+  disabled도 지원. `true-walkforward`는 stop-loss CLI 플래그를 노출하지 않고
+  config/environment 또는 기본값을 사용
 
 ### 3.3 기존 BacktestEngine 보존
 - 기존 `engine.py` 수정 금지
@@ -151,10 +155,12 @@ for each trading day:
 - 필요 시 `BacktestEngine` 테스트 유지용으로 유지
 
 ### 3.4 리스크 관리
-- 섹션 노출 캡: 30% per GICS Level 1
-- 단일 포지션 최대: 10% NAV
-- 최소 현금 버퍼: 5%
-- correlation filter: 같은 섹터 3종목 이상 시 최고 스코어만 유지
+- 섹터 노출 캡: **unsupported/deferred** (PIT-safe sector mapping과 함께 구현 예정)
+- `MAX_HOLDINGS`: **unsupported/deferred**; 현재 TOP_N과 별도의 보유 수 제한 없음
+- `MIN_CASH_RATIO`: **unsupported/deferred**; 현재 현금 버퍼로 적용하지 않음
+- `MAX_POSITION_WEIGHT`: 설정은 남아 있지만 별도 risk-contract 검증 전까지
+  sensitivity 차원으로 사용하지 않음
+- correlation filter: **unsupported/deferred**
 
 ---
 
@@ -162,7 +168,8 @@ for each trading day:
 
 ### 4.1 CLI 진입점
 - [ ] `src/k200_mq/main.py` — `k200-mq run` CLI
-- [ ] argparse: `--start`, `--end`, `--output`, `--dart-api-key`, `--no-cache`, `--rebalance-freq`, `--top-n`
+- [ ] argparse: `--start`, `--end`, `--output`, `--dart-api-key`, `--rebalance-freq`, `--top-n`
+- [x] `--no-cache` 및 `--rebalance-lookback`는 unsupported/deferred로 명확히 거부
 - [ ] 기존 `super-quality` CLI 와 별도 실행
 
 ### 4.2 독립 Subperiod Robustness Test (현재 구현)
@@ -200,19 +207,25 @@ synthetic evidence로 `validated_expanding_walk_forward_pit`를 만들지 않습
 
 ### 4.4 트랜잭션 비용 모델
 - [ ] 명시적 비용: 수수료 0.015% + 세금 0.20%(매도) + 슬리피지 0.10%
-- [ ] 시장 영향 비용: ADV 기반 동적 슬리피지
+- [ ] 시장 영향 비용: ADV 기반 동적 슬리피지 (deferred/unsupported; 현재 미적용)
 - [ ] Net of cost alpha 산출
 - [ ] Turnover 비용 귀속 분석
 
 ### 4.5 파라미터 민감도 분석
 | 파라미터 | 범위 |
 |----------|------|
-| MOMENTUM_WINDOW | (252, 21), (252, 126), (126, 63), (252, 147) |
+| MOMENTUM_WINDOW_LONG | 252 (현재 공식; 변경 시 fresh WF 필요) |
 | QUALITY_WEIGHT | 0.0, 0.25, 0.50, 0.75, 1.0 |
 | TOP_N | 10, 20, 30, 40 |
 | REBALANCE_FREQ | weekly, monthly, quarterly |
 | STOP_LOSS | -10%, -15%, -20%, none |
 | REGIME_FILTER | on, off |
+
+`SECTOR_CAP`, `MIN_ADV_RATIO`, `MIN_CASH_RATIO`, `MAX_HOLDINGS`,
+`UNIVERSE_SIZE`, `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`는 구현되지
+않았거나 inert이므로 현재 candidate library와 sensitivity 실행에서 제외한다.
+`MOMENTUM_WINDOW_SHORT`는 `momentum_6m` diagnostic-only이며 sensitivity 또는
+운영 파라미터 주장이 아니므로 제외한다.
 
 ### 4.6 레짓 필터 교차 분석
 - Regime ON vs OFF 성과 비교

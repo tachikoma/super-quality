@@ -79,11 +79,11 @@ class MomentumQualityStrategy:
         if self.config.EXCLUDE_KOSPI_TOP_N > 0:
             selected = self._exclude_kospi_top(selected)
 
-        # 섹션별 노출 캡 적용 (간단 구현)
-        # TODO: GICS 코드 매핑 후 정확한 섹션별 캡
+        # SECTOR_CAP is intentionally not applied until a PIT-safe GICS
+        # mapping is available.  The setting remains documented as deferred.
 
         if selected.empty:
-            logger.warning("리밸런싱 %s: 선택된 종목 없음 (캡 적용 후)", as_of)
+            logger.warning("리밸런싱 %s: 선택된 종목 없음 (제외 필터 적용 후)", as_of)
             return []
 
         # 포지션 배분

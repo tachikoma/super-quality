@@ -109,6 +109,49 @@ def test_two_interval_executions_are_fresh_and_exclude_warmup_rows() -> None:
     assert second["trade_log"]["entry_date"].min() == dates[6]
 
 
+def test_prepared_interval_disabled_stop_loss_ignores_retained_threshold() -> None:
+    prepared = _prepared_inputs()
+    dates = pd.bdate_range("2024-01-02", periods=8)
+    price_data = prepared.price_data.copy(deep=True)
+    # An enabled stop-loss with this threshold would queue a stop as soon as
+    # the close falls below the prior peak.  The disabled candidate must not.
+    price_data.loc[("A", dates[4]), "close"] = 1.0
+    disabled_prepared = PreparedK200MQInputs(
+        price_data=price_data,
+        factor_data=prepared.factor_data,
+        index_data=prepared.index_data,
+        universe_history=prepared.universe_history,
+        regime_scale_map=prepared.regime_scale_map,
+        measured_start=prepared.measured_start,
+        measured_end=prepared.measured_end,
+        measured_dates=prepared.measured_dates,
+        active_trading_start=prepared.active_trading_start,
+        runtime_config=prepared.runtime_config,
+    )
+
+    result = execute_engine_interval(
+        disabled_prepared,
+        CandidateSpec(
+            "STOP_LOSS_OFF",
+            {"TOP_N": 1, "ENABLE_STOP_LOSS": False, "SL_STOP_LOSS": 0.25},
+        ),
+        measured_start=dates[2],
+        measured_end=dates[-1],
+        active_trading_start=dates[2],
+    )
+
+    assert not (result["trade_log"]["exit_reason"] == "stop_loss").any()
+
+
+@pytest.mark.parametrize("threshold", [-1.0, 0.0])
+def test_prepared_interval_rejects_invalid_active_stop_loss(threshold: float) -> None:
+    with pytest.raises(ValueError, match="-1.0 < SL_STOP_LOSS < 0.0"):
+        execute_engine_interval(
+            _prepared_inputs(),
+            CandidateSpec("INVALID_STOP", {"SL_STOP_LOSS": threshold}),
+        )
+
+
 def test_candidate_execution_does_not_mutate_shared_prepared_inputs() -> None:
     prepared = _prepared_inputs()
     factor_before = prepared.factor_data.copy(deep=True)
@@ -473,6 +516,12 @@ def test_strict_preparation_cannot_be_disabled_by_candidate() -> None:
         "REBALANCE_FREQ",
         "REGIME_MA_PERIOD",
         "REGIME_REDUCTION",
+        "SECTOR_CAP",
+        "MIN_ADV_RATIO",
+        "MIN_CASH_RATIO",
+        "USE_52WEEK_HIGH",
+        "MAX_HOLDINGS",
+        "QUALITY_MIN_TTM_QUARTERS",
     ],
 )
 def test_candidate_overrides_requiring_recomputation_are_rejected(field: str) -> None:
