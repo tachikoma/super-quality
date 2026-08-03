@@ -5,6 +5,12 @@ KOSPI 200 대형주 중심의 모멘텀+품질 백테스팅 시스템입니다.
 Super Quality 2.0 (KOSDAQ 소형주 밸류 전략)이 구조적으로 실패한 후,
 KOSPI 200 Momentum + Quality 프레임워크로 새 출발한 프로젝트입니다.
 
+> **Current evidence boundary:** The v4 result currently available is a
+> momentum-only mechanical non-PIT diagnostic, not validated performance
+> evidence. Historical PIT constituents and filing-date financial data are the
+> next gate. The canonical status is
+> [docs/planning/05_status.md](docs/planning/05_status.md).
+
 ## 전략 개요
 
 KOSPI 200 종목 중 리밸런싱 일자에 모멘텀 팩터와 품질 팩터를
@@ -56,12 +62,10 @@ regime scaling, stop-loss, 그리고 명시적 거래 비용입니다. 다음 �
 
 현재 모멘텀 공식은 `k200mq-momentum-skipped-return-v4`이며,
 `close[t-skip_days] / close[t-long_window] - 1` (기본
-`close[t-42] / close[t-252] - 1`)입니다. 이 의미론적 변경 이전에 생성된 결과는
-모두 `obsolete_pre_momentum_v4` / non-current diagnostic으로 분류합니다. 따라서
-보존된 **+26.97%**, 이전 **+207%/+245-era** 결과와 pre-v4 independent
-robustness 및 WF 수치(이 문서의 +44.6426% 포함)는 현재 공식 결과와 비교해서는
-안 됩니다. 감사(audit) 기록은 삭제하지 않으며, 공식/현재 성과로 취급하지 않습니다.
-공식 또는 다른 factor 의미론이 바뀔 때마다 fresh true-WF run을 다시 수행해야 합니다.
+`close[t-42] / close[t-252] - 1`입니다. 이 의미론적 변경 이전에 생성된 결과는
+모두 `obsolete_pre_momentum_v4` / non-current audit diagnostic으로 분류합니다.
+현재 공식 결과와 비교하거나 성과 주장에 사용할 수 없으며, 공식 또는 다른
+factor 의미론이 바뀔 때마다 fresh true-WF run을 다시 수행해야 합니다.
 
 ## 설치
 
@@ -128,7 +132,7 @@ uv run python -m k200_mq.main true-walkforward --output outputs_k200mq
 - `selection_and_folds.json`: fold 선택/결과, base runtime config, fold별 유효
   merged config 및 hash, git state, preparation manifest context
 - `summary.csv`: fold별 test 지표와 위 provenance를 포함한 요약
-- `oos_returns.csv`: 검증된 stitched OOS 일별 수익률
+- `oos_returns.csv`: mechanical/exact-coverage checked stitched OOS returns
 
 현재 결과는
 `mechanical_expanding_walk_forward_non_pit`으로 분류되며, 이 순수 core는
@@ -175,24 +179,33 @@ cross-sectional ranking이 non-PIT proxy이고 DART가 unset되어 financial dat
 없거나 non-PIT이므로 **validated performance evidence가 아닙니다.** 따라서
 canonical/production 결과로 승격하지 않습니다.
 
-#### 이전 pre-v4 기계적 진단 실행 (2026-08-03; `obsolete_pre_momentum_v4`)
+### 출력 산출물과 비용/벤치마크 의미론
 
-실행 명령은 `uv run python -m k200_mq.main true-walkforward --output
-/tmp/k200mq_true_wf`입니다. 분류는
-`mechanical_expanding_walk_forward_non_pit`이며, 5개 fold가 모두 유효했고
-모든 fold에서 `TOP_N_10`이 선택되었습니다. OOS는 1,231개 포인트(2020–2024
-test 기간), stitched 누적 수익률은 **+44.6426%**, stitched MDD는
-**-32.5935%**입니다. Fold별 test 수익률은 2020 **+60.4528%**, 2021
-**-2.0225%**, 2022 **-20.2042%**, 2023 **+19.2139%**, 2024
-**-3.2801%**입니다.
+`run` output directory may contain:
 
-산출물은 `/tmp/k200mq_true_wf/true_walkforward/` 아래의
-`selection_and_folds.json`, `summary.csv`, `oos_returns.csv`이며 저장소에
-복사하지 않습니다. 현재 KOSPI 200 membership/ranking은 non-PIT proxy이고
-normalized DART 재무 데이터는 `non_pit_fiscal_period`이므로, 이 결과는
-**validated performance evidence가 아니며 canonical/production 결과도 아닙니다.**
-또한 v4 formula correction 이전 실행이므로 `obsolete_pre_momentum_v4` non-current
-diagnostic입니다. 현재 공식과 비교하려면 fresh true-WF 실행이 필요합니다.
+- `portfolio_snapshots.csv`, `trade_log.csv`, and `daily_returns.csv`
+- `metrics.json` and `run_manifest.json`
+- `benchmark_returns.csv` (KPI200 **price return**, not total return)
+- `subperiod_robustness_summary.csv`
+- `true_walkforward/selection_and_folds.json`, `summary.csv`, and
+  `oos_returns.csv`
+
+Cost attribution is implemented for actual filled trades. Commission, slippage,
+sell-only tax, turnover, and total cost are reconciled across fill records,
+execution statistics, and snapshots. ADV impact is deferred.
+
+PIT historical universe, filing-date financials, strict PIT WF, PIT sensitivity,
+and stress tests are pending. Sector caps, ADV liquidity/impact, `MAX_HOLDINGS`,
+`MIN_CASH_RATIO`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`, and
+`QUALITY_MIN_TTM_QUARTERS` are unsupported or inert and are excluded from
+current sensitivity claims.
+
+#### 이전 pre-v4 기계적 진단 실행 (`obsolete_pre_momentum_v4`)
+
+이전 실행과 결과는 audit-only 기록입니다. v4 formula correction 이전의
+`mechanical_expanding_walk_forward_non_pit` 결과이며, 현재 공식과 비교하거나
+성과 주장에 사용할 수 없습니다. 숫자와 실행 context는 canonical status 문서의
+`Obsolete/audit-only pre-v4 results` 항목에만 유지합니다.
 
 ### 데이터 유효성 계약
 
@@ -261,7 +274,7 @@ src/k200_mq/
 │   └── data/loader.py
 ├── data/
 │   ├── __init__.py
-│   ├── universe.py          # KOSPI 200 유니버스 및 PIT provenance
+│   ├── universe.py          # Proxy universe and PIT provenance contracts
 │   └── provenance.py        # Filing timestamp/PIT validity contracts
 ├── factors/
 │   ├── momentum.py          # skipped-return 모멘텀 팩터 (v4)
@@ -300,32 +313,23 @@ src/k200_mq/
 - 현재 `robustness` 명령은 고정된 독립 subperiod robustness test입니다. 학습/피팅이
   없는 반면, `true-walkforward`는 학습/선택과 OOS 실행을 분리한 expanding-window
   command입니다.
+- 현재 v4 no-DART true-WF diagnostic은 stitched return **+4.0408%**, stitched MDD
+  **-32.0408%**, OOS **1,231 points**입니다. Quality가 비활성화된 momentum-only
+  mechanical non-PIT diagnostic이며 validated performance evidence가 아닙니다.
 - 백테스트 결과는 아직 검증되지 않았습니다. 리짓 필터 적용, 리밸런싱 일자 통합,
   품질 팩터 커버리지 개선은 구현되었지만, PIT 유니버스와 filing-date 재무 데이터
   한계가 남아 있어 결과를 전략 성과로 해석할 수 없습니다.
+- KPI200 benchmark는 price return이며 total return이 아닙니다. Cost attribution은
+  actual filled trades에 대해 구현되어 있습니다.
 - 기존 Super Quality 2.0 레거시 코드는 `src/super_quality/`에 frozen 상태로 보존됩니다.
 - true-walkforward의 기계적 interval slicing은 future rows가 adapter에 들어가는
   것을 막지만, 이것만으로 historical PIT 유니버스·재무 provenance가 생기지는 않습니다.
 
-## 초기 백테스트 결과 (2026-07-26, 2020-2024; `obsolete_pre_momentum_v4`)
+## Obsolete/audit-only results
 
-다음 수치는 v4 공식 적용 전의 보존용 감사 기록이다. **현재 결과가 아니며,
-현재 공식과 비교하거나 성과 주장에 사용할 수 없다. v4 fresh true-WF를 먼저
-실행해야 한다.**
-
-```
-초기 자본: 100,000,000원 → 최종 자본: 307,063,900원
-총 수익률: +207.06%
-연간 수익률: +61.94%
-연간 변동성: 80.93%
-Sharpe 비율: 0.596
-최대 낙폭: -60.71%
-총 거래: 62건 | 승률: 77.4%
-평균 수익률/건: +35.46% | 평균 보유일: 131.3일
-평균 보유 종목: 9.2개
-```
-
-> **⚠️ 주의**: 위 수치는 P0 수정 전이고 현재 모멘텀 공식 변경 전의 과거 실행
-> 결과인 `obsolete_pre_momentum_v4`입니다. 같은 이유로 보존된 +26.97%와
-> 이전 +207%/+245-era 결과, pre-v4 robustness/WF 결과와 현재 공식 결과를
-> 비교하지 마십시오. 감사 기록은 유지하며, 현재 공식에는 fresh run이 필요합니다.
+All pre-v4 and pre-cash-fix backtest, robustness, ablation, and WF outputs are
+retained only as audit history under `obsolete_pre_momentum_v4`. They are not
+current results, validated evidence, or acceptable inputs for parameter
+selection. The numerical audit record is consolidated in
+`docs/planning/05_status.md` to avoid duplicating contradictory historical
+figures across the README files.

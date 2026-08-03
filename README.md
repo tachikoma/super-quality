@@ -3,11 +3,19 @@
 | 전략 | 상태 | 태그 |
 |------|------|------|
 | Super Quality 2.0 (KOSDAQ 소형주 밸류+품질) | **ABANDONED** | `v2.0-abandoned` |
-| KOSPI 200 Momentum + Quality | 베타 (Beta) | — |
+| KOSPI 200 Momentum + Quality | 베타 (Beta), mechanical non-PIT diagnostics only | — |
 
 **Super Quality 2.0**은 강환국 스타일의 한국 주식 퀀트 백테스팅 시스템입니다. 10년(2015-2024) 백테스트 결과 어떤 파라미터 조합으로도 양수 수익을 달성하지 못해 2026-07-25에 전략을 폐기했습니다.
 
 **KOSPI 200 Momentum + Quality**는 폐기된 전략의 인프라(data pipeline, backtest engine, factor framework, reporting)를 재사용하여 KOSPI 200 대형주 중심의 모멘텀+품질 전략으로 새 출발하는 프로젝트입니다.
+
+> **Current evidence boundary:** The current v4 true-WF result is a
+> momentum-only mechanical non-PIT diagnostic, not validated performance
+> evidence. With DART unset it reports **+4.0408% stitched return**,
+> **-32.0408% stitched MDD**, and **1,231 OOS points** (2020-2024).
+> Historical PIT constituents and filing-date financial data are not connected
+> yet. See [docs/planning/05_status.md](docs/planning/05_status.md) for the
+> canonical status and obsolete-result boundary.
 
 ## 전략 개요
 
@@ -66,7 +74,7 @@ uv run super-quality run
 uv run super-quality run --start 2015-01-01 --end 2024-12-31 --dart-api-key YOUR_KEY
 ```
 
-### KOSPI 200 Momentum + Quality (WIP)
+### KOSPI 200 Momentum + Quality (Beta; diagnostics only)
 
 ```bash
 # 전체 백테스트 실행
@@ -110,6 +118,10 @@ interval adapter에서 제거하는 **기계적 non-PIT 보호**이지 historica
 준비된 거래일 달력이 없는 pure-runner 호출은 exact 날짜 대신 구조적·non-empty
 검사만 사용합니다.
 
+현재 v4 no-DART 실행은 `mechanical_expanding_walk_forward_non_pit`로 분류됩니다.
+Quality가 비활성화된 momentum-only 진단이며, proxy universe/ranking과
+non-PIT financial path 때문에 validated performance evidence가 아닙니다.
+
 ### 출력 파일
 
 K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리에 저장됩니다:
@@ -119,13 +131,23 @@ K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리�
 | `portfolio_snapshots.csv` | 일별 포트폴리오 가치, 현금, 보유종목, NAV (데이터가 있을 때) |
 | `trade_log.csv` | 모든 거래 내역 (진입/종료일, 손익, 보유일, 종료 사유; 거래가 있을 때) |
 | `daily_returns.csv` | 일별 포트폴리오 수익률 (데이터가 있을 때) |
-| `metrics.json` | 성과 지표 및 비용 attribution |
-| `benchmark_returns.csv` | 설정된 KPI200 가격수익률 벤치마크 (사용 가능할 때) |
+| `metrics.json` | 성과 지표 및 actual-fill 비용 attribution |
+| `benchmark_returns.csv` | 설정된 KPI200 **가격수익률** 벤치마크 (total return 아님) |
 | `run_manifest.json` | 설정, 데이터 provenance, 비용/벤치마크 및 알려진 제한사항 |
 | `subperiod_robustness_summary.csv` | 독립 subperiod robustness 결과 요약 |
 | `true_walkforward/selection_and_folds.json` | expanding-WF 선택, fold 결과 및 provenance |
 | `true_walkforward/summary.csv` | fold별 OOS 지표와 config/git/preparation provenance |
 | `true_walkforward/oos_returns.csv` | exact-coverage 검사를 통과한 stitched OOS 수익률 |
+
+### 현재 deferred / unsupported settings
+
+PIT historical universe, filing-date financials, strict PIT WF, PIT
+sensitivity, and stress tests are pending. ADV impact/liquidity execution,
+sector caps, `MAX_HOLDINGS`, `MIN_CASH_RATIO`, `UNIVERSE_SIZE`,
+`USE_52WEEK_HIGH`, and `QUALITY_MIN_TTM_QUARTERS` are unsupported or inert and
+are excluded from current sensitivity claims. `MOMENTUM_WINDOW_SHORT` is
+diagnostic-only. Cost attribution is implemented for actual filled trades; the
+current benchmark is price return rather than total return.
 
 ## 프로젝트 구조
 
@@ -140,7 +162,7 @@ src/
 │   ├── backtest/
 │   ├── analysis/
 │   └── reporting/
-└── k200_mq/                    # NEW — KOSPI 200 Momentum + Quality (WIP)
+└── k200_mq/                    # NEW — KOSPI 200 Momentum + Quality (Beta)
     ├── __init__.py
     ├── main.py                 # CLI 진입점
     ├── config.py               # K200MQConfig (BacktestConfig + strategy params)
@@ -149,9 +171,9 @@ src/
     │   ├── factors/base.py
     │   ├── analysis/metrics.py
     │   └── reporting/report.py
-    ├── data/                   # Data layer (extends core/data/loader.py)
+    ├── data/                   # Data layer and provenance contracts
     │   ├── __init__.py
-    │   ├── universe.py         # KOSPI 200 history and PIT provenance
+    │   ├── universe.py         # Proxy universe and PIT provenance contracts
     │   └── provenance.py       # Filing timestamp/PIT validity contracts
     ├── factors/                # New factors (momentum, quality, regime)
     ├── strategies/             # KOSPI 200 Momentum + Quality strategy
@@ -171,7 +193,7 @@ src/
 | 개인 투자자 순매수 | pykrx | 아니요 | 8 workers | Supply factor (legacy) |
 | 유상증자 일정 | OpenDartReader | 예 | 4 workers | Share change tracking |
 | KOSDAQ 지수 (KQ11) | FinanceDataReader | 아니요 | - | 레짓 필터 (legacy) |
-| KOSPI 200 지수 (KPI200) | FinanceDataReader | 아니요 | - | 모멘텀+리짓 필터 (신규) |
+| KOSPI 200 지수 (KPI200) | FinanceDataReader | 아니요 | - | 모멘텀+리짓 필터 및 price-return benchmark |
 
 ## DART API 키
 
@@ -235,5 +257,5 @@ ruff check
 | [docs/planning/01_strategy_pivot.md](docs/planning/01_strategy_pivot.md) | 전략 전환 이유 및 폐기/유지 매핑 |
 | [docs/planning/02_architecture.md](docs/planning/02_architecture.md) | KOSPI 200 MQ 패키지 구조 및 팩터 설계 |
 | [docs/planning/03_implementation_plan.md](docs/planning/03_implementation_plan.md) | 5단계 구현 계획 |
-| [docs/planning/04_backtest_spec.md](docs/planning/04_backtest_spec.md) | 독립 subperiod robustness, 향후 WF, 비용 모델, 스트레스 테스트 |
+| [docs/planning/04_backtest_spec.md](docs/planning/04_backtest_spec.md) | 독립 subperiod robustness, mechanical WF, 비용 모델, PIT gate, 스트레스 테스트 |
 | [docs/planning/05_status.md](docs/planning/05_status.md) | 실시간 진행 상황 |
