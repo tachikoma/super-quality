@@ -12,12 +12,16 @@ timestamp may instead use an explicit source timezone and exchange cutoff;
 after-cutoff values are mapped to the next trading session.  A parseable
 column, including one named ``filing_timestamp`` or ``report_date``, is
 otherwise non-PIT.
+
+The local DART importer is stricter than this provider-neutral contract:
+session-cutoff timestamps remain deferred until their raw filing lineage is
+attested by the verified manifest and normalized-frame evidence.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import time
+from datetime import date, datetime, time
 import hashlib
 import json
 from typing import Any
@@ -90,6 +94,67 @@ def _constituent_fingerprint(tickers: list[str]) -> str:
     canonical = sorted({str(ticker) for ticker in tickers})
     payload = json.dumps(canonical, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _canonical_evidence_value(value: Any) -> Any:
+    """Convert provenance evidence to a deterministic JSON-compatible value."""
+    if value is None or value is pd.NaT:
+        return None
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonical_evidence_value(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonical_evidence_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_canonical_evidence_value(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True))
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        missing = False
+    if isinstance(missing, bool) and missing:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _history_evidence_fingerprint(
+    history_data: pd.DataFrame,
+    provenance_by_as_of: Mapping[str, Any],
+    metadata_by_as_of: Mapping[str, Any],
+    acquisition_manifest: Mapping[str, Any] | None,
+    source_file_sha256: str | None,
+) -> str | None:
+    """Fingerprint the materialized history and all evidence that authorizes it."""
+    if not isinstance(history_data, pd.DataFrame):
+        return None
+    if not isinstance(provenance_by_as_of, Mapping) or not isinstance(metadata_by_as_of, Mapping):
+        return None
+    if not isinstance(acquisition_manifest, Mapping) or not source_file_sha256:
+        return None
+    columns = tuple(str(column) for column in history_data.columns)
+    rows = [
+        [_canonical_evidence_value(value) for value in row]
+        for row in history_data.loc[:, list(columns)].itertuples(index=False, name=None)
+    ]
+    rows.sort(key=lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True))
+    payload = {
+        "history_columns": list(columns),
+        "history_rows": rows,
+        "provenance_by_as_of": _canonical_evidence_value(provenance_by_as_of),
+        "provenance_metadata_by_as_of": _canonical_evidence_value(metadata_by_as_of),
+        "acquisition_manifest": _canonical_evidence_value(acquisition_manifest),
+        "source_file_sha256": str(source_file_sha256).casefold(),
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _metadata_label(metadata: Any) -> str | None:
@@ -178,8 +243,16 @@ def _metadata_matches(
     return label in PROXY_CONTRACTS and metadata.get("contract") == PROXY_CONTRACTS[label]
 
 
-def _verified_acquisition_matches(evidence: Any, metadata: Mapping[str, Any]) -> bool:
-    """Recognize only the importer-issued raw-byte evidence token."""
+def _verified_acquisition_matches(
+    evidence: Any,
+    metadata: Mapping[str, Any],
+    *,
+    history_data: pd.DataFrame | None = None,
+    provenance_by_as_of: Mapping[str, Any] | None = None,
+    metadata_by_as_of: Mapping[str, Any] | None = None,
+    acquisition_manifest: Mapping[str, Any] | None = None,
+) -> bool:
+    """Recognize only importer-issued evidence bound to this history."""
     if evidence is None:
         return False
     evidence_type = type(evidence)
@@ -192,7 +265,24 @@ def _verified_acquisition_matches(evidence: Any, metadata: Mapping[str, Any]) ->
     raw_sha = getattr(evidence, "raw_sha256", None)
     expected = metadata.get("source_file_sha256")
     manifest_sha = getattr(manifest, "source_file_sha256", None)
-    return isinstance(raw_sha, str) and raw_sha == expected == manifest_sha
+    if not (isinstance(raw_sha, str) and raw_sha == expected == manifest_sha):
+        return False
+    if history_data is None:
+        return True
+    if (
+        provenance_by_as_of is None
+        or metadata_by_as_of is None
+        or acquisition_manifest is None
+    ):
+        return False
+    expected_history_fingerprint = _history_evidence_fingerprint(
+        history_data,
+        provenance_by_as_of,
+        metadata_by_as_of,
+        acquisition_manifest,
+        raw_sha,
+    )
+    return getattr(evidence, "history_fingerprint", None) == expected_history_fingerprint
 
 
 def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
@@ -209,6 +299,7 @@ def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
     """
     if isinstance(universe_history, pd.DataFrame):
         history_data = universe_history
+        history_attrs = universe_history.attrs
         raw_sources = universe_history.attrs.get(
             "provenance_by_as_of",
             universe_history.attrs.get("source_by_as_of", {}),
@@ -227,10 +318,15 @@ def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
         # this validator independent from the loader and preserves compatibility
         # with the result object accepted by the public validator API.
         history_data = getattr(universe_history, "data")
+        history_attrs = history_data.attrs
         raw_sources = getattr(universe_history, "provenance_by_as_of")
         provenance = getattr(universe_history, "provenance")
         raw_metadata = getattr(universe_history, "provenance_metadata_by_as_of")
-        acquisition_evidence = getattr(universe_history, "_verified_acquisition", None)
+        acquisition_evidence = getattr(
+            universe_history,
+            "_verified_acquisition",
+            history_data.attrs.get("_verified_acquisition"),
+        )
 
     def _date_key(value: Any) -> str | None:
         try:
@@ -294,6 +390,8 @@ def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
             if isinstance(metadata, dict):
                 metadata_by_as_of[key] = metadata
 
+    acquisition_manifest = history_attrs.get("acquisition_manifest")
+
     # A PIT label without a per-date key is never a valid history claim.  In
     # particular, ``{"history": "pit"}`` is an aggregate assertion and must
     # not be used as a fallback for every row in the history.
@@ -313,7 +411,14 @@ def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
             if (
                 not _metadata_matches(metadata, "pit", as_of, tickers)
                 or not isinstance(metadata, Mapping)
-                or not _verified_acquisition_matches(acquisition_evidence, metadata)
+                or not _verified_acquisition_matches(
+                    acquisition_evidence,
+                    metadata,
+                    history_data=history_data,
+                    provenance_by_as_of=supplied_sources,
+                    metadata_by_as_of=metadata_by_as_of,
+                    acquisition_manifest=acquisition_manifest,
+                )
             ):
                 resolved_source = LEGACY_PROXY_UNKNOWN
         elif source not in {"proxy_current", "mcap_proxy", LEGACY_PROXY_UNKNOWN}:
@@ -651,10 +756,21 @@ def filing_to_trading_session(
     else:
         local = parsed
 
-    sessions = pd.DatetimeIndex(pd.to_datetime(all_dates, errors="coerce")).dropna()
-    if sessions.tz is not None:
-        sessions = sessions.tz_convert(None)
-    sessions = sessions.normalize()
+    session_values: list[pd.Timestamp] = []
+    for value in all_dates:
+        try:
+            session = pd.Timestamp(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if pd.isna(session):
+            continue
+        if session.tzinfo is not None:
+            try:
+                session = session.tz_convert("Asia/Seoul").tz_localize(None)
+            except (TypeError, ValueError, OverflowError):
+                continue
+        session_values.append(pd.Timestamp(session.date()))
+    sessions = pd.DatetimeIndex(session_values)
     sessions = sessions.unique().sort_values()
     if not len(sessions):
         return None
@@ -663,7 +779,7 @@ def filing_to_trading_session(
         eligible = sessions[sessions > local_date]
     else:
         parsed_cutoff = _parse_cutoff_time(cutoff_time)
-        if parsed_cutoff is None:
+        if parsed_cutoff is None or not has_meaningful_filing_timestamp(parsed):
             return None
         local_clock = local.timetz().replace(tzinfo=None)
         if local_date in sessions and local_clock <= parsed_cutoff:
@@ -691,11 +807,12 @@ def _availability_values(data: pd.DataFrame, field: str) -> list[pd.Timestamp | 
 
 
 def find_filing_date_field(data: pd.DataFrame) -> str | None:
-    """Return the first supported availability field, if any."""
-    for field in (*TIMESTAMP_FIELDS, *CUTOFF_FIELDS, *FILING_DATE_FIELDS):
-        if field in data.columns:
-            return field
-    return None
+    """Return one supported availability field; conflicts fail closed."""
+    fields = list(dict.fromkeys(
+        field for field in (*TIMESTAMP_FIELDS, *CUTOFF_FIELDS, *FILING_DATE_FIELDS)
+        if field in data.columns
+    ))
+    return fields[0] if len(fields) == 1 else None
 
 
 def has_usable_filing_dates(

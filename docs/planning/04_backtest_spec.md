@@ -169,6 +169,43 @@ connected yet, and the current proxy default behavior is intentionally
 unchanged. The strict PIT WF remains blocked and does not consume this
 importer.
 
+### Local OpenDART filing-date provenance contract
+
+`src/k200_mq/data/dart_pit.py` provides the corresponding local-only financial
+candidate importer. It accepts JSON, CSV, and Parquet raw files and a separate
+sidecar manifest; it does not call OpenDART. The intended upstream endpoint
+contracts are:
+
+```text
+filing list:     https://opendart.fss.or.kr/api/list.json
+financial facts: https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json
+```
+
+One normalized filing row represents one submission and preserves
+`corp_code`, `rcept_no`, raw `rcept_dt`, parsed receipt date, amendment and
+withdrawal status, source path, response hash, and retrieval timestamp. A
+financial fact preserves `rcept_no` and is joined to metadata only by
+`(corp_code, rcept_no)`; fiscal period alone is never a join key. Missing or
+ambiguous receipt joins are invalid.
+
+OpenDART `rcept_dt` is official date-only `YYYYMMDD` in Asia/Seoul. The default
+availability policy is `next_session`, meaning the first supplied KRX trading
+date strictly after the receipt date. Same-day availability is rejected. A
+session-cutoff timestamp policy is deferred: it cannot be used unless the
+timestamp lineage is declared in the verified raw filing manifest and included
+in the importer-issued normalized-frame fingerprint. A timestamp appended after
+the exact join is rejected. Withdrawn filings are rejected and one of `first_filing` or
+`latest_filing_available_as_of` must be selected for amendments.
+
+Only frames with verified raw response manifests, exact joins, mapped sessions,
+valid hashes, and explicit policies receive the existing
+`pit_filing_date` financial provenance contract. Otherwise they remain
+`non_pit_fiscal_period`/invalid. This importer is not wired into the current
+quality defaults, which remain non-PIT.
+
+The next step is to connect an OpenDART API or bulk-download acquisition job to
+the raw files and manifests. No live API calls are made by the current package.
+
 After that gate, the following remain pending:
 
 - strict PIT WF;

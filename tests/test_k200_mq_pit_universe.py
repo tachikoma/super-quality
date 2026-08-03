@@ -110,6 +110,50 @@ def test_valid_snapshot_normalization_and_legacy_history_contract(tmp_path: Path
     assert validate_universe_provenance(history)["pit_valid"] is True
 
 
+def test_history_evidence_token_is_bound_to_rows_and_per_date_metadata(
+    tmp_path: Path,
+) -> None:
+    source, manifest = _write_source(tmp_path, _snapshot_frame(), ".csv")
+    snapshots = load_constituent_snapshots(source, acquisition_manifest=manifest)
+    history = snapshots_to_history(
+        snapshots,
+        requested_rebalance_date=date(2024, 1, 31),
+        target_size=2,
+    )
+    assert validate_universe_provenance(history)["pit_valid"] is True
+
+    altered_rows = history.copy(deep=True)
+    altered_rows.attrs = dict(history.attrs)
+    altered_rows.loc[0, "ticker"] = "000270"
+    assert validate_universe_provenance(altered_rows)["pit_valid"] is False
+
+    altered_metadata = history.copy(deep=True)
+    altered_metadata.attrs = dict(history.attrs)
+    metadata = dict(altered_metadata.attrs["provenance_metadata_by_as_of"])
+    metadata["2024-01-31"] = dict(metadata["2024-01-31"])
+    metadata["2024-01-31"]["retrieved_at_utc"] = "2024-02-02T00:00:00+00:00"
+    altered_metadata.attrs["provenance_metadata_by_as_of"] = metadata
+    assert validate_universe_provenance(altered_metadata)["pit_valid"] is False
+
+    other_source, other_manifest = _write_source(
+        tmp_path,
+        _snapshot_frame(as_of="2024-02-29"),
+        ".csv",
+    )
+    other_snapshots = load_constituent_snapshots(
+        other_source,
+        acquisition_manifest=other_manifest,
+    )
+    other_history = snapshots_to_history(
+        other_snapshots,
+        requested_rebalance_date=date(2024, 2, 29),
+        target_size=2,
+    )
+    other_history.attrs = dict(other_history.attrs)
+    other_history.attrs["_verified_acquisition"] = history.attrs["_verified_acquisition"]
+    assert validate_universe_provenance(other_history)["pit_valid"] is False
+
+
 def test_missing_provenance_is_rejected_without_a_caller_pit_boolean() -> None:
     raw = _snapshot_frame().drop(columns=["source_url"])
     snapshots = load_constituent_snapshots(raw)

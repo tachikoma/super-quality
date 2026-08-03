@@ -49,6 +49,13 @@ The project is beta infrastructure, not a validated investment strategy.
   unless a separate acquisition manifest proves official KRX source metadata
   and verifies the raw-byte SHA-256. It has no network path and is not
   connected to the proxy default loader.
+- A local-file-first DART provenance layer is implemented at
+  `src/k200_mq/data/dart_pit.py`. It normalizes raw filing submissions and
+  financial facts, verifies response-manifest SHA-256 sidecars, joins facts
+  only on `(corp_code, rcept_no)`, rejects withdrawals/ambiguous joins, and
+  maps official date-only `rcept_dt` values to the first provided KRX session
+  strictly after the filing date. It has no live API path and is not connected
+  to the current quality-factor defaults.
 
 ## Mechanical non-PIT diagnostics
 
@@ -90,7 +97,9 @@ Limitations:
 - KOSPI 200 membership and cross-sectional ranking are based on non-PIT proxy
   inputs.
 - DART financial data was unavailable for this run, and the normal financial
-  path does not yet use filing/publication dates.
+  path remains non-PIT by default. The new local importer does not alter that
+  behavior; no verified historical DART response files are connected to the
+  pipeline.
 - The benchmark available in the implementation is KPI200 price return, not
   total return.
 - ADV impact, sector caps, PIT sensitivity, and stress tests are not complete.
@@ -150,6 +159,30 @@ The explicit next priority is:
 3. Re-run strict PIT WF and only then run PIT sensitivity and stress tests.
 
 Until these steps are complete, output numbers are mechanical diagnostics only.
+
+### OpenDART local contract and next step
+
+The local DART layer is designed around these OpenDART response contracts:
+
+- filing list: `https://opendart.fss.or.kr/api/list.json`;
+- financial facts: `https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json`;
+- raw filing rows preserve `corp_code`, `rcept_no`, and date-only `rcept_dt`
+  (`YYYYMMDD`); fact rows preserve the same receipt number and report keys;
+- each downloaded response requires a separate JSON manifest containing the
+  response SHA-256 and timezone-aware `retrieved_at_utc`. The importer checks
+  the digest against raw bytes and never treats a DataFrame or embedded hash as
+  acquisition evidence;
+- date-only filings use `next_session`: the first supplied KRX trading date
+  strictly after the official receipt date in the Asia/Seoul local calendar.
+  Session-cutoff timestamps are deferred until timestamp lineage is present in
+  the verified raw filing manifest and importer-issued normalized frame
+  fingerprint; post-join timestamp injection is rejected. Withdrawn filings
+  and unspecified amendment policy are rejected.
+
+The next step is to connect OpenDART API/bulk downloads to these raw local
+files and manifests. Until that acquisition adapter and historical files are
+present, the current quality behavior and all non-PIT diagnostics remain
+unchanged.
 
 ## Deferred or unsupported settings
 

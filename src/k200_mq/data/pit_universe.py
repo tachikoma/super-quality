@@ -26,6 +26,7 @@ from k200_mq.data.provenance import (
     PIT_EFFECTIVE_DATE_CONTRACT,
     PIT_SCHEMA_CONTRACT,
     _constituent_fingerprint,
+    _history_evidence_fingerprint,
     validate_universe_provenance,
 )
 
@@ -224,6 +225,7 @@ class _VerifiedAcquisition:
     manifest: AcquisitionManifest
     raw_sha256: str
     normalized_fingerprint: str
+    history_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, init=False)
@@ -811,7 +813,31 @@ def snapshots_to_history(
     history.attrs["provenance"] = "pit"
     history.attrs["source"] = "pit"
     history.attrs["provenance_metadata_by_as_of"] = metadata_by_date
-    history.attrs["_verified_acquisition"] = snapshots.attrs.get("_verified_acquisition")
+    acquisition_manifest = snapshots.attrs.get("acquisition_manifest")
+    history.attrs["acquisition_manifest"] = (
+        dict(acquisition_manifest) if isinstance(acquisition_manifest, Mapping) else None
+    )
+    history.attrs["acquisition_manifest_verified"] = snapshots.attrs.get(
+        "acquisition_manifest_verified", False,
+    )
+    source_token = snapshots.attrs.get("_verified_acquisition")
+    history_token: _VerifiedAcquisition | None = None
+    if isinstance(source_token, _VerifiedAcquisition):
+        history_fingerprint = _history_evidence_fingerprint(
+            history,
+            history.attrs["provenance_by_as_of"],
+            metadata_by_date,
+            history.attrs["acquisition_manifest"],
+            source_token.raw_sha256,
+        )
+        if history_fingerprint is not None:
+            history_token = _VerifiedAcquisition(
+                manifest=source_token.manifest,
+                raw_sha256=source_token.raw_sha256,
+                normalized_fingerprint=source_token.normalized_fingerprint,
+                history_fingerprint=history_fingerprint,
+            )
+    history.attrs["_verified_acquisition"] = history_token
     history.attrs["pit_valid"] = bool(validate_universe_provenance(history)["pit_valid"])
     return history
 
