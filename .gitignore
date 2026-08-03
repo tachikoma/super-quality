@@ -12,7 +12,7 @@ build/
 
 # Data science / project
 data/raw/
-# data/universe/
+data/universe/
 data/processed/
 outputs/
 outputs_k200mq/
