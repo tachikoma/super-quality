@@ -1297,8 +1297,20 @@ def prepare_k200mq_inputs(
             {"provenance": "config", "pit_valid": True},
             config=config,
         )
+    local_pit_path = getattr(config, "LOCAL_PIT_UNIVERSE_PATH", "")
+    universe_kwargs: dict[str, Any] = {}
+    if local_pit_path:
+        universe_kwargs = {
+            "local_pit_universe_path": local_pit_path,
+            "local_pit_universe_source_kind": getattr(
+                config, "LOCAL_PIT_UNIVERSE_SOURCE_KIND", "",
+            ),
+            "local_pit_universe_manifest": getattr(
+                config, "LOCAL_PIT_UNIVERSE_MANIFEST", "",
+            ),
+        }
     universe_history = get_kospi200_history(
-        start_date, end_date, config.REBALANCE_FREQ,
+        start_date, end_date, config.REBALANCE_FREQ, **universe_kwargs,
     )
     if universe_history.empty:
         if strict_pit:

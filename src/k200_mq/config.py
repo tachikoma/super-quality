@@ -120,6 +120,18 @@ class K200MQConfig(BacktestConfig):
             "이 설정을 소비하지 않음"
         ),
     )
+    LOCAL_PIT_UNIVERSE_PATH: str = Field(
+        default="",
+        description="선택적 로컬 PIT 유니버스 파일 경로 (미설정 시 기존 proxy 로더 사용)",
+    )
+    LOCAL_PIT_UNIVERSE_SOURCE_KIND: str = Field(
+        default="",
+        description="로컬 PIT 유니버스 형식 (snapshots 또는 intervals; 기본 snapshots)",
+    )
+    LOCAL_PIT_UNIVERSE_MANIFEST: str = Field(
+        default="",
+        description="선택적 로컬 PIT 유니버스 acquisition manifest 경로",
+    )
     EXCLUDE_KOSPI_TOP_N: int = Field(
         default=50,
         description=(

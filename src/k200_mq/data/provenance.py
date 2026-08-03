@@ -20,7 +20,7 @@ attested by the verified manifest and normalized-frame evidence.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, time
 import hashlib
 import json
@@ -130,14 +130,15 @@ def _history_evidence_fingerprint(
     provenance_by_as_of: Mapping[str, Any],
     metadata_by_as_of: Mapping[str, Any],
     acquisition_manifest: Mapping[str, Any] | None,
-    source_file_sha256: str | None,
+    source_file_sha256: str | Sequence[str] | None,
 ) -> str | None:
     """Fingerprint the materialized history and all evidence that authorizes it."""
     if not isinstance(history_data, pd.DataFrame):
         return None
     if not isinstance(provenance_by_as_of, Mapping) or not isinstance(metadata_by_as_of, Mapping):
         return None
-    if not isinstance(acquisition_manifest, Mapping) or not source_file_sha256:
+    source_identity = _source_hash_identity(source_file_sha256)
+    if not isinstance(acquisition_manifest, Mapping) or source_identity is None:
         return None
     columns = tuple(str(column) for column in history_data.columns)
     rows = [
@@ -151,8 +152,62 @@ def _history_evidence_fingerprint(
         "provenance_by_as_of": _canonical_evidence_value(provenance_by_as_of),
         "provenance_metadata_by_as_of": _canonical_evidence_value(metadata_by_as_of),
         "acquisition_manifest": _canonical_evidence_value(acquisition_manifest),
-        "source_file_sha256": str(source_file_sha256).casefold(),
+        "source_file_sha256": source_identity,
     }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _source_hash_identity(value: str | Sequence[str] | None) -> str | list[str] | None:
+    """Return a canonical identity for one or more verified raw sources."""
+    if isinstance(value, str):
+        return value.casefold() if value else None
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
+        return None
+    if any(not isinstance(item, str) or not item for item in value):
+        return None
+    return sorted(item.casefold() for item in value)
+
+
+def _manifest_bound_date(manifest: Mapping[str, Any]) -> str | None:
+    """Return the canonical date identity carried by a manifest."""
+    candidates: list[str] = []
+    explicit = manifest.get("as_of_date")
+    if explicit is not None:
+        try:
+            parsed = pd.Timestamp(explicit)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if pd.isna(parsed):
+            return None
+        candidates.append(parsed.date().isoformat())
+    for field in ("query_params", "date_params"):
+        parameters = manifest.get(field)
+        if not isinstance(parameters, Mapping):
+            continue
+        for key, value in parameters.items():
+            normalized = "".join(
+                character for character in str(key).casefold()
+                if character not in " _-"
+            )
+            if normalized not in {"asof", "asofdate", "date", "trddd", "effectivedate"}:
+                continue
+            values = value if isinstance(value, (list, tuple, set)) else (value,)
+            for item in values:
+                try:
+                    parsed = pd.Timestamp(item)
+                except (TypeError, ValueError, OverflowError):
+                    return None
+                if pd.isna(parsed):
+                    return None
+                candidates.append(parsed.date().isoformat())
+    if not candidates or len(set(candidates)) != 1:
+        return None
+    return candidates[0]
+
+
+def _manifest_digest(manifest: Mapping[str, Any]) -> str:
+    payload = _canonical_evidence_value(manifest)
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
@@ -217,6 +272,12 @@ def _metadata_matches(
         manifest = metadata.get("acquisition_manifest")
         if not isinstance(manifest, Mapping):
             return False
+        expected_date = pd.Timestamp(as_of).date().isoformat() if as_of is not None else None
+        if (
+            "snapshot_identity_sha256" in manifest
+            and _manifest_bound_date(manifest) != expected_date
+        ):
+            return False
         source_url = manifest.get("source_url", manifest.get("official_source_url"))
         parsed_url = urlparse(source_url) if isinstance(source_url, str) else None
         host = parsed_url.hostname.casefold() if parsed_url and parsed_url.hostname else ""
@@ -255,17 +316,62 @@ def _verified_acquisition_matches(
     """Recognize only importer-issued evidence bound to this history."""
     if evidence is None:
         return False
-    evidence_type = type(evidence)
-    if (
-        evidence_type.__name__ != "_VerifiedAcquisition"
-        or evidence_type.__module__ != "k200_mq.data.pit_universe"
+    evidence_values = evidence if isinstance(evidence, tuple) else (evidence,)
+    if not evidence_values or any(
+        type(item).__name__ != "_VerifiedAcquisition"
+        or type(item).__module__ != "k200_mq.data.pit_universe"
+        for item in evidence_values
     ):
         return False
-    manifest = getattr(evidence, "manifest", None)
-    raw_sha = getattr(evidence, "raw_sha256", None)
+
+    def token_identity(item: Any) -> tuple[str | None, str | None, str] | None:
+        manifest = getattr(item, "manifest", None)
+        as_dict = getattr(manifest, "as_dict", None)
+        item_manifest = as_dict() if callable(as_dict) else None
+        raw_sha = getattr(item, "raw_sha256", None)
+        manifest_sha = getattr(manifest, "source_file_sha256", None)
+        if (
+            not isinstance(item_manifest, Mapping)
+            or not isinstance(raw_sha, str)
+            or not isinstance(manifest_sha, str)
+            or raw_sha.casefold() != manifest_sha.casefold()
+        ):
+            return None
+        return _manifest_bound_date(item_manifest), raw_sha.casefold(), _manifest_digest(item_manifest)
+
     expected = metadata.get("source_file_sha256")
-    manifest_sha = getattr(manifest, "source_file_sha256", None)
-    if not (isinstance(raw_sha, str) and raw_sha == expected == manifest_sha):
+    metadata_manifest = metadata.get("acquisition_manifest")
+    if not isinstance(expected, str) or not isinstance(metadata_manifest, Mapping):
+        return False
+    expected_date = _manifest_bound_date(metadata_manifest)
+    metadata_effective_date = metadata.get("effective_date")
+    if metadata_effective_date is not None:
+        try:
+            parsed_effective_date = pd.Timestamp(metadata_effective_date)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if pd.isna(parsed_effective_date):
+            return False
+        effective_date = parsed_effective_date.date().isoformat()
+        if (
+            "snapshot_identity_sha256" in metadata_manifest
+            and expected_date != effective_date
+        ):
+            return False
+    expected_identity = (expected_date, expected.casefold(), _manifest_digest(metadata_manifest))
+    identities = [token_identity(item) for item in evidence_values]
+    if any(identity is None for identity in identities):
+        return False
+    matching_evidence = [
+        item for item, identity in zip(evidence_values, identities, strict=True)
+        if identity == expected_identity
+        or (
+            expected_date is None
+            and identity is not None
+            and identity[1:] == expected_identity[1:]
+        )
+    ]
+    if len(matching_evidence) != 1:
         return False
     if history_data is None:
         return True
@@ -275,14 +381,71 @@ def _verified_acquisition_matches(
         or acquisition_manifest is None
     ):
         return False
+    token_hashes = [identity[1] for identity in identities if identity is not None]
+    if len(token_hashes) != len(evidence_values) or any(
+        not isinstance(item, str) for item in token_hashes
+    ):
+        return False
+    if not isinstance(metadata_by_as_of, Mapping) or not metadata_by_as_of:
+        return False
+    expected_identities: dict[str, tuple[str, str, str]] = {}
+    for raw_date, metadata_value in metadata_by_as_of.items():
+        key = str(raw_date)
+        if not isinstance(metadata_value, Mapping):
+            return False
+        bound_date = _manifest_bound_date(metadata_value.get("acquisition_manifest", {}))
+        source_hash = metadata_value.get("source_file_sha256")
+        manifest_value = metadata_value.get("acquisition_manifest")
+        if (
+            not isinstance(source_hash, str)
+            or not isinstance(manifest_value, Mapping)
+            or (
+                "snapshot_identity_sha256" in manifest_value
+                and bound_date != key
+            )
+        ):
+            return False
+        expected_identities[key] = (
+            bound_date,
+            source_hash.casefold(),
+            _manifest_digest(manifest_value),
+        )
+    actual_identities = [identity for identity in identities if identity is not None]
+    if len(expected_identities) != len(actual_identities):
+        return False
+    if any(identity[0] is None for identity in actual_identities):
+        return False
+    if len(set(actual_identities)) != len(actual_identities):
+        return False
+    if set(actual_identities) != set(expected_identities.values()):
+        return False
+
+    manifests_by_as_of = acquisition_manifest.get("manifests_by_as_of")
+    if len(expected_identities) > 1:
+        manifests_by_as_of = acquisition_manifest.get("manifests_by_as_of")
+        if not isinstance(manifests_by_as_of, Mapping):
+            return False
+        if {str(key) for key in manifests_by_as_of} != set(expected_identities):
+            return False
+        if any(
+            not isinstance(value, Mapping)
+            or _manifest_digest(value) != expected_identities[str(key)][2]
+            for key, value in manifests_by_as_of.items()
+        ):
+            return False
+    elif not isinstance(acquisition_manifest, Mapping):
+        return False
     expected_history_fingerprint = _history_evidence_fingerprint(
         history_data,
         provenance_by_as_of,
         metadata_by_as_of,
         acquisition_manifest,
-        raw_sha,
+        token_hashes,
     )
-    return getattr(evidence, "history_fingerprint", None) == expected_history_fingerprint
+    return all(
+        getattr(item, "history_fingerprint", None) == expected_history_fingerprint
+        for item in evidence_values
+    )
 
 
 def validate_universe_provenance(universe_history: object) -> dict[str, Any]:

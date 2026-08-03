@@ -368,6 +368,14 @@ def test_manifest_rejects_local_url_naive_timestamp_and_unallowlisted_source(tmp
             load_constituent_snapshots(source, acquisition_manifest=invalid)
 
 
+def test_manifest_retrieval_timestamp_alias_cannot_override_canonical_utc(tmp_path: Path) -> None:
+    source, manifest = _write_source(tmp_path, _snapshot_frame(), ".csv")
+    manifest["retrieval_timestamp"] = "2024-02-02T00:00:00+00:00"
+
+    with pytest.raises(PITUniverseError, match="timestamp aliases"):
+        load_constituent_snapshots(source, acquisition_manifest=manifest)
+
+
 def test_manifest_requires_explicit_krx_attestation(tmp_path: Path) -> None:
     source, manifest = _write_source(tmp_path, _snapshot_frame(), ".csv")
     manifest.pop("source_is_krx")

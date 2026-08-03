@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -23,6 +24,7 @@ import pandas as pd
 
 from k200_mq.core.cache import DataCache
 from k200_mq.core.data.loader import get_krx_listings
+from k200_mq.data.pit_universe import import_local_pit_universe
 from k200_mq.data.provenance import (
     LEGACY_PROXY_UNKNOWN as LEGACY_PROXY_UNKNOWN,
     PIT_EFFECTIVE_DATE_CONTRACT as PIT_EFFECTIVE_DATE_CONTRACT,
@@ -251,7 +253,13 @@ def _get_kospi200_by_mcap(as_of: date) -> list[str]:
 
 
 def get_kospi200_history(
-    start: date, end: date, rebalance_freq: str = "M"
+    start: date,
+    end: date,
+    rebalance_freq: str = "M",
+    *,
+    local_pit_universe_path: str | Path | None = None,
+    local_pit_universe_source_kind: str | None = None,
+    local_pit_universe_manifest: Mapping[str, Any] | str | Path | None = None,
 ) -> pd.DataFrame:
     """리밸런싱 일자별 KOSPI 200 종속 이력을 생성합니다.
 
@@ -263,6 +271,14 @@ def get_kospi200_history(
         종료 일자.
     rebalance_freq : str
         리밸런싱 주기 ('M': 월간, 'Q': 분기).
+    local_pit_universe_path : str or pathlib.Path, optional
+        Explicit local PIT source.  When set, the source is loaded without
+        consulting the proxy/cache loader.
+    local_pit_universe_source_kind : str, optional
+        Local source kind (``snapshots`` or ``intervals``).  Empty values use
+        the importer's ``snapshots`` default.
+    local_pit_universe_manifest : mapping or str or pathlib.Path, optional
+        Optional acquisition manifest passed to the local importer.
 
     Returns
     -------
@@ -287,6 +303,15 @@ def get_kospi200_history(
         if ts_start.date() <= rebalance_date <= ts_end.date():
             rebalance_dates.append(rebalance_date)
     rebalance_dates = sorted(set(rebalance_dates))
+
+    if local_pit_universe_path:
+        return import_local_pit_universe(
+            local_pit_universe_path,
+            source_kind=local_pit_universe_source_kind or "snapshots",
+            requested_rebalance_dates=rebalance_dates,
+            target_size=200,
+            manifest=local_pit_universe_manifest or None,
+        )
 
     records = []
     sources_by_date: dict[str, str] = {}
@@ -320,10 +345,28 @@ def get_kospi200_history(
 
 
 def get_kospi200_history_with_provenance(
-    start: date, end: date, rebalance_freq: str = "M"
+    start: date,
+    end: date,
+    rebalance_freq: str = "M",
+    *,
+    local_pit_universe_path: str | Path | None = None,
+    local_pit_universe_source_kind: str | None = None,
+    local_pit_universe_manifest: Mapping[str, Any] | str | Path | None = None,
 ) -> UniverseHistoryResult:
     """Return the compatible history together with explicit source metadata."""
-    history = get_kospi200_history(start, end, rebalance_freq)
+    local_kwargs: dict[str, Any] = {}
+    if local_pit_universe_path:
+        local_kwargs = {
+            "local_pit_universe_path": local_pit_universe_path,
+            "local_pit_universe_source_kind": local_pit_universe_source_kind,
+            "local_pit_universe_manifest": local_pit_universe_manifest,
+        }
+    history = get_kospi200_history(
+        start,
+        end,
+        rebalance_freq,
+        **local_kwargs,
+    )
     validation = validate_universe_provenance(history)
     return UniverseHistoryResult(
         data=history,

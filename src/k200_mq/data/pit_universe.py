@@ -10,8 +10,8 @@ not imported or changed here; callers can opt into this importer explicitly.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
 import hashlib
 from io import BytesIO
 import json
@@ -194,9 +194,11 @@ class AcquisitionManifest:
     source_file_sha256: str
     source_type: str
     source_is_krx: bool
+    as_of_date: date | None = None
+    snapshot_identity_sha256: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "source_url": self.source_url,
             "query_params": dict(self.query_params),
             "date_params": dict(self.date_params),
@@ -208,6 +210,11 @@ class AcquisitionManifest:
             "verified": True,
             "verification": "raw_bytes_sha256",
         }
+        if self.as_of_date is not None:
+            result["as_of_date"] = self.as_of_date.isoformat()
+        if self.snapshot_identity_sha256 is not None:
+            result["snapshot_identity_sha256"] = self.snapshot_identity_sha256
+        return result
 
 
 @dataclass(frozen=True)
@@ -415,6 +422,8 @@ def load_constituent_snapshots(
     retrieved_at_utc: datetime | str | None = None,
     acquisition_manifest: Mapping[str, Any] | str | Path | None = None,
     manifest: Mapping[str, Any] | str | Path | None = None,
+    default_index_code: str | None = None,
+    default_as_of_date: date | datetime | str | None = None,
 ) -> pd.DataFrame:
     """Load and normalize a local CSV, Excel, Parquet, JSON, or DataFrame.
 
@@ -432,10 +441,21 @@ def load_constituent_snapshots(
     resolved = _resolve_columns(
         raw,
         column_mapping,
-        required=_SNAPSHOT_REQUIRED,
+        required=tuple(
+            field
+            for field in _SNAPSHOT_REQUIRED
+            if not (
+                field == "index_code" and default_index_code is not None
+                or field == "as_of_date" and default_as_of_date is not None
+            )
+        ),
         optional=(*_OPTIONAL_SNAPSHOT, *_SOURCE_FIELDS),
     )
     canonical = _rename_columns(raw, resolved)
+    if default_index_code is not None:
+        canonical["index_code"] = default_index_code
+    if default_as_of_date is not None:
+        canonical["as_of_date"] = default_as_of_date
     metadata = _source_metadata(
         source,
         raw,
@@ -778,6 +798,12 @@ def snapshots_to_history(
     metadata_by_date: dict[str, dict[str, Any]] = {}
     interval_metadata_by_as_of = snapshots.attrs.get("interval_metadata_by_as_of", {})
     acquisition_manifest = snapshots.attrs.get("acquisition_manifest")
+    manifests_by_as_of = snapshots.attrs.get("acquisition_manifests_by_as_of", {})
+    if (
+        (not isinstance(manifests_by_as_of, Mapping) or not manifests_by_as_of)
+        and isinstance(acquisition_manifest, Mapping)
+    ):
+        manifests_by_as_of = acquisition_manifest.get("manifests_by_as_of", {})
     for as_of in dates:
         group = snapshots[snapshots["as_of_date"].map(_safe_date).eq(as_of)].copy()
         tickers = sorted(group["security_code"].astype(str).tolist())
@@ -798,8 +824,13 @@ def snapshots_to_history(
             "contract": PIT_EFFECTIVE_DATE_CONTRACT,
             "fingerprint": fingerprint,
         }
-        if isinstance(acquisition_manifest, Mapping):
-            metadata_by_date[key]["acquisition_manifest"] = dict(acquisition_manifest)
+        date_manifest = (
+            manifests_by_as_of.get(key, acquisition_manifest)
+            if isinstance(manifests_by_as_of, Mapping)
+            else acquisition_manifest
+        )
+        if isinstance(date_manifest, Mapping):
+            metadata_by_date[key]["acquisition_manifest"] = dict(date_manifest)
         if isinstance(interval_metadata_by_as_of, Mapping):
             rows = interval_metadata_by_as_of.get(key, [])
             if isinstance(rows, list):
@@ -813,6 +844,11 @@ def snapshots_to_history(
     history.attrs["provenance"] = "pit"
     history.attrs["source"] = "pit"
     history.attrs["provenance_metadata_by_as_of"] = metadata_by_date
+    history.attrs["acquisition_manifests_by_as_of"] = {
+        key: dict(value)
+        for key, value in manifests_by_as_of.items()
+        if isinstance(value, Mapping)
+    } if isinstance(manifests_by_as_of, Mapping) else {}
     acquisition_manifest = snapshots.attrs.get("acquisition_manifest")
     history.attrs["acquisition_manifest"] = (
         dict(acquisition_manifest) if isinstance(acquisition_manifest, Mapping) else None
@@ -821,24 +857,31 @@ def snapshots_to_history(
         "acquisition_manifest_verified", False,
     )
     source_token = snapshots.attrs.get("_verified_acquisition")
-    history_token: _VerifiedAcquisition | None = None
-    if isinstance(source_token, _VerifiedAcquisition):
+    source_tokens = _verified_acquisition_tokens(source_token)
+    history_token: _VerifiedAcquisition | tuple[_VerifiedAcquisition, ...] | None = None
+    if source_tokens is not None:
+        source_hashes = [token.raw_sha256 for token in source_tokens]
         history_fingerprint = _history_evidence_fingerprint(
             history,
             history.attrs["provenance_by_as_of"],
             metadata_by_date,
             history.attrs["acquisition_manifest"],
-            source_token.raw_sha256,
+            source_hashes,
         )
         if history_fingerprint is not None:
-            history_token = _VerifiedAcquisition(
-                manifest=source_token.manifest,
-                raw_sha256=source_token.raw_sha256,
-                normalized_fingerprint=source_token.normalized_fingerprint,
-                history_fingerprint=history_fingerprint,
+            history_tokens = tuple(
+                replace(token, history_fingerprint=history_fingerprint)
+                for token in source_tokens
             )
+            history_token = history_tokens[0] if len(history_tokens) == 1 else history_tokens
     history.attrs["_verified_acquisition"] = history_token
-    history.attrs["pit_valid"] = bool(validate_universe_provenance(history)["pit_valid"])
+    provenance_report = validate_universe_provenance(history)
+    if not provenance_report["pit_valid"]:
+        raise PITUniverseError(
+            "final universe provenance validation failed: "
+            + str(provenance_report.get("reason", "untrusted evidence"))
+        )
+    history.attrs["pit_valid"] = True
     return history
 
 
@@ -1064,6 +1107,15 @@ def _read_frame_bytes(raw_bytes: bytes, suffix: str) -> pd.DataFrame:
     if suffix in {".parquet", ".pq"}:
         return pd.read_parquet(stream)
     if suffix in {".json", ".jsonl"}:
+        if suffix == ".json":
+            try:
+                payload = json.loads(raw_bytes.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise PITUniverseError("invalid local JSON source") from exc
+            if isinstance(payload, Mapping):
+                output = payload.get("output")
+                if isinstance(output, list) and all(isinstance(row, Mapping) for row in output):
+                    return pd.DataFrame([dict(row) for row in output])
         return pd.read_json(stream, lines=suffix == ".jsonl")
     raise PITUniverseError(f"unsupported local universe file type: {suffix or '<none>'}")
 
@@ -1099,6 +1151,62 @@ def _manifest_value(data: Mapping[str, Any], *names: str) -> Any:
         if name in data:
             return data[name]
     return None
+
+
+def _manifest_date_value(parameters: Mapping[str, Any]) -> date | None:
+    """Return one unambiguous snapshot date from manifest parameters.
+
+    ``trdDd`` and ``as_of`` are the two spellings used by the KRX adapter.  A
+    sidecar may contain both, but they are evidence for the same date rather
+    than alternatives.  Keeping this check here makes the date part of the
+    importer-issued trust token instead of relying on a raw-hash set.
+    """
+    candidates: list[date] = []
+    for key, value in parameters.items():
+        normalized = re.sub(r"[\s_\-]+", "", str(key).casefold())
+        if normalized not in {
+            "asof",
+            "asofdate",
+            "date",
+            "trddd",
+            "effectivedate",
+        }:
+            continue
+        values = value if isinstance(value, (list, tuple, set)) else (value,)
+        for item in values:
+            parsed = _safe_date(item)
+            if parsed is None:
+                raise PITUniverseError(
+                    f"acquisition manifest date parameter {key!r} is invalid"
+                )
+            candidates.append(parsed)
+    if not candidates:
+        return None
+    if len(set(candidates)) != 1:
+        raise PITUniverseError("acquisition manifest date parameters disagree")
+    return candidates[0]
+
+
+def _manifest_bound_date(manifest: Mapping[str, Any]) -> date | None:
+    """Read the date identity from a parsed or serialized manifest."""
+    explicit = manifest.get("as_of_date")
+    if explicit is not None:
+        parsed = _safe_date(explicit)
+        if parsed is None:
+            return None
+        parameter_dates: list[date] = [parsed]
+    else:
+        parameter_dates = []
+    for field in ("query_params", "date_params"):
+        parameters = manifest.get(field)
+        if not isinstance(parameters, Mapping):
+            continue
+        parsed = _manifest_date_value(parameters)
+        if parsed is not None:
+            parameter_dates.append(parsed)
+    if not parameter_dates or len(set(parameter_dates)) != 1:
+        return None
+    return parameter_dates[0]
 
 
 def _manifest_mapping(data: Mapping[str, Any], *names: str) -> Mapping[str, Any]:
@@ -1160,6 +1268,14 @@ def _parse_acquisition_manifest(
             "acquisition manifest requires explicit date parameters"
         )
     _validate_manifest_date_parameters({**query_params, **date_params})
+    manifest_dates = [
+        parsed
+        for parameters in (query_params, date_params)
+        if (parsed := _manifest_date_value(parameters)) is not None
+    ]
+    if manifest_dates and len(set(manifest_dates)) != 1:
+        raise PITUniverseError("acquisition manifest query/date parameters disagree")
+    as_of_date = manifest_dates[0] if manifest_dates else None
 
     raw_hash = _manifest_value(
         data,
@@ -1181,18 +1297,49 @@ def _parse_acquisition_manifest(
             "acquisition manifest source_type must be one of "
             + ", ".join(sorted(ALLOWED_ACQUISITION_SOURCE_TYPES))
         )
-    retrieved = _manifest_value(
-        data,
-        "retrieval_timestamp",
+    # ``retrieved_at_utc`` is canonical.  Aliases are accepted for existing
+    # scalar manifests, but never selected over it and never allowed to
+    # disagree with it.  This also covers a KRX sidecar carrying both UTC and
+    # Seoul spellings.
+    timestamp_fields = (
         "retrieved_at_utc",
+        "retrieved_at_seoul",
+        "retrieval_timestamp",
         "retrieved_at",
         "retrieval_time",
     )
-    retrieved_at = _aware_utc(retrieved)
-    if retrieved_at is None:
+    parsed_timestamps: dict[str, pd.Timestamp] = {}
+    for field in timestamp_fields:
+        if field not in data:
+            continue
+        parsed = _aware_utc(data[field])
+        if parsed is None:
+            raise PITUniverseError(
+                f"acquisition manifest retrieval timestamp {field!r} must be timezone-aware"
+            )
+        parsed_timestamps[field] = parsed
+    retrieved = parsed_timestamps.get("retrieved_at_utc")
+    if retrieved is None:
+        retrieved = next(iter(parsed_timestamps.values()), None)
+    if retrieved is None:
         raise PITUniverseError(
             "acquisition manifest requires a timezone-aware retrieval timestamp"
         )
+    if any(timestamp != retrieved for timestamp in parsed_timestamps.values()):
+        raise PITUniverseError("acquisition manifest retrieval timestamp aliases disagree")
+    if "retrieved_at_seoul" in data:
+        seoul = pd.Timestamp(data["retrieved_at_seoul"])
+        seoul_python = cast(datetime, seoul.to_pydatetime())
+        if (
+            bool(pd.isna(seoul))
+            or
+            seoul.tzinfo is None
+            or seoul_python.utcoffset() != timedelta(hours=9)
+        ):
+            raise PITUniverseError(
+                "acquisition manifest retrieved_at_seoul must use Asia/Seoul offset"
+            )
+    retrieved_at = retrieved
 
     attestation_key = next(
         (
@@ -1226,6 +1373,11 @@ def _parse_acquisition_manifest(
         raise PITUniverseError(
             "acquisition manifest requires an explicit attestation that the source is KRX"
         )
+    snapshot_identity = data.get("snapshot_identity_sha256")
+    if snapshot_identity is not None and (
+        not isinstance(snapshot_identity, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", snapshot_identity)
+    ):
+        raise PITUniverseError("acquisition manifest snapshot identity is invalid")
     return AcquisitionManifest(
         source_url=str(source_url).strip(),
         query_params=query_params,
@@ -1234,6 +1386,10 @@ def _parse_acquisition_manifest(
         source_file_sha256=normalized_hash,
         source_type=str(source_type),
         source_is_krx=True,
+        as_of_date=as_of_date,
+        snapshot_identity_sha256=(
+            snapshot_identity.casefold() if isinstance(snapshot_identity, str) else None
+        ),
     )
 
 
@@ -1560,10 +1716,44 @@ def _interval_records(data: pd.DataFrame) -> list[MembershipInterval]:
     return records
 
 
+def _verified_acquisition_tokens(value: Any) -> tuple[_VerifiedAcquisition, ...] | None:
+    """Normalize one or many importer-issued raw-byte trust tokens."""
+    if isinstance(value, _VerifiedAcquisition):
+        return (value,)
+    if isinstance(value, tuple) and value and all(
+        isinstance(item, _VerifiedAcquisition) for item in value
+    ):
+        return value
+    return None
+
+
+def _acquisition_manifest_digest(manifest: AcquisitionManifest | Mapping[str, Any]) -> str:
+    """Digest the canonical manifest portion of a raw-byte trust token."""
+    payload = manifest.as_dict() if isinstance(manifest, AcquisitionManifest) else dict(manifest)
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _acquisition_identity(
+    token: _VerifiedAcquisition,
+) -> tuple[date | None, str | None, str]:
+    """Return date/hash/manifest identity for one importer-issued token."""
+    manifest_date = token.manifest.as_of_date
+    if manifest_date is None:
+        manifest_date = _manifest_bound_date(token.manifest.as_dict())
+    return manifest_date, token.raw_sha256.casefold(), _acquisition_manifest_digest(token.manifest)
+
+
 def _append_acquisition_errors(errors: list[str], data: pd.DataFrame) -> None:
     """Require the private raw-byte token for PIT promotion."""
     token = data.attrs.get("_verified_acquisition")
-    if not isinstance(token, _VerifiedAcquisition):
+    tokens = _verified_acquisition_tokens(token)
+    if tokens is None:
         errors.append(
             "verified acquisition manifest is required for pit_valid=True; "
             "data is only a pit_candidate"
@@ -1581,8 +1771,73 @@ def _append_acquisition_errors(errors: list[str], data: pd.DataFrame) -> None:
         current_fingerprint = fingerprint_dataframe(data)
     except (TypeError, ValueError):
         current_fingerprint = None
-    if current_fingerprint != token.normalized_fingerprint:
+    if any(current_fingerprint != item.normalized_fingerprint for item in tokens):
         errors.append("normalized data no longer matches verified source bytes")
+    if "source_file_sha256" in data:
+        source_hashes = {
+            _normalize_sha_or_none(value)
+            for value in data["source_file_sha256"]
+            if _normalize_sha_or_none(value) is not None
+        }
+        token_hashes = {item.raw_sha256 for item in tokens}
+        if source_hashes and source_hashes != token_hashes:
+            errors.append("verified acquisition tokens do not cover every raw source hash")
+
+    # A hash set is insufficient for a multi-date source: the same raw bytes
+    # can otherwise be relabeled and a token can silently migrate to another
+    # snapshot.  Match one token, one manifest digest, and one as-of date for
+    # every date represented by the normalized frame.  A single scalar token
+    # remains compatible with older one-source callers that did not carry a
+    # date in their manifest.
+    date_groups: dict[date, set[str]] = {}
+    if "as_of_date" in data:
+        for parsed_date, group in data.groupby("as_of_date", sort=False):
+            normalized_date = _safe_date(parsed_date)
+            if normalized_date is None:
+                continue
+            date_groups[normalized_date] = {
+                normalized_hash
+                for normalized_hash in (
+                    _normalize_sha_or_none(value) for value in group["source_file_sha256"]
+                )
+                if normalized_hash is not None
+            }
+    identities = [_acquisition_identity(item) for item in tokens]
+    dated_identities = [identity for identity in identities if identity[0] is not None]
+    manifests_by_date = data.attrs.get("acquisition_manifests_by_as_of")
+    if isinstance(manifests_by_date, Mapping):
+        normalized_manifest_keys = {str(key) for key in manifests_by_date}
+        if normalized_manifest_keys != {value.isoformat() for value in date_groups}:
+            errors.append("per-date acquisition manifests do not cover every snapshot date")
+        for raw_key, manifest in manifests_by_date.items():
+            if not isinstance(manifest, Mapping):
+                errors.append("per-date acquisition manifest is not a mapping")
+                continue
+            key = str(raw_key)
+            matching = [identity for identity in identities if identity[0] and identity[0].isoformat() == key]
+            if len(matching) != 1 or _acquisition_manifest_digest(manifest) != matching[0][2]:
+                errors.append("per-date acquisition manifest digest does not match its token")
+    if len(date_groups) > 1:
+        if len(dated_identities) != len(tokens):
+            errors.append("multi-date acquisition tokens lack per-date manifest identity")
+        expected_pairs = {
+            (parsed_date, next(iter(hashes)))
+            for parsed_date, hashes in date_groups.items()
+            if len(hashes) == 1
+        }
+        actual_pairs = {(identity[0], identity[1]) for identity in dated_identities}
+        if len(dated_identities) != len(actual_pairs) or actual_pairs != expected_pairs:
+            errors.append("verified acquisition tokens do not cover each date exactly once")
+    elif len(date_groups) == 1 and dated_identities:
+        only_date = next(iter(date_groups))
+        strict_date_identity = any(
+            item.manifest.snapshot_identity_sha256 is not None for item in tokens
+        )
+        if strict_date_identity and (
+            len(tokens) != 1
+            or any(identity[0] != only_date for identity in dated_identities)
+        ):
+            errors.append("verified acquisition token date does not match snapshot date")
 
 
 def _known_membership_value(value: Any) -> bool:
