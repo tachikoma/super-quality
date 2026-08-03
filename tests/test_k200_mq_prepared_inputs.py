@@ -228,7 +228,10 @@ def test_cold_interval_execution_does_not_initialize_cache_or_write_files(tmp_pa
             },
             financial_data=financial,
         )
-        execute_engine_interval(prepared, None)
+        try:
+            execute_engine_interval(prepared, None)
+        except RuntimeError as error:
+            assert "PIT provenance" in str(error)
 
         assert "k200_mq.data.universe" not in sys.modules
         assert "k200_mq.core.cache" not in sys.modules
@@ -477,7 +480,7 @@ def test_strict_candidate_rejects_non_pit_financial_context() -> None:
         ),
     )
 
-    with pytest.raises(RuntimeError, match="no validator-backed financial provenance"):
+    with pytest.raises(RuntimeError, match="universe provenance"):
         execute_engine_interval(
             prepared,
             CandidateSpec("STRICT", {"STRICT_PIT_VALIDATION": True}),

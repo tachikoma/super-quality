@@ -17,6 +17,34 @@
 > yet. See [docs/planning/05_status.md](docs/planning/05_status.md) for the
 > canonical status and obsolete-result boundary.
 
+### Structural PIT candidate importer (not verified KRX ingestion)
+
+The repository includes a local-file-only structural importer at
+`k200_mq.data.pit_universe`; it does not call KRX, DART, or any other live API.
+Normalization of a CSV, JSON, Parquet, bytes, or DataFrame produces only an
+unverified `pit_candidate`. It cannot emit `pit_valid=True` or `pit`
+provenance. Promotion requires a separate acquisition-manifest sidecar with an
+official HTTPS KRX URL, query/date parameters, timezone-aware retrieval time,
+an allowed KRX source type, explicit KRX attestation, and a SHA-256 digest
+verified against the raw bytes. Local paths, `file://` URLs, mtimes, embedded
+hashes, DataFrames, and caller-supplied PIT flags are never official evidence.
+
+The candidate snapshot schema is:
+
+```text
+index_code, as_of_date (or effective_date), security_code,
+source_type, source_url, source_file_sha256, retrieved_at_utc
+```
+
+`name`, `sector`, `index_weight`, `index_shares`, and `free_float` are optional.
+An explicit membership-interval file additionally uses `effective_from`,
+nullable exclusive `effective_to`, `action` or `status`, `announcement_date`,
+and `provenance`; event/event aliases are unsupported. The importer checks
+tickers, strict dates, chronology, duplicates, interval overlaps, per-date
+fingerprints, and target size. No official historical PIT KRX file is
+connected, and no strict WF path consumes this importer yet, so proxy behavior
+and current mechanical non-PIT diagnostics are unchanged.
+
 ## 전략 개요
 
 Super Quality 2.0은 여덟 가지 조건(A-H)으로 KOSPI 및 KOSDAQ 종목을 스크리닝합니다:

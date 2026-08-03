@@ -21,6 +21,7 @@ from datetime import time
 import hashlib
 import json
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
@@ -81,6 +82,7 @@ PROXY_CONTRACTS = {
     "proxy_current": "current_listing_ignores_as_of",
     "mcap_proxy": "current_market_cap_snapshot",
 }
+_PIT_SOURCE_TYPES = {"krx_official_snapshot", "krx_official_event"}
 
 
 def _constituent_fingerprint(tickers: list[str]) -> str:
@@ -147,8 +149,50 @@ def _metadata_matches(
             "pit", "proxy_current", "mcap_proxy", LEGACY_PROXY_UNKNOWN,
         }:
             return False
+        manifest = metadata.get("acquisition_manifest")
+        if not isinstance(manifest, Mapping):
+            return False
+        source_url = manifest.get("source_url", manifest.get("official_source_url"))
+        parsed_url = urlparse(source_url) if isinstance(source_url, str) else None
+        host = parsed_url.hostname.casefold() if parsed_url and parsed_url.hostname else ""
+        if (
+            not parsed_url
+            or parsed_url.scheme.casefold() != "https"
+            or not (host == "krx.co.kr" or host.endswith(".krx.co.kr"))
+        ):
+            return False
+        if manifest.get("source_type") not in _PIT_SOURCE_TYPES:
+            return False
+        if manifest.get("source_is_krx") is not True or manifest.get("verified") is not True:
+            return False
+        raw_hash = manifest.get("raw_file_sha256", manifest.get("source_file_sha256"))
+        if not isinstance(raw_hash, str) or metadata.get("source_file_sha256") != raw_hash:
+            return False
+        try:
+            retrieved = pd.Timestamp(manifest.get("retrieved_at_utc"))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if pd.isna(retrieved) or retrieved.tzinfo is None:
+            return False
         return metadata.get("contract") == PIT_EFFECTIVE_DATE_CONTRACT
     return label in PROXY_CONTRACTS and metadata.get("contract") == PROXY_CONTRACTS[label]
+
+
+def _verified_acquisition_matches(evidence: Any, metadata: Mapping[str, Any]) -> bool:
+    """Recognize only the importer-issued raw-byte evidence token."""
+    if evidence is None:
+        return False
+    evidence_type = type(evidence)
+    if (
+        evidence_type.__name__ != "_VerifiedAcquisition"
+        or evidence_type.__module__ != "k200_mq.data.pit_universe"
+    ):
+        return False
+    manifest = getattr(evidence, "manifest", None)
+    raw_sha = getattr(evidence, "raw_sha256", None)
+    expected = metadata.get("source_file_sha256")
+    manifest_sha = getattr(manifest, "source_file_sha256", None)
+    return isinstance(raw_sha, str) and raw_sha == expected == manifest_sha
 
 
 def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
@@ -176,6 +220,7 @@ def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
             )
         )
         raw_metadata = universe_history.attrs.get("provenance_metadata_by_as_of", {})
+        acquisition_evidence = universe_history.attrs.get("_verified_acquisition")
     else:
         # ``UniverseHistoryResult`` lives in the cache-backed universe module.
         # Reading its structural fields instead of importing that class keeps
@@ -185,6 +230,7 @@ def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
         raw_sources = getattr(universe_history, "provenance_by_as_of")
         provenance = getattr(universe_history, "provenance")
         raw_metadata = getattr(universe_history, "provenance_metadata_by_as_of")
+        acquisition_evidence = getattr(universe_history, "_verified_acquisition", None)
 
     def _date_key(value: Any) -> str | None:
         try:
@@ -264,7 +310,11 @@ def validate_universe_provenance(universe_history: object) -> dict[str, Any]:
             as_of = pd.Timestamp(key).date()
             metadata = metadata_by_as_of.get(key)
             tickers = tickers_by_date.get(key, [])
-            if not _metadata_matches(metadata, "pit", as_of, tickers):
+            if (
+                not _metadata_matches(metadata, "pit", as_of, tickers)
+                or not isinstance(metadata, Mapping)
+                or not _verified_acquisition_matches(acquisition_evidence, metadata)
+            ):
                 resolved_source = LEGACY_PROXY_UNKNOWN
         elif source not in {"proxy_current", "mcap_proxy", LEGACY_PROXY_UNKNOWN}:
             resolved_source = LEGACY_PROXY_UNKNOWN

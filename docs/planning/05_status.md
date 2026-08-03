@@ -43,6 +43,12 @@ The project is beta infrastructure, not a validated investment strategy.
   related runtime-domain checks.
 - K200MQ factor, strategy, engine, provenance, benchmark, cost, and WF regression
   tests are implemented. The legacy `src/super_quality/` package remains frozen.
+- A structural local-file PIT candidate importer is implemented at
+  `src/k200_mq/data/pit_universe.py`. It normalizes CSV/JSON/Parquet/bytes
+  snapshots or explicit effective-dated intervals, but remains unverified
+  unless a separate acquisition manifest proves official KRX source metadata
+  and verifies the raw-byte SHA-256. It has no network path and is not
+  connected to the proxy default loader.
 
 ## Mechanical non-PIT diagnostics
 
@@ -111,6 +117,19 @@ The current `true-walkforward` path therefore cannot be labeled
 `validated_expanding_walk_forward_pit`. A strict PIT WF, PIT sensitivity, and
 any performance conclusion remain pending.
 
+The importer defines the structural candidate contract: `index_code`,
+`as_of_date` (or `effective_date`), and `security_code`; source metadata is
+normalized when present but is not trusted from raw rows. Explicit interval
+files also carry effective bounds, action/status, announcement date, and
+provenance. A separate acquisition-manifest sidecar is required for promotion
+and must contain an official HTTPS KRX URL, query/date parameters, a
+timezone-aware retrieval timestamp, an allowlisted KRX source type, explicit
+KRX attestation, and a raw-byte SHA-256 match. Local paths, `file://`, mtimes,
+embedded hashes, DataFrames, and arbitrary PIT flags remain unverified. No
+official KRX historical PIT file has been acquired or connected, so this
+implementation does not change current results or upgrade any diagnostic to
+validated evidence.
+
 ## Obsolete/audit-only pre-v4 results
 
 All results generated before the v4 momentum semantic correction are classified
@@ -125,7 +144,7 @@ validated result, or a basis for parameter selection.
 The explicit next priority is:
 
 1. Acquire historical KOSPI 200 constituent files with effective dates and
-   wire them into the universe loader.
+   connect the local-file-first importer to the universe loader.
 2. Acquire raw DART filing/publication metadata and map availability to safe
    trading sessions without substituting fiscal-period dates.
 3. Re-run strict PIT WF and only then run PIT sensitivity and stress tests.

@@ -107,7 +107,7 @@ def test_legacy_cache_without_structured_provenance_is_unknown(monkeypatch) -> N
     assert constituents.provenance == "legacy_proxy_unknown"
 
 
-def test_pit_label_requires_source_contract_and_matching_fingerprint() -> None:
+def test_pit_label_requires_verified_acquisition_manifest_and_matching_fingerprint() -> None:
     tickers = ["A", "B"]
     as_of = date(2024, 1, 31)
     trusted = universe_module._provenance_metadata(
@@ -116,7 +116,7 @@ def test_pit_label_requires_source_contract_and_matching_fingerprint() -> None:
 
     assert universe_module._classify_cached_provenance(
         trusted, as_of, tickers,
-    )[0] == "pit"
+    )[0] == "legacy_proxy_unknown"
     assert universe_module._classify_cached_provenance(
         "pit", as_of, tickers,
     )[0] == "legacy_proxy_unknown"
@@ -133,8 +133,8 @@ def test_pit_label_requires_source_contract_and_matching_fingerprint() -> None:
         ),
     }
     validation = universe_module.validate_universe_provenance(history)
-    assert validation["provenance"] == "pit"
-    assert validation["pit_valid"] is True
+    assert validation["provenance"] == "legacy_proxy_unknown"
+    assert validation["pit_valid"] is False
 
 
 def test_pit_provenance_requires_every_history_date() -> None:
@@ -189,7 +189,7 @@ def test_pit_effective_date_only_passes_when_not_after_as_of(
         "pit", effective_date, tickers, "KRX historical constituent file",
     )
 
-    expected = "pit" if expected_pit else "legacy_proxy_unknown"
+    expected = "legacy_proxy_unknown"
     assert universe_module._classify_cached_provenance(metadata, rebalance_date, tickers)[0] == expected
 
 

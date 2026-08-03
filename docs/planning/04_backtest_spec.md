@@ -134,6 +134,41 @@ The next gate is acquisition and wiring of:
 - raw DART filing/publication metadata mapped to safe trading-session
   availability dates.
 
+### Structural candidate versus verified KRX PIT ingestion
+
+The local-only structural candidate importer is implemented in
+`src/k200_mq/data/pit_universe.py` as a CLI-independent import path. It reads
+CSV, JSON, Parquet, bytes, or DataFrame inputs and never calls a live KRX or
+DART endpoint. Normalization alone is not PIT evidence and reports only an
+unverified `pit_candidate`.
+
+The candidate snapshot schema is:
+
+```text
+index_code, as_of_date (or effective_date), security_code,
+source_type, source_url, source_file_sha256, retrieved_at_utc
+```
+
+Optional snapshot fields are `name`, `sector`, `index_weight`, `index_shares`,
+and `free_float`. An explicit membership interval source uses
+`effective_from`, nullable exclusive `effective_to`, `action` or `status`,
+`announcement_date`, and `provenance`; event/event aliases are unsupported.
+Provider-specific spellings must be declared with an explicit column mapping
+when aliases are ambiguous. The structural loader validates six-digit security
+codes, strict dates and chronology, duplicate rows, interval overlaps, and
+snapshot-size diagnostics. A bare `True` cannot bypass size checks; exceptions
+must provide allowed sizes and written documentation.
+
+Only a separate acquisition-manifest sidecar can promote a candidate. It must
+state an official HTTPS KRX source URL, query/date parameters, a timezone-aware
+retrieval timestamp, an allowlisted KRX source type, explicit KRX attestation,
+and a raw-file SHA-256 verified against the actual bytes. Local path/file URLs,
+mtimes, embedded self-hashes, DataFrames, and arbitrary caller flags cannot
+promote data. No official downloaded KRX historical file is present or
+connected yet, and the current proxy default behavior is intentionally
+unchanged. The strict PIT WF remains blocked and does not consume this
+importer.
+
 After that gate, the following remain pending:
 
 - strict PIT WF;
