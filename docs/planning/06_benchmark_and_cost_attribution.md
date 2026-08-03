@@ -1,23 +1,20 @@
-# K200MQ benchmark and cost attribution
+# K200MQ 벤치마크 및 비용 귀속
 
-K200MQ reports the configured market-index ticker (normally `KPI200`) as a
-**price-return** benchmark.  Its daily returns are calculated from the
-supplied close series with `pct_change()` after clipping index observations to
-the measured interval.  The first in-period close has no prior in-period
-close and therefore produces no return.  The manifest carries the actual
-configured source ticker and does not label another ticker as `KPI200`.
-No dividends, distributions, withholding taxes, or other adjustments are
-invented; therefore this benchmark must not be described as a total-return
-index.
+K200MQ는 구성된 시장 지수 티커(일반적으로 `KPI200`)를 **가격수익률(price-return)**
+벤치마크로 보고합니다. 일별 수익률은 제공된 종가 시계열을 측정 구간으로 자른 뒤
+`pct_change()`로 계산합니다. 구간 내 첫 종가에는 구간 안의 직전 종가가 없으므로
+수익률이 생성되지 않습니다. 매니페스트에는 실제로 구성된 원천 티커가 기록되며,
+다른 티커를 `KPI200`으로 표시하지 않습니다.
 
-Cost attribution sums the actual filled buy and sell notionals in the trade
-log.  Commission and slippage are applied to both sides, while transaction
-tax is applied to sells only.  `total_cost` is the sum of those filled costs;
-it is not a hypothetical cost on requested shares.  Turnover is the sum of
-actual buy and sell notionals, with one-way turnover reported as half of that
-sum when both sides are available.
+배당, 분배금, 원천징수세 또는 기타 조정값을 임의로 추가하지 않습니다. 따라서 이
+벤치마크를 총수익률 지수로 설명해서는 안 됩니다.
 
-The engine writes cumulative filled cost to each portfolio snapshot and to
-execution statistics.  Attribution consumes the final snapshot cumulative
-cost when a per-fill cost schema is unavailable, rather than silently
-reporting zero.
+비용 귀속은 거래 로그에 기록된 실제 체결 매수·매도 명목금액을 합산합니다. 수수료와
+슬리피지는 양쪽 거래에 적용하고 거래세는 매도에만 적용합니다. `total_cost`는 실제
+체결 비용의 합계이며, 요청 수량을 기준으로 한 가상 비용이 아닙니다. 회전율은 실제
+매수·매도 명목금액의 합계이고, 양쪽 거래가 모두 있으면 편도 회전율은 그 합계의
+절반으로 보고합니다.
+
+엔진은 누적 실제 체결 비용을 각 포트폴리오 스냅샷과 실행 통계에 기록합니다. 개별
+체결별 비용 스키마를 사용할 수 없을 때 귀속 로직은 비용을 조용히 0으로 보고하는
+대신 마지막 스냅샷의 누적 비용을 사용합니다.

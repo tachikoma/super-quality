@@ -1,4 +1,4 @@
-# 전략 폐기 및 KOSPI 200 모멘텀+품질 전환
+# 전략 폐기 및 KOSPI 200 모멘텀 + 품질 전환
 
 ## 요약
 
@@ -47,7 +47,7 @@ Super Quality 2.0 전략(KOSDAQ 소형주 밸류+품질)을 폐기하고, KOSPI 
 - **상위 50개 제외**: Choi, Choi & Kang (2013) — 메가캡이 모멘텀 성능을 저하
 - **skipped-return (current v4)**: `close[t-skip_days] / close[t-long_window] - 1`
   (기본 `close[t-42] / close[t-252] - 1`; 한국 2개월 반전 회피)
-- **포인트인트임 유니버스**: 종속 이력 오염 방지
+- **시점 기준(PIT) 유니버스**: 종목 구성 이력 오염 방지
 
 ## 폐기 대상 (코드)
 
@@ -73,7 +73,25 @@ Super Quality 2.0 전략(KOSDAQ 소형주 밸류+품질)을 폐기하고, KOSPI 
 
 ## 레거시 마이그레이션
 
-1. `git tag v2.0-abandoned` — 기존 코드 frozen
+1. `git tag v2.0-abandoned` — 기존 코드 동결
 2. `src/super_quality/` → 레거시 상태로 유지 (수정 불가)
 3. 새 전략은 `src/k200_mq/` 패키지로 분리
 4. 공통 인프라는 `src/k200_mq/core/` 로 추출
+
+## 현재 전환 상태
+
+새 전략의 파이프라인, 팩터, 포트폴리오 엔진, CLI, 가격수익률 벤치마크, 실제 체결
+비용 귀속, 그리고 provenance 검증 계약은 구현되어 있습니다. 모멘텀은 현재
+`k200mq-momentum-skipped-return-v4`이며 기본 공식은
+`close[t-42] / close[t-252] - 1`입니다.
+
+인증된 KRX 어댑터는 `src/k200_mq/data/krx_pit.py`에 구현되어 두 날짜에 대한
+라이브 스모크 테스트를 마쳤습니다. 다만 원시 KRX 파일과 매니페스트는 로컬의
+커밋하지 않는 산출물이며, 충분한 역사 자료를 확보하여 운영 성과 근거에 연결하는
+작업은 아직 완료되지 않았습니다. 로컬 KRX PIT 원천을 `config`·`universe`·`main`을
+통해 명시적으로 선택하는 경로는 추가되었고, 설정하지 않으면 기존 proxy 기본값을
+그대로 사용하며 설정된 원천이 유효하지 않으면 fail closed로 중단합니다.
+
+OpenDART 로컬 provenance 계약도 존재하지만 원시 API/벌크 수집과 품질 팩터 연결은
+남아 있습니다. 따라서 strict PIT WF, PIT 민감도, 생존자 편향 비교, ADV 영향,
+계획된 스트레스 테스트는 모두 아직 검증 게이트를 통과하지 않았습니다.
