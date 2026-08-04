@@ -132,6 +132,13 @@ class K200MQConfig(BacktestConfig):
         default="",
         description="선택적 로컬 PIT 유니버스 acquisition manifest 경로",
     )
+    LOCAL_PIT_SECTOR_PATH: str = Field(
+        default="",
+        description=(
+            "선택적 로컬 PIT 섹터 맵 구간 파일 경로 "
+            "(미설정 시 섹터 맵 준비를 건너뜀)"
+        ),
+    )
     EXCLUDE_KOSPI_TOP_N: int = Field(
         default=50,
         description=(

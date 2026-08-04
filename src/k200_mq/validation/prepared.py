@@ -179,6 +179,7 @@ class PreparedK200MQInputs:
     index_data: pd.DataFrame
     universe_history: pd.DataFrame
     regime_scale_map: Mapping[Any, float] | None = None
+    sector_map_by_as_of: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     kospi_mcap_ranking: tuple[str, ...] | None = None
     manifest_context: Mapping[str, Any] = field(default_factory=dict)
     provenance: Mapping[str, Any] = field(default_factory=dict)
@@ -214,6 +215,21 @@ class PreparedK200MQInputs:
                 "regime_scale_map",
                 MappingProxyType(dict(self.regime_scale_map)),
             )
+        if not isinstance(self.sector_map_by_as_of, Mapping):
+            raise TypeError("sector_map_by_as_of must be a mapping")
+        normalised_sector_map: dict[str, MappingProxyType] = {}
+        for as_of, ticker_map in self.sector_map_by_as_of.items():
+            if not isinstance(ticker_map, Mapping):
+                raise TypeError("sector_map_by_as_of values must be mappings")
+            normalised_sector_map[str(as_of)] = MappingProxyType({
+                str(ticker): str(sector)
+                for ticker, sector in ticker_map.items()
+            })
+        object.__setattr__(
+            self,
+            "sector_map_by_as_of",
+            MappingProxyType(normalised_sector_map),
+        )
         ranking = tuple(str(ticker) for ticker in (self.kospi_mcap_ranking or ()))
         object.__setattr__(self, "kospi_mcap_ranking", ranking)
         if not isinstance(self.ranking_pit_valid, bool):

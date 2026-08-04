@@ -1267,6 +1267,87 @@ def _enforce_strict_pit_validation(
         )
 
 
+def _prepare_sector_map_artifacts(
+    config: Any,
+    universe_history: pd.DataFrame,
+) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
+    """Prepare optional PIT sector-map artifacts keyed by rebalance as-of date."""
+    from k200_mq.data.sector_pit import (
+        load_sector_intervals,
+        sector_map_as_of,
+        sector_map_fingerprint,
+        validate_sector_intervals,
+    )
+
+    sector_path = str(getattr(config, "LOCAL_PIT_SECTOR_PATH", "") or "").strip()
+    if not sector_path:
+        return {}, {
+            "status": "disabled",
+            "source": "not_configured",
+            "interval_count": 0,
+            "as_of_count": int(universe_history["as_of"].nunique()) if "as_of" in universe_history else 0,
+            "coverage_ratio": 0.0,
+            "covered_universe_rows": 0,
+            "universe_row_count": int(len(universe_history)),
+        }
+
+    intervals = load_sector_intervals(sector_path)
+    validation = validate_sector_intervals(intervals)
+    if not validation.pit_valid:
+        raise RuntimeError(
+            "LOCAL_PIT_SECTOR_PATH failed PIT sector validation: "
+            + "; ".join(validation.errors)
+        )
+
+    as_of_values = (
+        pd.to_datetime(universe_history["as_of"], errors="coerce")
+        .dropna()
+        .dt.normalize()
+        .unique()
+        .tolist()
+        if "as_of" in universe_history
+        else []
+    )
+    as_of_values = sorted(as_of_values)
+
+    sector_map_by_as_of: dict[str, dict[str, str]] = {}
+    fingerprint_by_as_of: dict[str, str] = {}
+    for as_of_value in as_of_values:
+        as_of_date = pd.Timestamp(as_of_value).date()
+        as_of_key = as_of_date.isoformat()
+        sector_map = sector_map_as_of(intervals, as_of_date)
+        sector_map_by_as_of[as_of_key] = sector_map
+        fingerprint_by_as_of[as_of_key] = sector_map_fingerprint(sector_map)
+
+    covered_rows = 0
+    universe_row_count = int(len(universe_history))
+    if universe_row_count > 0 and sector_map_by_as_of:
+        for _, row in universe_history.iterrows():
+            as_of = pd.to_datetime(row.get("as_of"), errors="coerce")
+            if pd.isna(as_of):
+                continue
+            as_of_key = pd.Timestamp(as_of).date().isoformat()
+            ticker = str(row.get("ticker", ""))
+            if ticker in sector_map_by_as_of.get(as_of_key, {}):
+                covered_rows += 1
+
+    coverage_ratio = covered_rows / max(universe_row_count, 1)
+    context = {
+        "status": "loaded",
+        "source": "local_pit_sector_intervals",
+        "path": sector_path,
+        "pit_valid": True,
+        "interval_count": int(len(intervals)),
+        "as_of_count": int(len(as_of_values)),
+        "covered_universe_rows": int(covered_rows),
+        "universe_row_count": universe_row_count,
+        "coverage_ratio": float(coverage_ratio),
+        "snapshot_fingerprints_by_as_of": fingerprint_by_as_of,
+        "validation_diagnostics": validation.diagnostics,
+    }
+    return sector_map_by_as_of, context
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 메인 파이프라인
 # ═══════════════════════════════════════════════════════════════════
@@ -1456,6 +1537,12 @@ def prepare_k200mq_inputs(
         "artifact_available": bool(kospi_mcap_ranking),
     }
     manifest_context["ranking"] = ranking_context
+
+    sector_map_by_as_of, sector_map_context = _prepare_sector_map_artifacts(
+        config,
+        universe_history,
+    )
+    manifest_context["sector_map"] = sector_map_context
 
     # 전체 가격 데이터 (팩터 계산용 — lookback 포함).  The loader's
     # contract makes warmup half-open, but de-duplicate here as a safe guard
@@ -1751,6 +1838,7 @@ def prepare_k200mq_inputs(
         universe_history=universe_history,
         financial_data=financial_data,
         regime_scale_map=regime_scale_map,
+        sector_map_by_as_of=sector_map_by_as_of,
         kospi_mcap_ranking=kospi_mcap_ranking,
         ranking_status=ranking_status,
         ranking_provenance=ranking_provenance,
@@ -1766,6 +1854,7 @@ def prepare_k200mq_inputs(
         coverage={
             "quality": quality_coverage,
             "rebalance_readiness": rebalance_readiness,
+            "sector_map": sector_map_context,
         },
         measured_start=start_date,
         measured_end=end_date,

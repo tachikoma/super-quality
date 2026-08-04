@@ -195,6 +195,7 @@ class PortfolioRebalanceEngine:
 | `LOCAL_PIT_UNIVERSE_PATH` | "" | 설정 시 사용하는 로컬 PIT 유니버스 파일 경로; 미설정 시 proxy 로더 사용 |
 | `LOCAL_PIT_UNIVERSE_SOURCE_KIND` | "" | 로컬 원천 형식 (`snapshots` 또는 `intervals`; 기본 `snapshots`) |
 | `LOCAL_PIT_UNIVERSE_MANIFEST` | "" | 선택적 로컬 PIT 수집 매니페스트 경로 |
+| `LOCAL_PIT_SECTOR_PATH` | "" | 선택적 로컬 PIT 섹터 맵 구간 파일 경로; 설정 시 준비 경로에서 검증/스냅샷 생성 |
 | `SECTOR_CAP` | 0.30 | **미지원/보류** — 현재 엔진에 적용하지 않음 |
 | `MOMENTUM_WINDOW_LONG` | 252 | skipped return v4 순위 특성: `close[t-42] / close[t-252] - 1` (기본) |
 | `MOMENTUM_WINDOW_SHORT` | 126 | **진단 전용** `momentum_6m` 표시; 순위/readiness/민감도에 사용하지 않음 |
