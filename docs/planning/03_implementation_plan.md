@@ -177,3 +177,56 @@ provenance를 실제 자료로 연결하는 것입니다. KRX 인증 어댑터�
 
 PIT 자료 게이트가 완료되기 전까지 모든 성과 출력은 기계적 비-PIT 진단으로만
 취급합니다.
+
+## 계속/중단/피벗 결정 규칙 (Go/No-Go)
+
+이 프로젝트의 현재 단계는 알고리즘 튜닝이 아니라 "검증 가능한 성과 근거"를
+확보하는 단계입니다. 따라서 진행 여부는 아래 게이트를 숫자로 판단합니다.
+
+### 피벗의 의미
+
+- 여기서 피벗은 구현을 포기한다는 뜻이 아니라, 현재 가설(KOSPI 200 Momentum +
+  Quality)의 실전 가능성이 낮다고 판단될 때, 다른 전략 가설(예: 유니버스/팩터/
+  보유기간/리스크 구조)로 연구 축을 이동하는 것을 의미합니다.
+
+### 타임박스
+
+- 1차 판단 기한: 2~3주.
+- 기한 내 아래 "필수 게이트"를 충족하지 못하면, 현재 전략은 중단 후보로 분류하고
+  피벗 옵션을 우선 검토합니다.
+
+### 필수 게이트 (모두 충족 필요)
+
+1. 데이터/검증 게이트
+   - strict 경로 재현 실행이 가능하고, strict preflight 실패가 없어야 함.
+   - 유니버스 historical 예외(예: 198 constituent 날짜)가 문서화된 전이 예외 또는
+     원천 보정으로 정리되어야 함.
+   - DART filing-date 기반 입력이 목표 기간에서 최소 커버리지 기준을 충족해야 함.
+2. 성과 게이트 (비용 반영 후 OOS)
+   - OOS CAGR > 0.
+   - OOS MDD가 사전 정의 상한 이내.
+   - 벤치마크 대비 위험조정 성과(예: Sharpe 또는 Calmar)가 최소 기준 이상.
+3. 안정성 게이트
+   - 핵심 파라미터 소폭 변화 시 성과 붕괴가 없어야 함.
+   - 서브기간별 성과가 특정 1개 구간에 과도하게 집중되지 않아야 함.
+
+### 권장 초기 컷오프 (보수적)
+
+- OOS CAGR: 연 5% 이상.
+- OOS MDD: -25% 이내.
+- Sharpe: 0.7 이상.
+- Calmar: 0.3 이상.
+
+위 컷오프는 "연구 지속 여부" 판단선이며, 실거래 투입선이 아닙니다.
+
+### 의사결정 규칙
+
+- Continue: 필수 게이트 모두 충족 + 컷오프 충족.
+- Hold: 필수 게이트는 충족했지만 컷오프 미달.
+- Pivot: 필수 게이트 미충족 또는 게이트는 충족했으나 반복 실험에서 안정성 실패.
+
+### 실행 템플릿
+
+- 2주 실행 체크리스트: [docs/planning/07_two_week_execution_checklist.md](docs/planning/07_two_week_execution_checklist.md)
+- Go/No-Go 판정표 템플릿(문서): [docs/planning/08_go_no_go_scorecard_template.md](docs/planning/08_go_no_go_scorecard_template.md)
+- Go/No-Go 판정표 템플릿(CSV): [docs/planning/08_go_no_go_scorecard_template.csv](docs/planning/08_go_no_go_scorecard_template.csv)

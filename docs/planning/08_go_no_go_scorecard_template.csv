@@ -1,0 +1,11 @@
+section,metric,threshold,current_value,pass,evidence_path,notes
+validation,strict_preflight_failures,0,,,,
+validation,universe_exception_resolution,completed,,,,
+validation,dart_filing_date_coverage,above_threshold,,,,
+performance,oos_cagr,>=0.05,,,,
+performance,oos_mdd,>=-0.25,,,,
+performance,oos_sharpe,>=0.7,,,,
+performance,oos_calmar,>=0.3,,,,
+stability,small_perturbation_robustness,no_collapse,,,,
+stability,subperiod_concentration,no_extreme_concentration,,,,
+decision,final_decision,Continue|Hold|Pivot,,,,
