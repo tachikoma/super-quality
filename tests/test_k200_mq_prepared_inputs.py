@@ -289,6 +289,63 @@ def test_nonzero_exclusion_uses_prepared_ranking_without_loader_fallback(monkeyp
     assert prepared.ranking_status == "non_pit_mechanical"
 
 
+def test_sector_cap_execution_uses_prepared_sector_map() -> None:
+    base = _prepared_inputs()
+    config = base.runtime_config.model_copy(update={
+        "ENABLE_SECTOR_CAP": True,
+        "SECTOR_CAP": 0.5,
+        "LOCAL_PIT_SECTOR_PATH": "/tmp/mock_sector.csv",
+    })
+    prepared = PreparedK200MQInputs(
+        price_data=base.price_data,
+        factor_data=base.factor_data,
+        index_data=base.index_data,
+        universe_history=base.universe_history,
+        regime_scale_map=base.regime_scale_map,
+        runtime_config=config,
+        sector_map_by_as_of={
+            "2024-01-04": {"A": "TECH", "B": "TECH"},
+            "2024-01-09": {"A": "TECH", "B": "TECH"},
+        },
+    )
+
+    result = execute_engine_interval(
+        prepared,
+        CandidateSpec("SECTOR_CAP", {"TOP_N": 1}),
+        measured_start=pd.Timestamp("2024-01-04"),
+        measured_end=pd.Timestamp("2024-01-09"),
+        active_trading_start=pd.Timestamp("2024-01-04"),
+    )
+
+    assert not result["portfolio_snapshots"].empty
+
+
+def test_sector_cap_execution_fails_without_prepared_sector_map() -> None:
+    base = _prepared_inputs()
+    config = base.runtime_config.model_copy(update={
+        "ENABLE_SECTOR_CAP": True,
+        "SECTOR_CAP": 0.5,
+        "LOCAL_PIT_SECTOR_PATH": "/tmp/mock_sector.csv",
+    })
+    prepared = PreparedK200MQInputs(
+        price_data=base.price_data,
+        factor_data=base.factor_data,
+        index_data=base.index_data,
+        universe_history=base.universe_history,
+        regime_scale_map=base.regime_scale_map,
+        runtime_config=config,
+    )
+
+    with pytest.raises(RuntimeError, match="prepared sector map"):
+        execute_engine_interval(
+            prepared,
+            CandidateSpec("SECTOR_CAP", {"TOP_N": 1}),
+            measured_start=pd.Timestamp("2024-01-04"),
+            measured_end=pd.Timestamp("2024-01-09"),
+            active_trading_start=pd.Timestamp("2024-01-04"),
+        )
+
+
 def test_enabled_exclusion_without_prepared_artifact_fails_explicitly() -> None:
     base = _prepared_inputs()
     prepared = PreparedK200MQInputs(

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
@@ -27,9 +28,17 @@ class MomentumQualityStrategy:
         self,
         config: K200MQConfig,
         kospi_mcap_ranking: tuple[str, ...] | None = None,
+        sector_map_by_as_of: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         self.config = config
         self._kospi_mcap_ranking = kospi_mcap_ranking
+        self._sector_map_by_as_of = {
+            str(as_of): {
+                str(ticker): str(sector)
+                for ticker, sector in sector_map.items()
+            }
+            for as_of, sector_map in dict(sector_map_by_as_of or {}).items()
+        }
 
     def select_portfolio(
         self,
@@ -83,9 +92,6 @@ class MomentumQualityStrategy:
         if len(selected) > max_holdings:
             selected = selected.nlargest(max_holdings, "composite_z")
 
-        # SECTOR_CAP is intentionally not applied until a PIT-safe GICS
-        # mapping is available.  The setting remains documented as deferred.
-
         if selected.empty:
             logger.warning("리밸런싱 %s: 선택된 종목 없음 (제외 필터 적용 후)", as_of)
             return []
@@ -110,6 +116,9 @@ class MomentumQualityStrategy:
         if weights_norm > 0:
             selected["weight"] = selected["weight"] / weights_norm
 
+        if bool(getattr(self.config, "ENABLE_SECTOR_CAP", False)):
+            selected = self._apply_sector_cap(selected, as_of)
+
         logger.info(
             "리밸런싱 %s: %d개 선정, 평균 weight=%.4f",
             as_of,
@@ -118,6 +127,86 @@ class MomentumQualityStrategy:
         )
 
         return selected.to_dict(orient="records")
+
+    def _apply_sector_cap(self, selected: pd.DataFrame, as_of: Any) -> pd.DataFrame:
+        """Apply sector-level cap using prepared PIT sector-map snapshots."""
+        as_of_key = self._resolve_sector_map_key(as_of)
+        if as_of_key is None:
+            raise RuntimeError(
+                "ENABLE_SECTOR_CAP requires a prepared sector map for the rebalance date"
+            )
+        sector_map = self._sector_map_by_as_of.get(as_of_key, {})
+        if not sector_map:
+            raise RuntimeError(
+                "ENABLE_SECTOR_CAP requires non-empty prepared sector map snapshots"
+            )
+
+        selected = selected.copy()
+        selected["sector"] = selected["ticker"].map(lambda ticker: sector_map.get(str(ticker), ""))
+        if (selected["sector"].str.len() == 0).any():
+            missing_tickers = sorted(
+                str(ticker)
+                for ticker in selected.loc[selected["sector"].str.len() == 0, "ticker"].unique()
+            )
+            raise RuntimeError(
+                "ENABLE_SECTOR_CAP requires sector assignments for all selected tickers; "
+                f"missing: {', '.join(missing_tickers)}"
+            )
+
+        cap = float(self.config.SECTOR_CAP)
+        if cap >= 1.0:
+            return selected
+
+        selected["weight"] = selected["weight"].astype(float)
+        if selected["weight"].sum() <= 0:
+            return selected
+
+        selected["weight"] = selected["weight"] / selected["weight"].sum()
+        sector_weights = selected.groupby("sector")["weight"].sum().to_dict()
+
+        sector_target = {sector: min(weight, cap) for sector, weight in sector_weights.items()}
+        allocated = sum(sector_target.values())
+        leftover = max(1.0 - allocated, 0.0)
+        total_room = sum(max(cap - sector_target[sector], 0.0) for sector in sector_target)
+        if leftover > 0 and total_room > 0:
+            fill = min(leftover, total_room)
+            for sector in sector_target:
+                room = max(cap - sector_target[sector], 0.0)
+                if room <= 0:
+                    continue
+                sector_target[sector] += fill * (room / total_room)
+
+        row_weights: list[float] = []
+        for _, row in selected.iterrows():
+            sector = str(row["sector"])
+            sector_weight = sector_weights.get(sector, 0.0)
+            if sector_weight <= 0:
+                row_weights.append(0.0)
+                continue
+            row_weights.append(float(row["weight"]) * (sector_target[sector] / sector_weight))
+        selected["weight"] = row_weights
+        return selected.drop(columns=["sector"])
+
+    def _resolve_sector_map_key(self, as_of: Any) -> str | None:
+        """Resolve a prepared sector-map key for a signal date.
+
+        Universe schedules can map month-end dates to a prior trading session
+        in the engine, so this resolver tolerates a small calendar mismatch.
+        """
+        if not self._sector_map_by_as_of:
+            return None
+        ts = pd.Timestamp(as_of).normalize()
+        key = ts.date().isoformat()
+        if key in self._sector_map_by_as_of:
+            return key
+
+        candidates = [pd.Timestamp(candidate) for candidate in self._sector_map_by_as_of]
+        if not candidates:
+            return None
+        nearest = min(candidates, key=lambda candidate: abs((candidate - ts).days))
+        if abs((nearest - ts).days) <= 7:
+            return nearest.date().isoformat()
+        return None
 
     def get_signal(
         self,

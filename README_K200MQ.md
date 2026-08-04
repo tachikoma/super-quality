@@ -39,7 +39,7 @@ KOSPI 200 종목 중 리밸런싱 일자에 모멘텀 팩터와 품질 팩터를
 - 선택 종목: TOP 20 (기본)
 - 배분: 동일 비중 또는 순위 가중
 - KOSPI 상위 50개 제외 (메가캡 모멘텀 희석 방지)
-- 섹터별 노출 캡: **unsupported/deferred** (현재 엔진에 적용하지 않음)
+- 섹터별 노출 캡: `ENABLE_SECTOR_CAP=True` + 검증된 로컬 PIT 섹터 맵 조건에서 적용
 - 일일 손절: -15% (선택 사항)
 
 ### 구현 범위와 deferred 설정
@@ -47,7 +47,7 @@ KOSPI 200 종목 중 리밸런싱 일자에 모멘텀 팩터와 품질 팩터를
 현재 엔진이 실제로 적용하는 것은 TOP_N, KOSPI 상위 제외, `MAX_HOLDINGS`,
 `MIN_CASH_RATIO`, 포지션 배분, regime scaling, stop-loss, 그리고 명시적 거래
 비용입니다. 다음 설정은 호환성을 위해 유지되지만 **unsupported/deferred**이며
-백테스트에 적용되지 않습니다: `SECTOR_CAP`, `MIN_ADV_RATIO`/ADV 유동성 필터,
+백테스트에 적용되지 않습니다: `MIN_ADV_RATIO`/ADV 유동성 필터,
 `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`/52주 고점 신호.
 `QUALITY_MIN_TTM_QUARTERS`도
 현재 inert이며 TTM 분기 필터를 수행하지 않습니다. `EXCLUDE_MANAGEMENT`,
@@ -247,7 +247,8 @@ metadata를 확보하고, 그 공시일을 재무 데이터 가용일로 사용�
 | `--no-cache` | — | **unsupported/deferred** — 사용 시 명확히 거부 |
 | `--rebalance-lookback` | — | **unsupported/deferred** — 사용 시 명확히 거부 |
 | `--max-holdings` | 20 | 최대 동시 보유 종목 수 |
-| `--sector-cap` | 0.30 | **unsupported/deferred** — CLI 및 런타임 설정 채널에서 명확히 거부 |
+| `--sector-cap` | 0.30 | `--enable-sector-cap`과 함께 사용; 로컬 PIT 섹터 맵 검증/전체 커버리지 필요 |
+| `--enable-sector-cap` / `--disable-sector-cap` | disabled | 섹터 노출 상한 적용 on/off |
 | `--min-adv-ratio` | 0.01 | **unsupported/deferred** — CLI 및 런타임 설정 채널에서 명확히 거부 |
 | `UNIVERSE_SIZE` | 200 | **unsupported/deferred** — 현재 유니버스 로더가 소비하지 않음 |
 | `--strict-pit` | false | PIT 유니버스·filing-date 재무 데이터가 없으면 중단 |

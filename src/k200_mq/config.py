@@ -216,6 +216,10 @@ class K200MQConfig(BacktestConfig):
             raise ValueError("MAX_HOLDINGS must be at least 1")
         if not 0.0 <= self.MIN_CASH_RATIO <= 1.0:
             raise ValueError("MIN_CASH_RATIO must satisfy 0.0 <= MIN_CASH_RATIO <= 1.0")
+        if self.ENABLE_SECTOR_CAP and not 0.0 < self.SECTOR_CAP <= 1.0:
+            raise ValueError(
+                "SECTOR_CAP must satisfy 0.0 < SECTOR_CAP <= 1.0 when ENABLE_SECTOR_CAP=True"
+            )
         return self
 
     # ── 리짓 필터 ──────────────────────────────────────────────
@@ -256,7 +260,11 @@ class K200MQConfig(BacktestConfig):
     )
     SECTOR_CAP: float = Field(
         default=0.30,
-        description="미지원/Deferred: 섹터별 최대 노출 (현재 엔진에 적용하지 않음)",
+        description="ENABLE_SECTOR_CAP=True일 때 섹터별 최대 노출 상한 (0 초과 1 이하)",
+    )
+    ENABLE_SECTOR_CAP: bool = Field(
+        default=False,
+        description="로컬 PIT 섹터 맵이 준비된 경우 섹터 노출 상한(SECTOR_CAP) 적용 여부",
     )
     MIN_CASH_RATIO: float = Field(
         default=0.05,

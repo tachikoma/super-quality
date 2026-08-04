@@ -62,7 +62,9 @@
   (`src/k200_mq/data/sector_pit.py`)과 검증 테스트 추가.
 - [x] 선택적 `LOCAL_PIT_SECTOR_PATH`를 통해 로컬 PIT 섹터 맵을 준비 경로에
   연결하고, as-of 스냅샷/커버리지 메타데이터를 준비 입력과 매니페스트에 기록.
-- [ ] 섹터 한도 및 상관관계 제약 구현. 현재는 미지원/보류 상태입니다.
+- [x] `ENABLE_SECTOR_CAP=True` + 검증된 로컬 PIT 섹터 맵 조건에서 섹터 한도를
+  전략/엔진에 조건부 적용하고, 섹터 맵 부재/미커버리지는 즉시 중단(fail closed).
+- [ ] 상관관계 제약 구현. 현재는 미지원/보류 상태입니다.
 
 ## 4단계: 통합과 검증
 
@@ -104,14 +106,15 @@
 ## 현재 보류 또는 미지원 설정
 
 다음 설정은 호환성 필드 또는 향후 작업으로 남아 있으며, 테스트한 민감도 차원으로
-제시해서는 안 됩니다: `SECTOR_CAP`, `MIN_ADV_RATIO`, `UNIVERSE_SIZE`,
+제시해서는 안 됩니다: `MIN_ADV_RATIO`, `UNIVERSE_SIZE`,
 `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`, 그리고 `EXCLUDE_MANAGEMENT`,
 `EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`, `EXCLUDE_ETF_ETN` 제외 플래그.
 `MOMENTUM_WINDOW_SHORT`는 진단 전용입니다. `--no-cache`와
 `--rebalance-lookback`은 미지원/보류 항목으로 명시적으로 거부되며, 손절 CLI
-플래그는 `run`에만 있고 `true-walkforward`에는 없습니다. `SECTOR_CAP`과
-`MIN_ADV_RATIO`는 CLI뿐 아니라 런타임 설정 채널에서도 비기본값을 명시적으로
-거부합니다.
+플래그는 `run`에만 있고 `true-walkforward`에는 없습니다. `MIN_ADV_RATIO`는 CLI뿐
+아니라 런타임 설정 채널에서도 비기본값을 명시적으로 거부합니다. `SECTOR_CAP`은
+`ENABLE_SECTOR_CAP=True`와 `LOCAL_PIT_SECTOR_PATH`의 검증/전체 커버리지 조건에서만
+실행됩니다.
 
 ## 남은 작업 / 다음 단계
 

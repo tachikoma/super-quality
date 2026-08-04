@@ -8,6 +8,7 @@ KOSPI 200 Momentum + Quality 전략의 일별 시뮬레이션 루프를 구현�
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
@@ -40,9 +41,14 @@ class PortfolioRebalanceEngine:
         self,
         config: K200MQConfig,
         kospi_mcap_ranking: tuple[str, ...] | None = None,
+        sector_map_by_as_of: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         self.config = config
-        self.strategy = MomentumQualityStrategy(config, kospi_mcap_ranking)
+        self.strategy = MomentumQualityStrategy(
+            config,
+            kospi_mcap_ranking,
+            sector_map_by_as_of=sector_map_by_as_of,
+        )
         self._execution_stats = self._zero_execution_stats()
 
     def run(

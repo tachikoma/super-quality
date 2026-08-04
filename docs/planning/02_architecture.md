@@ -84,7 +84,7 @@ docs/planning/
     │         └─ mcap 기준 상위 50개 제외 (KOSPI 50 희석)
     │
     ├── 6. 포트폴리오 구성: 동일 비중 또는 순위 가중
-    │         └─ 섹터 노출 한도: 미지원/보류 (적용하지 않음)
+    │         └─ 섹터 노출 한도: ENABLE_SECTOR_CAP + PIT 섹터 맵 조건에서만 적용
     │
     └── 7. 일별: 시가평가, 활성 손절 확인(-15%), 일정에 따른 리밸런싱
 ```
@@ -196,7 +196,8 @@ class PortfolioRebalanceEngine:
 | `LOCAL_PIT_UNIVERSE_SOURCE_KIND` | "" | 로컬 원천 형식 (`snapshots` 또는 `intervals`; 기본 `snapshots`) |
 | `LOCAL_PIT_UNIVERSE_MANIFEST` | "" | 선택적 로컬 PIT 수집 매니페스트 경로 |
 | `LOCAL_PIT_SECTOR_PATH` | "" | 선택적 로컬 PIT 섹터 맵 구간 파일 경로; 설정 시 준비 경로에서 검증/스냅샷 생성 |
-| `SECTOR_CAP` | 0.30 | **미지원/보류** — 현재 엔진에 적용하지 않음 |
+| `SECTOR_CAP` | 0.30 | `ENABLE_SECTOR_CAP=True`에서 섹터별 최대 노출 상한 |
+| `ENABLE_SECTOR_CAP` | false | 로컬 PIT 섹터 맵 검증/전체 커버리지 조건에서만 섹터 캡 적용 |
 | `MOMENTUM_WINDOW_LONG` | 252 | skipped return v4 순위 특성: `close[t-42] / close[t-252] - 1` (기본) |
 | `MOMENTUM_WINDOW_SHORT` | 126 | **진단 전용** `momentum_6m` 표시; 순위/readiness/민감도에 사용하지 않음 |
 | `MOMENTUM_SKIP_DAYS` | 42 | 마지막 2개월 제외 |
@@ -211,10 +212,10 @@ class PortfolioRebalanceEngine:
 않습니다. `MOMENTUM_WINDOW_SHORT`는 진단용 표시만 계산하며 민감도 또는
 readiness/운영 파라미터로 취급하지 않습니다.
 
-`SECTOR_CAP`과 `MIN_ADV_RATIO`는 현재 엔진 미구현 항목으로, CLI 플래그뿐 아니라
-런타임 설정 채널에서도 비기본값을 명시적으로 거부합니다. `src/k200_mq/data/sector_pit.py`
-계약 레이어는 향후 SECTOR_CAP 연결을 위한 PIT 섹터 맵 정규화/검증 스캐폴딩을 제공하며,
-현재 실행 엔진에는 아직 연결되지 않았습니다.
+`MIN_ADV_RATIO`는 현재 엔진 미구현 항목으로, CLI 플래그뿐 아니라 런타임 설정
+채널에서도 비기본값을 명시적으로 거부합니다. `src/k200_mq/data/sector_pit.py`
+계약 레이어는 PIT 섹터 맵 정규화/검증과 as-of 스냅샷 생성을 제공하며, 실행 엔진은
+`ENABLE_SECTOR_CAP=True`에서 해당 준비 산출물의 검증/전체 커버리지를 요구합니다.
 
 `--enable-stop-loss`, `--disable-stop-loss`, `--stop-loss`는 `run` 명령의 CLI
 override에만 노출됩니다. `true-walkforward`는 이 플래그들을 노출하지 않고

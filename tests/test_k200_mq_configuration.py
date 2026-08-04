@@ -37,35 +37,49 @@ def test_run_cli_passes_supported_portfolio_settings_to_config() -> None:
         "--end", "2024-12-31",
         "--top-n", "12",
         "--max-holdings", "8",
+        "--enable-sector-cap",
+        "--sector-cap", "0.22",
     ])
 
     config = main_module._build_config(args)
 
     assert config.TOP_N == 12
     assert config.MAX_HOLDINGS == 8
-    assert config.SECTOR_CAP == 0.30
+    assert config.ENABLE_SECTOR_CAP is True
+    assert config.SECTOR_CAP == 0.22
     assert config.MIN_ADV_RATIO == 0.01
 
     manifest = main_module._build_run_manifest(config)
     assert manifest["config"]["MAX_HOLDINGS"] == 8
-    assert manifest["config"]["SECTOR_CAP"] == 0.30
+    assert manifest["config"]["ENABLE_SECTOR_CAP"] is True
+    assert manifest["config"]["SECTOR_CAP"] == 0.22
     assert manifest["config"]["MIN_ADV_RATIO"] == 0.01
 
 
-def test_run_cli_rejects_deferred_liquidity_and_sector_options() -> None:
+def test_run_cli_rejects_deferred_liquidity_option() -> None:
     parser = main_module._build_parser()
 
-    with pytest.raises(SystemExit):
-        parser.parse_args(["run", "--sector-cap"])
     with pytest.raises(SystemExit):
         parser.parse_args(["run", "--min-adv-ratio"])
 
 
 def test_runtime_rejects_deferred_option_overrides_from_config_channels() -> None:
-    with pytest.raises(RuntimeError, match="SECTOR_CAP"):
-        main_module._enforce_deferred_runtime_options(K200MQConfig(SECTOR_CAP=0.22))
     with pytest.raises(RuntimeError, match="MIN_ADV_RATIO"):
         main_module._enforce_deferred_runtime_options(K200MQConfig(MIN_ADV_RATIO=0.02))
+
+
+def test_runtime_requires_local_sector_source_when_sector_cap_enabled() -> None:
+    with pytest.raises(RuntimeError, match="LOCAL_PIT_SECTOR_PATH"):
+        main_module._enforce_deferred_runtime_options(K200MQConfig(ENABLE_SECTOR_CAP=True))
+
+
+def test_runtime_allows_sector_cap_when_local_sector_source_is_configured() -> None:
+    config = K200MQConfig(
+        ENABLE_SECTOR_CAP=True,
+        LOCAL_PIT_SECTOR_PATH="/tmp/mock_sector.csv",
+        SECTOR_CAP=0.25,
+    )
+    main_module._enforce_deferred_runtime_options(config)
 
 
 def test_runtime_allows_default_values_for_deferred_options() -> None:

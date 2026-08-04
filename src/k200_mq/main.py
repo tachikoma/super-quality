@@ -443,10 +443,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--sector-cap",
-        action=_UnsupportedCLIOption,
-        nargs=0,
+        type=float,
         default=argparse.SUPPRESS,
-        help="[unsupported/deferred] 섹터별 최대 노출은 현재 런타임에서 지원하지 않음",
+        help="ENABLE_SECTOR_CAP 활성화 시 섹터별 최대 노출 상한 (0.0 < cap <= 1.0)",
+    )
+    sector_cap_group = run_parser.add_mutually_exclusive_group()
+    sector_cap_group.add_argument(
+        "--enable-sector-cap",
+        dest="enable_sector_cap",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 섹터 맵이 준비된 경우 섹터 노출 상한 적용",
+    )
+    sector_cap_group.add_argument(
+        "--disable-sector-cap",
+        dest="enable_sector_cap",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="섹터 노출 상한 적용 비활성화 (기본값)",
     )
     run_parser.add_argument(
         "--min-adv-ratio",
@@ -575,6 +589,8 @@ def _build_config(args: argparse.Namespace) -> Any:
         "stop_loss": "SL_STOP_LOSS",
         "enable_stop_loss": "ENABLE_STOP_LOSS",
         "max_holdings": "MAX_HOLDINGS",
+        "sector_cap": "SECTOR_CAP",
+        "enable_sector_cap": "ENABLE_SECTOR_CAP",
         "output": "OUTPUT_DIR",
     }
     for argument_name, config_name in explicit_options.items():
@@ -596,7 +612,7 @@ def _enforce_deferred_runtime_options(config: Any) -> None:
     """
     from k200_mq.config import K200MQConfig
 
-    deferred_fields = ("SECTOR_CAP", "MIN_ADV_RATIO")
+    deferred_fields = ("MIN_ADV_RATIO",)
     for field_name in deferred_fields:
         field_info = K200MQConfig.model_fields.get(field_name)
         if field_info is None:
@@ -607,6 +623,14 @@ def _enforce_deferred_runtime_options(config: Any) -> None:
             raise RuntimeError(
                 f"{field_name} is unsupported/deferred by the K200MQ runtime and "
                 f"must remain at its default ({default_value!r}) until implemented"
+            )
+
+    if bool(getattr(config, "ENABLE_SECTOR_CAP", False)):
+        sector_source = str(getattr(config, "LOCAL_PIT_SECTOR_PATH", "") or "").strip()
+        if not sector_source:
+            raise RuntimeError(
+                "ENABLE_SECTOR_CAP requires LOCAL_PIT_SECTOR_PATH so sector limits "
+                "are backed by validated PIT sector intervals"
             )
 
 
@@ -629,7 +653,11 @@ def _print_config_summary(config: Any) -> None:
         f"MIN_CASH_RATIO={config.MIN_CASH_RATIO:.2%}"
     )
     print(
-        "  미지원/deferred (미적용): SECTOR_CAP, MIN_ADV_RATIO, "
+        f"  섹터 한도: {'활성' if config.ENABLE_SECTOR_CAP else '비활성'} "
+        f"(SECTOR_CAP={config.SECTOR_CAP:.2%})"
+    )
+    print(
+        "  미지원/deferred (미적용): MIN_ADV_RATIO, "
         "UNIVERSE_SIZE, USE_52WEEK_HIGH, QUALITY_MIN_TTM_QUARTERS"
     )
     print(
@@ -1134,7 +1162,10 @@ def _build_run_manifest(
             f"default {MOMENTUM_FORMULA_DEFAULT}; ranking uses momentum_z"
         ),
         "adv": "unsupported/deferred: MIN_ADV_RATIO is configured but not applied by the current engine",
-        "sector_cap": "unsupported/deferred: SECTOR_CAP is configured but not applied by the current engine",
+        "sector_cap": (
+            "conditional: ENABLE_SECTOR_CAP requires LOCAL_PIT_SECTOR_PATH and "
+            "full sector coverage; otherwise sector cap is disabled"
+        ),
         "portfolio_limits": (
             "active: MAX_HOLDINGS caps concurrent holdings and MIN_CASH_RATIO "
             "reserves a minimum cash buffer during buy sizing"

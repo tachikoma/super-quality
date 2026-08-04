@@ -71,12 +71,12 @@
   공식 날짜 전용 `rcept_dt`를 제출일보다 엄격히 뒤인 첫 KRX 세션으로 매핑합니다.
   다만 실시간 API/벌크 수집과 현재 품질 팩터 기본 경로 연결은 아직 없습니다.
 - 로컬 PIT 섹터 맵 계약 스캐폴딩이 `src/k200_mq/data/sector_pit.py`에 구현되어
-  있습니다. 이 계층은 섹터 구간 정규화, 겹침 검증, as-of 섹터 맵 생성을 제공하지만
-  현재 포트폴리오 엔진의 `SECTOR_CAP` 실행 로직에는 아직 연결되지 않았습니다.
+  있으며, 준비 경로에서 as-of 섹터 스냅샷으로 연결됩니다.
 - 선택적 `LOCAL_PIT_SECTOR_PATH`가 준비 경로(`prepare_k200mq_inputs`)에 연결되어,
   섹터 맵 검증을 통과한 경우 as-of별 ticker→sector 스냅샷과 커버리지 메타데이터를
-  준비 입력/매니페스트 컨텍스트에 기록합니다. 다만 이는 실행 준비 계층 연결이며
-  `SECTOR_CAP`의 실제 체결 제약 적용은 아직 보류 상태입니다.
+  준비 입력/매니페스트 컨텍스트에 기록합니다. `ENABLE_SECTOR_CAP=True`일 때는
+  로컬 PIT 섹터 맵의 검증 및 전체 커버리지를 요구하며, 조건 미충족 시 즉시 중단
+  (fail closed)합니다.
 
 ## 기계적 비-PIT 진단
 
@@ -208,7 +208,7 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 ## 보류 또는 미지원 설정
 
 다음 설정은 호환성 필드 또는 향후 작업으로 남아 있으며 현재 민감도 차원이 아닙니다:
-`SECTOR_CAP`, `MIN_ADV_RATIO`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
+`MIN_ADV_RATIO`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
 `QUALITY_MIN_TTM_QUARTERS`, 그리고
 `EXCLUDE_MANAGEMENT`, `EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`,
 `EXCLUDE_ETF_ETN` 제외 플래그. `MOMENTUM_WINDOW_SHORT`는
@@ -216,8 +216,9 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 
 ADV 계산은 도우미로 존재하지만 ADV 기반 유동성 및 시장 영향 실행은 연결되지
 않았습니다. `--no-cache`와 `--rebalance-lookback`은 명시적으로 미지원/보류이며
-거부됩니다. `SECTOR_CAP`과 `MIN_ADV_RATIO`는 CLI 플래그뿐 아니라 런타임 설정
-채널에서도 비기본값을 명시적으로 거부합니다. 손절 플래그는 `run` 전용이고
+거부됩니다. `MIN_ADV_RATIO`는 CLI 플래그뿐 아니라 런타임 설정 채널에서도
+비기본값을 명시적으로 거부합니다. `SECTOR_CAP`은 `ENABLE_SECTOR_CAP=True`와
+검증된 `LOCAL_PIT_SECTOR_PATH`의 전체 커버리지 조건에서만 활성화됩니다. 손절 플래그는 `run` 전용이고
 `true-walkforward`는 구성/기본값을 사용합니다.
 
 ## 출력 산출물

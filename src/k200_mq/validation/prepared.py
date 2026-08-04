@@ -679,6 +679,7 @@ def execute_engine_interval(
             engine = PortfolioRebalanceEngine(
                 config,
                 kospi_mcap_ranking=prepared.kospi_mcap_ranking,
+                sector_map_by_as_of=prepared.sector_map_by_as_of,
             )
         except TypeError as exc:
             # Keep compatibility with lightweight one-argument test adapters;
@@ -687,7 +688,15 @@ def execute_engine_interval(
                 raise
             engine = PortfolioRebalanceEngine(config)
     else:
-        engine = PortfolioRebalanceEngine(config)
+        try:
+            engine = PortfolioRebalanceEngine(
+                config,
+                sector_map_by_as_of=prepared.sector_map_by_as_of,
+            )
+        except TypeError as exc:
+            if "sector_map_by_as_of" not in str(exc):
+                raise
+            engine = PortfolioRebalanceEngine(config)
     return engine.run(
         price_data,
         index_data,

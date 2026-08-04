@@ -250,8 +250,6 @@ def test_inert_run_cli_options_are_rejected_instead_of_ignored() -> None:
     with pytest.raises(SystemExit):
         parser.parse_args(["run", "--rebalance-lookback", "252"])
     with pytest.raises(SystemExit):
-        parser.parse_args(["run", "--sector-cap"])
-    with pytest.raises(SystemExit):
         parser.parse_args(["run", "--min-adv-ratio"])
 
 
@@ -337,6 +335,64 @@ def test_strategy_caps_selected_count_by_max_holdings() -> None:
     assert [row["ticker"] for row in selected] == ["A", "B"]
     assert len(selected) == 2
     assert sum(row["weight"] for row in selected) == pytest.approx(1.0)
+
+
+def test_sector_cap_requires_sector_map_when_enabled() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=2,
+            ENABLE_SECTOR_CAP=True,
+            LOCAL_PIT_SECTOR_PATH="/tmp/mock_sector.csv",
+            SECTOR_CAP=0.5,
+            EXCLUDE_KOSPI_TOP_N=0,
+        )
+    )
+    factors = pd.DataFrame({
+        "ticker": ["A", "B"],
+        "momentum_z": [1.0, 0.9],
+        "quality_z": [1.0, 0.9],
+    })
+
+    with pytest.raises(RuntimeError, match="prepared sector map"):
+        strategy.select_portfolio(factors, ["A", "B"], pd.Timestamp("2024-01-31"))
+
+
+def test_sector_cap_is_applied_when_sector_map_is_available() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=3,
+            WEIGHT_METHOD="equal",
+            ENABLE_SECTOR_CAP=True,
+            LOCAL_PIT_SECTOR_PATH="/tmp/mock_sector.csv",
+            SECTOR_CAP=0.5,
+            EXCLUDE_KOSPI_TOP_N=0,
+            MAX_POSITION_WEIGHT=1.0,
+        ),
+        sector_map_by_as_of={
+            "2024-01-31": {
+                "A": "TECH",
+                "B": "TECH",
+                "C": "FIN",
+            }
+        },
+    )
+    factors = pd.DataFrame({
+        "ticker": ["A", "B", "C"],
+        "momentum_z": [3.0, 2.0, 1.0],
+        "quality_z": [0.0, 0.0, 0.0],
+    })
+
+    selected = strategy.select_portfolio(
+        factors,
+        ["A", "B", "C"],
+        pd.Timestamp("2024-01-31"),
+    )
+    by_ticker = {row["ticker"]: row["weight"] for row in selected}
+
+    assert sum(by_ticker.values()) == pytest.approx(1.0)
+    assert by_ticker["A"] == pytest.approx(0.25)
+    assert by_ticker["B"] == pytest.approx(0.25)
+    assert by_ticker["C"] == pytest.approx(0.50)
 
 
 def test_min_cash_ratio_reserves_cash_during_rebalance_buys() -> None:
