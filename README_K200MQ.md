@@ -225,6 +225,23 @@ uv run python -m k200_mq.main true-walkforward \\
 # strict true-walkforward는 bundle 유니버스 다음 단계에서 DART PIT provenance
 # 검증으로 진행됩니다.
 
+# 로컬 DART 원시 응답을 canonical CSV + manifest로 묶기
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/build_local_dart_bundle.py \
+  --kind filing \
+  --input-file data/raw/dart_filings.json \
+  --input-manifest data/raw/dart_filings.json.manifest.json \
+  --output-file data/raw/dart_filings.canonical.csv \
+  --manifest-file data/raw/dart_filings.canonical.manifest.json
+
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/build_local_dart_bundle.py \
+  --kind financial \
+  --input-file data/raw/dart_facts.json \
+  --input-manifest data/raw/dart_facts.json.manifest.json \
+  --output-file data/raw/dart_facts.canonical.csv \
+  --manifest-file data/raw/dart_facts.canonical.manifest.json
+
 # 주의: 위 스크립트는 입력 파일 형식을 맞추는 도구이며, PIT provenance의 사실성을 자동 보증하지 않습니다.
 # 주의: `--source-is-krx`는 실제 원천이 KRX임을 확인할 때만 사용해야 합니다.
 ```

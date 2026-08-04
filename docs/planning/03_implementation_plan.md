@@ -36,6 +36,9 @@
 - [x] 로컬 DART filing metadata와 financial facts를 sidecar manifest와 함께
   strict 준비 경로에 연결하여, filing-date provenance가 API 키 없이도 검증되도록
   구현.
+- [x] raw DART response를 canonical CSV + manifest로 패키징하는 helper
+  (`scripts/build_local_dart_bundle.py`)를 추가하여 실제 수집물을 strict 입력으로
+  정리할 수 있게 구현.
 - [ ] 원시 DART 제출/공시 메타데이터의 역사 범위를 더 넓혀 실제 자료에서 PIT
   유니버스 및 제출일(filing-date) provenance를 검증 완료.
 - [ ] ADV 기반 시장 영향 모델 구현.
