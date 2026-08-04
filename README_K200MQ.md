@@ -227,6 +227,23 @@ uv run python -m k200_mq.main true-walkforward \\
 
 # 로컬 DART 원시 응답을 canonical CSV + manifest로 묶기
 /Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/generate_dart_fetch_batch_spec.py \
+  --mode both \
+  --corp-codes-file data/raw/dart_corp_codes.txt \
+  --filing-bgn-de 20150101 \
+  --filing-end-de 20241231 \
+  --financial-start-year 2015 \
+  --financial-end-year 2024 \
+  --reprt-codes 11011,11013,11012,11014 \
+  --output-file data/raw/dart_batch_spec.json
+
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/fetch_local_dart_response.py \
+  --api-key "$DART_API_KEY" \
+  --batch-file data/raw/dart_batch_spec.json \
+  --output-dir data/raw/dart_batch
+
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
   scripts/fetch_local_dart_response.py \
   --kind filing \
   --api-key "$DART_API_KEY" \
@@ -267,6 +284,8 @@ uv run python -m k200_mq.main true-walkforward \\
 # 저장소 내부 계약에 맞게 정리합니다.
 # batch mode는 JSON 배열 spec을 받아 여러 raw response를 한 번에 쌓을 수
 # 있습니다.
+# batch spec은 generate_dart_fetch_batch_spec.py로 corp_code/연도 범위에서
+# 자동 생성할 수 있습니다.
 # 다음 실제 작업은 이 helper로 수집한 파일을 historical corp/date 범위로
 # 넓혀서 strict true-walkforward에 넣는 것입니다.
 

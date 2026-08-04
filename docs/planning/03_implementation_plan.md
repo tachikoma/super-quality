@@ -44,6 +44,9 @@
   구현.
 - [x] fetch helper의 batch mode를 추가하여 historical corp/date 조합을 반복 수집할
   수 있게 구현.
+- [x] corp_code/연도 범위에서 batch fetch spec(JSON)을 생성하는 helper
+  (`scripts/generate_dart_fetch_batch_spec.py`)를 추가하여 반복 수집 spec 작성을
+  자동화.
 - [ ] 원시 DART 제출/공시 메타데이터의 역사 범위를 더 넓혀 실제 자료에서 PIT
   유니버스 및 제출일(filing-date) provenance를 검증 완료.
 - [ ] ADV 기반 시장 영향 모델 구현.
