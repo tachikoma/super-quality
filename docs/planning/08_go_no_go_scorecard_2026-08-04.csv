@@ -1,0 +1,11 @@
+section,metric,threshold,current_value,pass,evidence_path,notes
+validation,strict_preflight_failures,0,2,false,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv;outputs_k200mq_day1_20260804_mapped/true_walkforward/summary.csv","both strict runs invalid"
+validation,universe_exception_resolution,completed,partial,pending,"data/universe/kospi200_bundle_strict/bundle.manifest.json","bundle path in place; date exceptions not fully closed"
+validation,dart_filing_date_coverage,above_threshold,not_measurable_due_to_join_integrity,false,"outputs_k200mq_day1_20260804/true_walkforward/selection_and_folds.json","STRICT_PIT_VALIDATION could not establish filing-date financial availability"
+performance,oos_cagr,>=0.05,N/A_invalid_run,pending,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv","run status invalid"
+performance,oos_mdd,>=-0.25,N/A_invalid_run,pending,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv","run status invalid"
+performance,oos_sharpe,>=0.7,N/A_invalid_run,pending,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv","run status invalid"
+performance,oos_calmar,>=0.3,N/A_invalid_run,pending,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv","run status invalid"
+stability,small_perturbation_robustness,no_collapse,not_run,pending,,
+stability,subperiod_concentration,no_extreme_concentration,not_run,pending,,
+decision,interim_decision,Continue|Hold|Pivot,Hold,,"docs/planning/08_go_no_go_scorecard_2026-08-04.md","Day 1 interim due to validation gate failure"

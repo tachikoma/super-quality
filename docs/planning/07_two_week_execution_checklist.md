@@ -55,3 +55,23 @@
 - 필수 게이트 3개(데이터/검증, 성과, 안정성) 상태가 모두 판정됨.
 - Go/No-Go scorecard가 숫자와 근거 경로를 포함해 완결됨.
 - 최종 의사결정(Continue/Hold/Pivot)이 문서화됨.
+
+## Day 1 실행 기록 (2026-08-04)
+
+- 실행 1 (strict + mixed DART aggregate)
+  - 명령:
+    - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_pilot_mixed/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_pilot_mixed/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_pilot_mixed/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_pilot_mixed/dart_facts_merged.manifest.json --output outputs_k200mq_day1_20260804`
+  - 결과: invalid
+  - 핵심 원인: local DART facts/filings 조인 키 무결성 실패로 strict financial availability 확정 불가.
+  - 근거: outputs_k200mq_day1_20260804/true_walkforward/summary.csv
+
+- 실행 2 (strict + mapped DART aggregate)
+  - 명령:
+    - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_pilot_mapped/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_pilot_mapped/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_pilot_mapped/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_pilot_mapped/dart_facts_merged.manifest.json --output outputs_k200mq_day1_20260804_mapped`
+  - 결과: invalid
+  - 핵심 원인: financial facts 중복/누락 조인으로 strict financial availability 확정 불가.
+  - 근거: outputs_k200mq_day1_20260804_mapped/true_walkforward/summary.csv
+
+- Day 1 판정
+  - 상태: 실패 분류 완료 (유니버스 통과, DART 조인 무결성 실패)
+  - 다음 액션: Day 2에서 DART duplicate/missing join 정리 우선 수행.
