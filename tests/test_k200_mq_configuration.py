@@ -61,6 +61,18 @@ def test_run_cli_rejects_deferred_liquidity_and_sector_options() -> None:
         parser.parse_args(["run", "--min-adv-ratio"])
 
 
+def test_runtime_rejects_deferred_option_overrides_from_config_channels() -> None:
+    with pytest.raises(RuntimeError, match="SECTOR_CAP"):
+        main_module._enforce_deferred_runtime_options(K200MQConfig(SECTOR_CAP=0.22))
+    with pytest.raises(RuntimeError, match="MIN_ADV_RATIO"):
+        main_module._enforce_deferred_runtime_options(K200MQConfig(MIN_ADV_RATIO=0.02))
+
+
+def test_runtime_allows_default_values_for_deferred_options() -> None:
+    config = K200MQConfig()
+    main_module._enforce_deferred_runtime_options(config)
+
+
 def test_disabled_regime_filter_skips_scaling_and_reports_manifest_status(
     monkeypatch, tmp_path,
 ) -> None:

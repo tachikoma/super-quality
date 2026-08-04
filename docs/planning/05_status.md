@@ -209,8 +209,9 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 
 ADV 계산은 도우미로 존재하지만 ADV 기반 유동성 및 시장 영향 실행은 연결되지
 않았습니다. `--no-cache`와 `--rebalance-lookback`은 명시적으로 미지원/보류이며
-거부됩니다. 손절 플래그는 `run` 전용이고 `true-walkforward`는 구성/기본값을
-사용합니다.
+거부됩니다. `SECTOR_CAP`과 `MIN_ADV_RATIO`는 CLI 플래그뿐 아니라 런타임 설정
+채널에서도 비기본값을 명시적으로 거부합니다. 손절 플래그는 `run` 전용이고
+`true-walkforward`는 구성/기본값을 사용합니다.
 
 ## 출력 산출물
 

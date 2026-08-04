@@ -105,7 +105,9 @@
 `EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`, `EXCLUDE_ETF_ETN` 제외 플래그.
 `MOMENTUM_WINDOW_SHORT`는 진단 전용입니다. `--no-cache`와
 `--rebalance-lookback`은 미지원/보류 항목으로 명시적으로 거부되며, 손절 CLI
-플래그는 `run`에만 있고 `true-walkforward`에는 없습니다.
+플래그는 `run`에만 있고 `true-walkforward`에는 없습니다. `SECTOR_CAP`과
+`MIN_ADV_RATIO`는 CLI뿐 아니라 런타임 설정 채널에서도 비기본값을 명시적으로
+거부합니다.
 
 ## 남은 작업 / 다음 단계
 

@@ -588,6 +588,28 @@ def _build_config(args: argparse.Namespace) -> Any:
     return K200MQConfig(**config_kwargs)
 
 
+def _enforce_deferred_runtime_options(config: Any) -> None:
+    """Fail closed when deferred options are changed via env/config files.
+
+    CLI already rejects these flags. This guard prevents silent drift when a
+    caller sets them through environment variables or other settings channels.
+    """
+    from k200_mq.config import K200MQConfig
+
+    deferred_fields = ("SECTOR_CAP", "MIN_ADV_RATIO")
+    for field_name in deferred_fields:
+        field_info = K200MQConfig.model_fields.get(field_name)
+        if field_info is None:
+            continue
+        default_value = field_info.default
+        current_value = getattr(config, field_name, default_value)
+        if current_value != default_value:
+            raise RuntimeError(
+                f"{field_name} is unsupported/deferred by the K200MQ runtime and "
+                f"must remain at its default ({default_value!r}) until implemented"
+            )
+
+
 def _print_config_summary(config: Any) -> None:
     """구성 요약을 출력합니다."""
     print("\n" + "=" * 60)
@@ -2973,6 +2995,7 @@ def main() -> None:
 
     if args.command == "run":
         config = _build_config(args)
+        _enforce_deferred_runtime_options(config)
         _print_config_summary(config)
 
         logger.info("파이프라인 시작...")
@@ -2981,6 +3004,7 @@ def main() -> None:
 
     elif args.command in {"robustness", "walkforward"}:
         config = _build_config(args)
+        _enforce_deferred_runtime_options(config)
         _print_config_summary(config)
         logger.info("Independent subperiod robustness test 시작...")
         _run_subperiod_robustness(config)
@@ -2988,6 +3012,7 @@ def main() -> None:
 
     elif args.command in {"true-walkforward", "expanding-walkforward"}:
         config = _build_config(args)
+        _enforce_deferred_runtime_options(config)
         _print_config_summary(config)
         _run_true_walkforward(config)
 
