@@ -346,6 +346,78 @@ def test_sector_cap_execution_fails_without_prepared_sector_map() -> None:
         )
 
 
+def test_correlation_filter_execution_uses_trailing_price_history() -> None:
+    base = _prepared_inputs()
+    config = base.runtime_config.model_copy(update={
+        "TOP_N": 2,
+        "ENABLE_CORRELATION_FILTER": True,
+        "MAX_PAIR_CORRELATION": 0.90,
+        "CORRELATION_LOOKBACK_DAYS": 20,
+    })
+    prepared = PreparedK200MQInputs(
+        price_data=base.price_data,
+        factor_data=base.factor_data,
+        index_data=base.index_data,
+        universe_history=pd.DataFrame([
+            {"as_of": pd.Timestamp("2024-01-04"), "ticker": "A"},
+            {"as_of": pd.Timestamp("2024-01-04"), "ticker": "B"},
+            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "A"},
+            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "B"},
+        ]),
+        regime_scale_map=base.regime_scale_map,
+        runtime_config=config,
+    )
+
+    result = execute_engine_interval(
+        prepared,
+        CandidateSpec("CORR_FILTER", {"TOP_N": 2}),
+        measured_start=pd.Timestamp("2024-01-02"),
+        measured_end=pd.Timestamp("2024-01-09"),
+        active_trading_start=pd.Timestamp("2024-01-04"),
+    )
+
+    assert not result["portfolio_snapshots"].empty
+
+
+def test_correlation_filter_fails_closed_on_missing_pair_coverage() -> None:
+    base = _prepared_inputs()
+    price_data = base.price_data.copy(deep=True)
+    # Flat closes for B make pairwise return-correlation undefined (NaN).
+    b_dates = price_data.loc[("B", slice(None)), :].index.get_level_values("date")
+    for current_date in b_dates:
+        price_data.loc[("B", current_date), "close"] = 20.0
+        price_data.loc[("B", current_date), "open"] = 20.0
+
+    config = base.runtime_config.model_copy(update={
+        "TOP_N": 2,
+        "ENABLE_CORRELATION_FILTER": True,
+        "MAX_PAIR_CORRELATION": 0.90,
+        "CORRELATION_LOOKBACK_DAYS": 20,
+    })
+    prepared = PreparedK200MQInputs(
+        price_data=price_data,
+        factor_data=base.factor_data,
+        index_data=base.index_data,
+        universe_history=pd.DataFrame([
+            {"as_of": pd.Timestamp("2024-01-04"), "ticker": "A"},
+            {"as_of": pd.Timestamp("2024-01-04"), "ticker": "B"},
+            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "A"},
+            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "B"},
+        ]),
+        regime_scale_map=base.regime_scale_map,
+        runtime_config=config,
+    )
+
+    with pytest.raises(RuntimeError, match="complete pairwise correlation coverage"):
+        execute_engine_interval(
+            prepared,
+            CandidateSpec("CORR_FILTER_FAIL", {"TOP_N": 2}),
+            measured_start=pd.Timestamp("2024-01-02"),
+            measured_end=pd.Timestamp("2024-01-09"),
+            active_trading_start=pd.Timestamp("2024-01-04"),
+        )
+
+
 def test_enabled_exclusion_without_prepared_artifact_fails_explicitly() -> None:
     base = _prepared_inputs()
     prepared = PreparedK200MQInputs(

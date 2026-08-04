@@ -463,6 +463,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="섹터 노출 상한 적용 비활성화 (기본값)",
     )
     run_parser.add_argument(
+        "--max-pair-correlation",
+        type=float,
+        default=argparse.SUPPRESS,
+        help=(
+            "ENABLE_CORRELATION_FILTER 활성화 시 허용되는 최대 pairwise 상관계수 "
+            "(-1.0 <= corr <= 1.0; 기본 0.90)"
+        ),
+    )
+    run_parser.add_argument(
+        "--correlation-lookback-days",
+        type=int,
+        default=argparse.SUPPRESS,
+        help=(
+            "ENABLE_CORRELATION_FILTER 활성화 시 상관계수 계산 룩백 일수 "
+            "(기본 60, 최소 20)"
+        ),
+    )
+    correlation_group = run_parser.add_mutually_exclusive_group()
+    correlation_group.add_argument(
+        "--enable-correlation-filter",
+        dest="enable_correlation_filter",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="리밸런싱 후보 내 고상관 페어 제한 적용",
+    )
+    correlation_group.add_argument(
+        "--disable-correlation-filter",
+        dest="enable_correlation_filter",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="리밸런싱 후보 내 고상관 페어 제한 비활성화 (기본값)",
+    )
+    run_parser.add_argument(
         "--min-adv-ratio",
         action=_UnsupportedCLIOption,
         nargs=0,
@@ -591,6 +624,9 @@ def _build_config(args: argparse.Namespace) -> Any:
         "max_holdings": "MAX_HOLDINGS",
         "sector_cap": "SECTOR_CAP",
         "enable_sector_cap": "ENABLE_SECTOR_CAP",
+        "max_pair_correlation": "MAX_PAIR_CORRELATION",
+        "correlation_lookback_days": "CORRELATION_LOOKBACK_DAYS",
+        "enable_correlation_filter": "ENABLE_CORRELATION_FILTER",
         "output": "OUTPUT_DIR",
     }
     for argument_name, config_name in explicit_options.items():
@@ -655,6 +691,11 @@ def _print_config_summary(config: Any) -> None:
     print(
         f"  섹터 한도: {'활성' if config.ENABLE_SECTOR_CAP else '비활성'} "
         f"(SECTOR_CAP={config.SECTOR_CAP:.2%})"
+    )
+    print(
+        f"  상관관계 제약: {'활성' if config.ENABLE_CORRELATION_FILTER else '비활성'} "
+        f"(MAX_PAIR_CORRELATION={config.MAX_PAIR_CORRELATION:.2f}, "
+        f"LOOKBACK={config.CORRELATION_LOOKBACK_DAYS}d)"
     )
     print(
         "  미지원/deferred (미적용): MIN_ADV_RATIO, "
@@ -1165,6 +1206,10 @@ def _build_run_manifest(
         "sector_cap": (
             "conditional: ENABLE_SECTOR_CAP requires LOCAL_PIT_SECTOR_PATH and "
             "full sector coverage; otherwise sector cap is disabled"
+        ),
+        "correlation_filter": (
+            "conditional: ENABLE_CORRELATION_FILTER enforces MAX_PAIR_CORRELATION "
+            "using trailing close-return history up to each rebalance signal date"
         ),
         "portfolio_limits": (
             "active: MAX_HOLDINGS caps concurrent holdings and MIN_CASH_RATIO "

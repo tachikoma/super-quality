@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from datetime import date
+from itertools import combinations
 from typing import Any
 
 import pandas as pd
@@ -384,7 +385,6 @@ class PortfolioRebalanceEngine:
         regime_scale_map: dict[Any, float] | None,
     ) -> dict[str, Any]:
         """Form a close-time target; execution is deferred to next open."""
-        del price_data  # Kept in the signature to make the signal boundary explicit.
         if "date" in factor_data.columns:
             factor_at_date = factor_data[
                 factor_data["date"] == signal_date
@@ -392,16 +392,76 @@ class PortfolioRebalanceEngine:
         else:
             factor_at_date = factor_data
 
+        pair_correlation_map: dict[tuple[str, str], float] | None = None
+        if bool(getattr(self.config, "ENABLE_CORRELATION_FILTER", False)):
+            universe_set = {str(ticker) for ticker in universe}
+            candidate_tickers = {
+                str(ticker)
+                for ticker in factor_at_date["ticker"].dropna().tolist()
+                if str(ticker) in universe_set
+            }
+            pair_correlation_map = self._build_pair_correlation_map(
+                price_data=price_data,
+                signal_date=signal_date,
+                tickers=candidate_tickers,
+            )
+
         selected = self.strategy.select_portfolio(
             factor_data=factor_at_date,
             universe=universe,
             as_of=signal_date,
+            pair_correlation_map=pair_correlation_map,
         )
         return {
             "signal_date": signal_date,
             "selected": selected,
             "regime_scale": self._regime_scale(regime_scale_map, signal_date),
         }
+
+    def _build_pair_correlation_map(
+        self,
+        price_data: pd.DataFrame,
+        signal_date: pd.Timestamp,
+        tickers: set[str],
+    ) -> dict[tuple[str, str], float]:
+        """Build a symmetric pairwise correlation map from trailing close returns."""
+        if not tickers:
+            return {}
+
+        lookback_days = int(getattr(self.config, "CORRELATION_LOOKBACK_DAYS", 60))
+        if lookback_days < 2:
+            return {}
+
+        close_series = price_data["close"]
+        close_matrix = close_series.unstack("ticker") if isinstance(close_series.index, pd.MultiIndex) else None
+        if close_matrix is None or close_matrix.empty:
+            return {}
+
+        available = sorted(ticker for ticker in tickers if ticker in close_matrix.columns)
+        if len(available) < 2:
+            return {}
+
+        history = close_matrix.loc[:signal_date, available].tail(lookback_days + 1)
+        returns = history.pct_change().dropna(how="all")
+        if returns.empty:
+            return {}
+
+        min_periods = max(2, min(len(returns), lookback_days // 3))
+        corr = returns.corr(min_periods=min_periods)
+        pair_map: dict[tuple[str, str], float] = {}
+        for left, right in combinations(available, 2):
+            value = corr.loc[left, right]
+            if pd.isna(value):
+                continue
+            pair_map[self._pair_corr_key(left, right)] = float(value)
+        return pair_map
+
+    @staticmethod
+    def _pair_corr_key(left: str, right: str) -> tuple[str, str]:
+        """Return a normalized pair key for symmetric correlation lookups."""
+        a = str(left)
+        b = str(right)
+        return (a, b) if a <= b else (b, a)
 
     def _regime_scale(
         self,

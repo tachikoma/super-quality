@@ -64,7 +64,9 @@
   연결하고, as-of 스냅샷/커버리지 메타데이터를 준비 입력과 매니페스트에 기록.
 - [x] `ENABLE_SECTOR_CAP=True` + 검증된 로컬 PIT 섹터 맵 조건에서 섹터 한도를
   전략/엔진에 조건부 적용하고, 섹터 맵 부재/미커버리지는 즉시 중단(fail closed).
-- [ ] 상관관계 제약 구현. 현재는 미지원/보류 상태입니다.
+- [x] `ENABLE_CORRELATION_FILTER=True`에서 trailing close 수익률 기반
+  pairwise 상관계수(`MAX_PAIR_CORRELATION`, `CORRELATION_LOOKBACK_DAYS`)를
+  사용해 고상관 페어를 greedy 방식으로 제한.
 
 ## 4단계: 통합과 검증
 
@@ -114,7 +116,8 @@
 플래그는 `run`에만 있고 `true-walkforward`에는 없습니다. `MIN_ADV_RATIO`는 CLI뿐
 아니라 런타임 설정 채널에서도 비기본값을 명시적으로 거부합니다. `SECTOR_CAP`은
 `ENABLE_SECTOR_CAP=True`와 `LOCAL_PIT_SECTOR_PATH`의 검증/전체 커버리지 조건에서만
-실행됩니다.
+실행됩니다. 상관관계 제약은 `ENABLE_CORRELATION_FILTER=True`일 때만 활성화되며,
+리밸런싱 신호일까지의 close 수익률 이력으로 계산된 pairwise 상관계수를 사용합니다.
 
 ## 남은 작업 / 다음 단계
 

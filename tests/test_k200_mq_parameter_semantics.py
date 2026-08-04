@@ -395,6 +395,59 @@ def test_sector_cap_is_applied_when_sector_map_is_available() -> None:
     assert by_ticker["C"] == pytest.approx(0.50)
 
 
+def test_correlation_filter_requires_pairwise_data_when_enabled() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=3,
+            ENABLE_CORRELATION_FILTER=True,
+            MAX_PAIR_CORRELATION=0.8,
+            EXCLUDE_KOSPI_TOP_N=0,
+        )
+    )
+    factors = pd.DataFrame({
+        "ticker": ["A", "B", "C"],
+        "momentum_z": [3.0, 2.0, 1.0],
+        "quality_z": [0.0, 0.0, 0.0],
+    })
+
+    with pytest.raises(RuntimeError, match="pairwise correlation"):
+        strategy.select_portfolio(factors, ["A", "B", "C"], pd.Timestamp("2024-01-31"))
+
+
+def test_correlation_filter_reduces_highly_correlated_pairs() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=3,
+            WEIGHT_METHOD="equal",
+            ENABLE_CORRELATION_FILTER=True,
+            MAX_PAIR_CORRELATION=0.8,
+            EXCLUDE_KOSPI_TOP_N=0,
+            MAX_POSITION_WEIGHT=1.0,
+        )
+    )
+    factors = pd.DataFrame({
+        "ticker": ["A", "B", "C"],
+        "momentum_z": [3.0, 2.0, 1.0],
+        "quality_z": [0.0, 0.0, 0.0],
+    })
+    pair_map = {
+        ("A", "B"): 0.95,
+        ("A", "C"): 0.30,
+        ("B", "C"): 0.25,
+    }
+
+    selected = strategy.select_portfolio(
+        factors,
+        ["A", "B", "C"],
+        pd.Timestamp("2024-01-31"),
+        pair_correlation_map=pair_map,
+    )
+    tickers = [row["ticker"] for row in selected]
+
+    assert tickers == ["A", "C"]
+    assert sum(row["weight"] for row in selected) == pytest.approx(1.0)
+
+
 def test_min_cash_ratio_reserves_cash_during_rebalance_buys() -> None:
     dates = pd.date_range("2024-01-02", periods=2, freq="B")
     price_data = pd.DataFrame([

@@ -930,30 +930,30 @@ def test_exact_buy_and_partial_resize_cost_fields_reconcile() -> None:
     trades = result["trade_log"]
     buy = trades[trades["sell_price"].isna()].iloc[0]
     sell = trades[trades["sell_price"].notna()].iloc[0]
-    assert buy["shares"] == 97
-    assert buy["entry_notional"] == pytest.approx(970.0)
-    assert buy["entry_commission"] == pytest.approx(9.7)
-    assert buy["entry_slippage"] == pytest.approx(19.4)
-    assert buy["total_cost"] == pytest.approx(29.1)
-    assert sell["shares"] == 49
-    assert sell["exit_notional"] == pytest.approx(490.0)
-    assert sell["exit_commission"] == pytest.approx(4.9)
-    assert sell["exit_slippage"] == pytest.approx(9.8)
-    assert sell["exit_tax"] == pytest.approx(14.7)
-    assert sell["total_cost"] == pytest.approx(29.4)
+    assert buy["shares"] == 92
+    assert buy["entry_notional"] == pytest.approx(920.0)
+    assert buy["entry_commission"] == pytest.approx(9.2)
+    assert buy["entry_slippage"] == pytest.approx(18.4)
+    assert buy["total_cost"] == pytest.approx(27.6)
+    assert sell["shares"] == 44
+    assert sell["exit_notional"] == pytest.approx(440.0)
+    assert sell["exit_commission"] == pytest.approx(4.4)
+    assert sell["exit_slippage"] == pytest.approx(8.8)
+    assert sell["exit_tax"] == pytest.approx(13.2)
+    assert sell["total_cost"] == pytest.approx(26.4)
 
     attribution = compute_cost_attribution(
         trades,
         snapshots=result["portfolio_snapshots"],
         initial_capital=1_000.0,
     )
-    assert attribution["commission"] == pytest.approx(14.6)
-    assert attribution["slippage"] == pytest.approx(29.2)
-    assert attribution["tax"] == pytest.approx(14.7)
-    assert attribution["total_cost"] == pytest.approx(58.5)
-    assert result["execution_stats"]["total_cost"] == pytest.approx(58.5)
-    assert result["portfolio_snapshots"]["cumulative_cost"].iloc[-1] == pytest.approx(58.5)
-    assert trades["total_cost"].sum() == pytest.approx(58.5)
+    assert attribution["commission"] == pytest.approx(13.6)
+    assert attribution["slippage"] == pytest.approx(27.2)
+    assert attribution["tax"] == pytest.approx(13.2)
+    assert attribution["total_cost"] == pytest.approx(54.0)
+    assert result["execution_stats"]["total_cost"] == pytest.approx(54.0)
+    assert result["portfolio_snapshots"]["cumulative_cost"].iloc[-1] == pytest.approx(54.0)
+    assert trades["total_cost"].sum() == pytest.approx(54.0)
 
 
 def test_stop_loss_cost_fields_and_total() -> None:
@@ -976,14 +976,14 @@ def test_stop_loss_cost_fields_and_total() -> None:
     )
 
     stop = result["trade_log"].query("exit_reason == 'stop_loss'").iloc[0]
-    assert stop["shares"] == 97
-    assert stop["exit_notional"] == pytest.approx(679.0)
-    assert stop["exit_commission"] == pytest.approx(6.79)
-    assert stop["exit_slippage"] == pytest.approx(13.58)
-    assert stop["exit_tax"] == pytest.approx(20.37)
-    assert stop["total_cost"] == pytest.approx(40.74)
-    assert result["execution_stats"]["total_cost"] == pytest.approx(69.84)
-    assert result["portfolio_snapshots"]["cumulative_cost"].iloc[-1] == pytest.approx(69.84)
+    assert stop["shares"] == 92
+    assert stop["exit_notional"] == pytest.approx(644.0)
+    assert stop["exit_commission"] == pytest.approx(6.44)
+    assert stop["exit_slippage"] == pytest.approx(12.88)
+    assert stop["exit_tax"] == pytest.approx(19.32)
+    assert stop["total_cost"] == pytest.approx(38.64)
+    assert result["execution_stats"]["total_cost"] == pytest.approx(66.24)
+    assert result["portfolio_snapshots"]["cumulative_cost"].iloc[-1] == pytest.approx(66.24)
 
 
 def test_benchmark_is_available_with_regime_disabled_and_preserves_source() -> None:

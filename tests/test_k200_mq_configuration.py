@@ -39,6 +39,9 @@ def test_run_cli_passes_supported_portfolio_settings_to_config() -> None:
         "--max-holdings", "8",
         "--enable-sector-cap",
         "--sector-cap", "0.22",
+        "--enable-correlation-filter",
+        "--max-pair-correlation", "0.85",
+        "--correlation-lookback-days", "90",
     ])
 
     config = main_module._build_config(args)
@@ -47,13 +50,26 @@ def test_run_cli_passes_supported_portfolio_settings_to_config() -> None:
     assert config.MAX_HOLDINGS == 8
     assert config.ENABLE_SECTOR_CAP is True
     assert config.SECTOR_CAP == 0.22
+    assert config.ENABLE_CORRELATION_FILTER is True
+    assert config.MAX_PAIR_CORRELATION == 0.85
+    assert config.CORRELATION_LOOKBACK_DAYS == 90
     assert config.MIN_ADV_RATIO == 0.01
 
     manifest = main_module._build_run_manifest(config)
     assert manifest["config"]["MAX_HOLDINGS"] == 8
     assert manifest["config"]["ENABLE_SECTOR_CAP"] is True
     assert manifest["config"]["SECTOR_CAP"] == 0.22
+    assert manifest["config"]["ENABLE_CORRELATION_FILTER"] is True
+    assert manifest["config"]["MAX_PAIR_CORRELATION"] == 0.85
+    assert manifest["config"]["CORRELATION_LOOKBACK_DAYS"] == 90
     assert manifest["config"]["MIN_ADV_RATIO"] == 0.01
+
+
+def test_config_rejects_invalid_correlation_filter_bounds_when_enabled() -> None:
+    with pytest.raises(ValueError, match="MAX_PAIR_CORRELATION"):
+        K200MQConfig(ENABLE_CORRELATION_FILTER=True, MAX_PAIR_CORRELATION=1.1)
+    with pytest.raises(ValueError, match="CORRELATION_LOOKBACK_DAYS"):
+        K200MQConfig(ENABLE_CORRELATION_FILTER=True, CORRELATION_LOOKBACK_DAYS=10)
 
 
 def test_run_cli_rejects_deferred_liquidity_option() -> None:

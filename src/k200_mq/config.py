@@ -220,6 +220,16 @@ class K200MQConfig(BacktestConfig):
             raise ValueError(
                 "SECTOR_CAP must satisfy 0.0 < SECTOR_CAP <= 1.0 when ENABLE_SECTOR_CAP=True"
             )
+        if self.ENABLE_CORRELATION_FILTER and not -1.0 <= self.MAX_PAIR_CORRELATION <= 1.0:
+            raise ValueError(
+                "MAX_PAIR_CORRELATION must satisfy -1.0 <= MAX_PAIR_CORRELATION <= 1.0 "
+                "when ENABLE_CORRELATION_FILTER=True"
+            )
+        if self.ENABLE_CORRELATION_FILTER and self.CORRELATION_LOOKBACK_DAYS < 20:
+            raise ValueError(
+                "CORRELATION_LOOKBACK_DAYS must be at least 20 when "
+                "ENABLE_CORRELATION_FILTER=True"
+            )
         return self
 
     # ── 리짓 필터 ──────────────────────────────────────────────
@@ -265,6 +275,24 @@ class K200MQConfig(BacktestConfig):
     ENABLE_SECTOR_CAP: bool = Field(
         default=False,
         description="로컬 PIT 섹터 맵이 준비된 경우 섹터 노출 상한(SECTOR_CAP) 적용 여부",
+    )
+    ENABLE_CORRELATION_FILTER: bool = Field(
+        default=False,
+        description="리밸런싱 후보 내 고상관 페어를 제한하는 상관관계 제약 적용 여부",
+    )
+    MAX_PAIR_CORRELATION: float = Field(
+        default=0.90,
+        description=(
+            "ENABLE_CORRELATION_FILTER=True일 때 허용되는 후보 간 최대 pairwise 상관계수 "
+            "(-1 이상 1 이하)"
+        ),
+    )
+    CORRELATION_LOOKBACK_DAYS: int = Field(
+        default=60,
+        description=(
+            "ENABLE_CORRELATION_FILTER=True일 때 pairwise 상관계수 계산에 사용하는 "
+            "수익률 룩백 일수 (최소 20)"
+        ),
     )
     MIN_CASH_RATIO: float = Field(
         default=0.05,

@@ -45,6 +45,7 @@ class MomentumQualityStrategy:
         factor_data: pd.DataFrame,
         universe: list[str],
         as_of: Any,
+        pair_correlation_map: Mapping[tuple[str, str], float] | None = None,
     ) -> list[dict[str, Any]]:
         """리밸런싱 일자에 포트폴리오를 선택합니다.
 
@@ -92,6 +93,9 @@ class MomentumQualityStrategy:
         if len(selected) > max_holdings:
             selected = selected.nlargest(max_holdings, "composite_z")
 
+        if bool(getattr(self.config, "ENABLE_CORRELATION_FILTER", False)):
+            selected = self._apply_correlation_filter(selected, pair_correlation_map)
+
         if selected.empty:
             logger.warning("리밸런싱 %s: 선택된 종목 없음 (제외 필터 적용 후)", as_of)
             return []
@@ -127,6 +131,53 @@ class MomentumQualityStrategy:
         )
 
         return selected.to_dict(orient="records")
+
+    def _apply_correlation_filter(
+        self,
+        selected: pd.DataFrame,
+        pair_correlation_map: Mapping[tuple[str, str], float] | None,
+    ) -> pd.DataFrame:
+        """Apply greedy pairwise correlation constraint to selected candidates."""
+        if pair_correlation_map is None:
+            raise RuntimeError(
+                "ENABLE_CORRELATION_FILTER requires precomputed pairwise correlation data"
+            )
+
+        if selected.empty or len(selected) <= 1:
+            return selected
+
+        threshold = float(self.config.MAX_PAIR_CORRELATION)
+        ordered = selected.nlargest(len(selected), "composite_z")
+        kept_tickers: list[str] = []
+        kept_rows: list[int] = []
+
+        for idx, row in ordered.iterrows():
+            ticker = str(row["ticker"])
+            rejected = False
+            for kept in kept_tickers:
+                key = self._pair_corr_key(ticker, kept)
+                corr = pair_correlation_map.get(key)
+                if corr is None:
+                    raise RuntimeError(
+                        "ENABLE_CORRELATION_FILTER requires complete pairwise "
+                        "correlation coverage for selected candidates"
+                    )
+                if float(corr) > threshold:
+                    rejected = True
+                    break
+            if rejected:
+                continue
+            kept_tickers.append(ticker)
+            kept_rows.append(idx)
+
+        return ordered.loc[kept_rows].copy()
+
+    @staticmethod
+    def _pair_corr_key(left: str, right: str) -> tuple[str, str]:
+        """Return a normalized pair key for symmetric correlation lookups."""
+        a = str(left)
+        b = str(right)
+        return (a, b) if a <= b else (b, a)
 
     def _apply_sector_cap(self, selected: pd.DataFrame, as_of: Any) -> pd.DataFrame:
         """Apply sector-level cap using prepared PIT sector-map snapshots."""

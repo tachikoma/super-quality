@@ -77,6 +77,10 @@
   준비 입력/매니페스트 컨텍스트에 기록합니다. `ENABLE_SECTOR_CAP=True`일 때는
   로컬 PIT 섹터 맵의 검증 및 전체 커버리지를 요구하며, 조건 미충족 시 즉시 중단
   (fail closed)합니다.
+- `ENABLE_CORRELATION_FILTER=True`일 때는 엔진이 리밸런싱 신호일까지의 close
+  수익률 이력으로 pairwise 상관계수를 계산하고, `MAX_PAIR_CORRELATION` 및
+  `CORRELATION_LOOKBACK_DAYS`를 사용해 고상관 페어를 greedy 방식으로 제한합니다.
+  선택된 후보 쌍의 상관계수 커버리지가 불완전하면 즉시 중단(fail closed)합니다.
 
 ## 기계적 비-PIT 진단
 
@@ -218,7 +222,8 @@ ADV 계산은 도우미로 존재하지만 ADV 기반 유동성 및 시장 영�
 않았습니다. `--no-cache`와 `--rebalance-lookback`은 명시적으로 미지원/보류이며
 거부됩니다. `MIN_ADV_RATIO`는 CLI 플래그뿐 아니라 런타임 설정 채널에서도
 비기본값을 명시적으로 거부합니다. `SECTOR_CAP`은 `ENABLE_SECTOR_CAP=True`와
-검증된 `LOCAL_PIT_SECTOR_PATH`의 전체 커버리지 조건에서만 활성화됩니다. 손절 플래그는 `run` 전용이고
+검증된 `LOCAL_PIT_SECTOR_PATH`의 전체 커버리지 조건에서만 활성화됩니다.
+상관관계 제약은 `ENABLE_CORRELATION_FILTER=True`일 때만 활성화됩니다. 손절 플래그는 `run` 전용이고
 `true-walkforward`는 구성/기본값을 사용합니다.
 
 ## 출력 산출물

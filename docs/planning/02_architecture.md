@@ -84,7 +84,8 @@ docs/planning/
     │         └─ mcap 기준 상위 50개 제외 (KOSPI 50 희석)
     │
     ├── 6. 포트폴리오 구성: 동일 비중 또는 순위 가중
-    │         └─ 섹터 노출 한도: ENABLE_SECTOR_CAP + PIT 섹터 맵 조건에서만 적용
+    │    ├─ 섹터 노출 한도: ENABLE_SECTOR_CAP + PIT 섹터 맵 조건에서만 적용
+    │    └─ 상관관계 제약: ENABLE_CORRELATION_FILTER + trailing return 이력 조건에서 적용
     │
     └── 7. 일별: 시가평가, 활성 손절 확인(-15%), 일정에 따른 리밸런싱
 ```
@@ -198,6 +199,9 @@ class PortfolioRebalanceEngine:
 | `LOCAL_PIT_SECTOR_PATH` | "" | 선택적 로컬 PIT 섹터 맵 구간 파일 경로; 설정 시 준비 경로에서 검증/스냅샷 생성 |
 | `SECTOR_CAP` | 0.30 | `ENABLE_SECTOR_CAP=True`에서 섹터별 최대 노출 상한 |
 | `ENABLE_SECTOR_CAP` | false | 로컬 PIT 섹터 맵 검증/전체 커버리지 조건에서만 섹터 캡 적용 |
+| `MAX_PAIR_CORRELATION` | 0.90 | `ENABLE_CORRELATION_FILTER=True`에서 허용되는 최대 pairwise 상관계수 |
+| `CORRELATION_LOOKBACK_DAYS` | 60 | 상관계수 계산에 사용하는 trailing 수익률 룩백 일수 |
+| `ENABLE_CORRELATION_FILTER` | false | 리밸런싱 후보 내 고상관 페어 제한 적용 여부 |
 | `MOMENTUM_WINDOW_LONG` | 252 | skipped return v4 순위 특성: `close[t-42] / close[t-252] - 1` (기본) |
 | `MOMENTUM_WINDOW_SHORT` | 126 | **진단 전용** `momentum_6m` 표시; 순위/readiness/민감도에 사용하지 않음 |
 | `MOMENTUM_SKIP_DAYS` | 42 | 마지막 2개월 제외 |
@@ -216,6 +220,9 @@ readiness/운영 파라미터로 취급하지 않습니다.
 채널에서도 비기본값을 명시적으로 거부합니다. `src/k200_mq/data/sector_pit.py`
 계약 레이어는 PIT 섹터 맵 정규화/검증과 as-of 스냅샷 생성을 제공하며, 실행 엔진은
 `ENABLE_SECTOR_CAP=True`에서 해당 준비 산출물의 검증/전체 커버리지를 요구합니다.
+상관관계 제약은 준비 아티팩트 없이 엔진에서 계산되며, 리밸런싱 신호일까지의 close
+수익률 이력을 사용해 pairwise 상관계수를 계산한 뒤 greedy 방식으로 후보를
+제한합니다.
 
 `--enable-stop-loss`, `--disable-stop-loss`, `--stop-loss`는 `run` 명령의 CLI
 override에만 노출됩니다. `true-walkforward`는 이 플래그들을 노출하지 않고
