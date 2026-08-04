@@ -138,7 +138,10 @@ def test_true_walkforward_prepares_once_and_serializes_artifacts(monkeypatch, tm
     assert len(pd.read_csv(artifact_dir / "oos_returns.csv")) == 30
 
 
-def test_true_walkforward_rejects_strict_pit_before_engine(monkeypatch, tmp_path) -> None:
+def test_true_walkforward_strict_pit_preflight_rejects_unvalidated_bundle(
+    monkeypatch,
+    tmp_path,
+) -> None:
     config = main_module._build_config(
         main_module._build_parser().parse_args(
             ["true-walkforward", "--strict-pit", "--output", str(tmp_path)]
@@ -157,6 +160,44 @@ def test_true_walkforward_rejects_strict_pit_before_engine(monkeypatch, tmp_path
         lambda *args, **kwargs: engine_calls.append((args, kwargs)),
     )
 
-    with pytest.raises(RuntimeError, match="rejects --strict-pit"):
+    with pytest.raises(RuntimeError, match="strict PIT preflight failed"):
         main_module._run_true_walkforward(config)
     assert engine_calls == []
+
+
+def test_true_walkforward_strict_pit_runs_when_preflight_is_satisfied(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    config = main_module._build_config(
+        main_module._build_parser().parse_args(
+            ["true-walkforward", "--strict-pit", "--output", str(tmp_path)]
+        )
+    )
+    prepared = _prepared(str(tmp_path), strict=True)
+    engine_calls: list[tuple[str, date, date]] = []
+
+    monkeypatch.setattr(
+        main_module,
+        "prepare_k200mq_inputs",
+        lambda config_arg, **kwargs: prepared,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_preflight_true_walkforward_strict_inputs",
+        lambda prepared_arg: None,
+    )
+
+    def execute(prepared_arg, candidate_config, *, measured_start, measured_end,
+                active_trading_start):
+        assert prepared_arg is prepared
+        assert active_trading_start == prepared.active_trading_start
+        engine_calls.append((candidate_config["phase"], measured_start, measured_end))
+        return _engine_result(measured_start)
+
+    monkeypatch.setattr(main_module, "execute_engine_interval", execute)
+
+    result = main_module._run_true_walkforward(config)
+
+    assert result.classification == main_module.MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
+    assert len(engine_calls) == 5 * 4 + 5

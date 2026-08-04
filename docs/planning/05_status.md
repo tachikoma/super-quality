@@ -154,6 +154,10 @@ DART_API_KEY="" uv run python -m k200_mq.main true-walkforward \
 없습니다. strict PIT WF, PIT 민감도, 생존자 편향 비교, ADV 영향, 계획된 스트레스
 테스트 및 성과 결론은 모두 보류 상태입니다.
 
+strict 모드 `true-walkforward`는 더 이상 옵션 자체를 사전 거부하지 않습니다.
+대신 실행 전 prepared 입력의 유니버스/재무 provenance를 strict preflight로
+검증하며, validator-backed PIT 계약이 불충분하면 즉시 중단(fail closed)합니다.
+
 구성원 importer는 구조적 후보 계약을 정의합니다: `index_code`, `as_of_date` 또는
 `effective_date`, `security_code`. 원천 메타데이터는 존재할 때 정규화하지만 원시
 행의 값을 그대로 신뢰하지 않습니다. 명시적 구간 파일에는 유효일 경계,

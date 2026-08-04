@@ -2628,6 +2628,13 @@ def _save_true_walkforward_failure_artifact(
     return output_dir
 
 
+def _preflight_true_walkforward_strict_inputs(prepared: PreparedK200MQInputs) -> None:
+    """Validate strict PIT evidence for true-walkforward before fold execution."""
+    from k200_mq.validation.prepared import _validate_prepared_pit_provenance
+
+    _validate_prepared_pit_provenance(prepared)
+
+
 def _run_true_walkforward(config: Any) -> WalkForwardResult:
     """Run mechanical expanding WF over one shared prepared input bundle."""
     logger.warning(
@@ -2659,16 +2666,19 @@ def _run_true_walkforward(config: Any) -> WalkForwardResult:
         )
 
     if bool(getattr(config, "STRICT_PIT_VALIDATION", False)):
-        _save_true_walkforward_failure_artifact(
-            prepared,
-            config,
-            "true-walkforward rejects --strict-pit before engine execution",
-        )
-        raise RuntimeError(
-            "true-walkforward rejects --strict-pit before engine execution: "
-            "the current prepared universe/quality inputs are mechanical non-PIT "
-            "and cannot support a validated PIT classification"
-        )
+        try:
+            _preflight_true_walkforward_strict_inputs(prepared)
+        except RuntimeError as exc:
+            _save_true_walkforward_failure_artifact(
+                prepared,
+                config,
+                f"true-walkforward strict PIT preflight failed: {exc}",
+            )
+            raise RuntimeError(
+                "true-walkforward strict PIT preflight failed before engine "
+                "execution: prepared inputs do not satisfy validator-backed PIT "
+                f"contracts ({exc})"
+            ) from exc
 
     folds = get_expanding_window_folds()
     candidates = get_candidate_library()
