@@ -231,7 +231,9 @@ uv run python -m k200_mq.main run --strict-pit
 
 `--strict-pit` (또는 `STRICT_PIT_VALIDATION=true`)는 PIT 유니버스와 실제
 filing/publication timestamp 또는 명시적 cutoff를 사용한 재무 데이터가
-없으면 팩터·백테스트 전에 중단합니다. 현재 top-N 제외 순위는 현재 시가총액
+없으면 팩터·백테스트 전에 중단합니다. strict 모드에서는
+`LOCAL_PIT_UNIVERSE_PATH`와 `LOCAL_PIT_UNIVERSE_MANIFEST`가 필수이며,
+미설정이면 유니버스 로드 전에 즉시 중단합니다. 현재 top-N 제외 순위는 현재 시가총액
 스냅샷이므로 strict 모드에서는 `EXCLUDE_KOSPI_TOP_N=0`이어야 합니다. strict
 모드를 통과하려면 KRX의 과거 유효일자별 구성종목 파일과 원시 DART filing
 metadata를 확보하고, 그 공시일을 재무 데이터 가용일로 사용하는 로더가

@@ -59,8 +59,10 @@
 - 명시적 로컬 KRX PIT 원천 통합이 `config`·`universe`·`main`에 구현되어 있습니다.
   `LOCAL_PIT_UNIVERSE_PATH`, `LOCAL_PIT_UNIVERSE_SOURCE_KIND`,
   `LOCAL_PIT_UNIVERSE_MANIFEST`를 설정하면 해당 원천을 사용하고 proxy/cache 경로를
-  사용하지 않습니다. 설정하지 않으면 기존 proxy 기본 동작을 유지하며, 설정한
-  원천의 파일·매니페스트·날짜·해시·타임스탬프·재로딩 검증이 실패하면 즉시 중단(fail closed)합니다.
+  사용하지 않습니다. strict 모드(`STRICT_PIT_VALIDATION=true` 또는 `--strict-pit`)에서는
+  `LOCAL_PIT_UNIVERSE_PATH`와 `LOCAL_PIT_UNIVERSE_MANIFEST`가 필수이며,
+  미설정이면 유니버스 로드 전에 즉시 중단(fail closed)합니다. 설정한 원천의
+  파일·매니페스트·날짜·해시·타임스탬프·재로딩 검증 실패도 즉시 중단됩니다.
 - provenance 계약은 여러 스냅샷의 날짜별 범위, 원시 해시, 시간대가 있는 타임스탬프,
   행 수, 스냅샷 식별자, 매니페스트, 토큰 및 결합 후 정규화 프레임 fingerprint를
   재검증합니다. 여러 날짜를 하나의 해시나 하나의 매니페스트로 잘못 대표하지

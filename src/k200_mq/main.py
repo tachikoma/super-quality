@@ -693,6 +693,28 @@ def _enforce_deferred_runtime_options(config: Any) -> None:
             )
 
 
+def _enforce_strict_input_sources(config: Any) -> None:
+    """Require explicit local PIT sources when strict validation is enabled."""
+    if not bool(getattr(config, "STRICT_PIT_VALIDATION", False)):
+        return
+
+    local_universe_path = str(getattr(config, "LOCAL_PIT_UNIVERSE_PATH", "") or "").strip()
+    local_universe_manifest = str(
+        getattr(config, "LOCAL_PIT_UNIVERSE_MANIFEST", "") or ""
+    ).strip()
+
+    if not local_universe_path:
+        raise RuntimeError(
+            "STRICT_PIT_VALIDATION requires LOCAL_PIT_UNIVERSE_PATH. "
+            "Do not use proxy/current universe sources in strict mode."
+        )
+    if not local_universe_manifest:
+        raise RuntimeError(
+            "STRICT_PIT_VALIDATION requires LOCAL_PIT_UNIVERSE_MANIFEST so "
+            "raw-source acquisition evidence can be verified."
+        )
+
+
 def _print_config_summary(config: Any) -> None:
     """구성 요약을 출력합니다."""
     print("\n" + "=" * 60)
@@ -1506,6 +1528,7 @@ def prepare_k200mq_inputs(
     logger.info("1단계: 유니버스 구성 (KOSPI 200 종속 이력)")
     strict_pit = bool(getattr(config, "STRICT_PIT_VALIDATION", False))
     if strict_pit:
+        _enforce_strict_input_sources(config)
         _enforce_strict_pit_validation(
             {"provenance": "config", "pit_valid": True},
             config=config,

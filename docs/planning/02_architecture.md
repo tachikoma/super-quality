@@ -194,9 +194,9 @@ class PortfolioRebalanceEngine:
 | `ENABLE_STOP_LOSS` | true | `run`과 true-WF가 config/environment 또는 기본값으로 사용하는 trailing stop-loss 주문 생성 여부; true-WF CLI override는 없음 |
 | `SL_STOP_LOSS` | -0.15 | 활성화 시 `-1.0 < value < 0.0`인 trailing 손절 기준 |
 | `UNIVERSE_SIZE` | 200 | **미지원/보류** — 현재 유니버스 로더가 소비하지 않음 |
-| `LOCAL_PIT_UNIVERSE_PATH` | "" | 설정 시 사용하는 로컬 PIT 유니버스 파일 경로; 미설정 시 proxy 로더 사용 |
+| `LOCAL_PIT_UNIVERSE_PATH` | "" | 로컬 PIT 유니버스 파일 경로; strict 모드에서는 필수 |
 | `LOCAL_PIT_UNIVERSE_SOURCE_KIND` | "" | 로컬 원천 형식 (`snapshots` 또는 `intervals`; 기본 `snapshots`) |
-| `LOCAL_PIT_UNIVERSE_MANIFEST` | "" | 선택적 로컬 PIT 수집 매니페스트 경로 |
+| `LOCAL_PIT_UNIVERSE_MANIFEST` | "" | 로컬 PIT 수집 매니페스트 경로; strict 모드에서는 필수 |
 | `LOCAL_PIT_SECTOR_PATH` | "" | 선택적 로컬 PIT 섹터 맵 구간 파일 경로; 설정 시 준비 경로에서 검증/스냅샷 생성 |
 | `SECTOR_CAP` | 0.30 | `ENABLE_SECTOR_CAP=True`에서 섹터별 최대 노출 상한 |
 | `ENABLE_SECTOR_CAP` | false | 로컬 PIT 섹터 맵 검증/전체 커버리지 조건에서만 섹터 캡 적용 |

@@ -456,6 +456,31 @@ def test_strict_validation_rejects_current_market_cap_top_n() -> None:
         universe_module.exclude_kospi_top_n(["A"], strict_pit=True)
 
 
+def test_strict_input_sources_require_local_universe_path_and_manifest() -> None:
+    with pytest.raises(RuntimeError, match="LOCAL_PIT_UNIVERSE_PATH"):
+        main_module._enforce_strict_input_sources(
+            K200MQConfig(STRICT_PIT_VALIDATION=True)
+        )
+
+    with pytest.raises(RuntimeError, match="LOCAL_PIT_UNIVERSE_MANIFEST"):
+        main_module._enforce_strict_input_sources(
+            K200MQConfig(
+                STRICT_PIT_VALIDATION=True,
+                LOCAL_PIT_UNIVERSE_PATH="local.csv",
+            )
+        )
+
+
+def test_strict_input_sources_accept_verified_local_boundary_configuration() -> None:
+    main_module._enforce_strict_input_sources(
+        K200MQConfig(
+            STRICT_PIT_VALIDATION=True,
+            LOCAL_PIT_UNIVERSE_PATH="local.csv",
+            LOCAL_PIT_UNIVERSE_MANIFEST="local.manifest.json",
+        )
+    )
+
+
 def test_non_strict_manifest_labels_proxy_and_fiscal_financial_mode(tmp_path) -> None:
     config = K200MQConfig(OUTPUT_DIR=str(tmp_path), STRICT_PIT_VALIDATION=False)
     manifest = main_module._build_run_manifest(config, {
