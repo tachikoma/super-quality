@@ -986,6 +986,29 @@ def _fact_lineage(data: pd.DataFrame) -> _DARTLineage | None:
     return None
 
 
+def _infer_period_end_from_report(bsns_year: Any, reprt_code: Any) -> date | None:
+    year_text = _text(bsns_year)
+    report_code = _text(reprt_code)
+    if year_text is None or report_code is None:
+        return None
+    try:
+        year = int(year_text)
+    except ValueError:
+        return None
+    month_day = {
+        "11013": (3, 31),
+        "11012": (6, 30),
+        "11014": (9, 30),
+        "11011": (12, 31),
+    }.get(report_code)
+    if month_day is None:
+        return None
+    try:
+        return date(year, month_day[0], month_day[1])
+    except ValueError:
+        return None
+
+
 def _filing_lineage(data: pd.DataFrame) -> _DARTLineage | None:
     direct = data.attrs.get(_DART_LINEAGE_ATTR)
     if _lineage_valid(data, direct, "filing_metadata"):
@@ -1146,14 +1169,40 @@ def load_financial_facts(
         local, manifest if manifest is not None else acquisition_manifest,
         expected_kind="financial_facts",
     )
-    _reject_fact_provenance_collisions(local.frame)
-    resolved = _resolve_columns(local.frame, _FACT_ALIASES, column_mapping)
+    working_frame = local.frame.copy()
+    _reject_fact_provenance_collisions(working_frame)
+    resolved = _resolve_columns(working_frame, _FACT_ALIASES, column_mapping)
+    request_params = manifest_value.get("request_params", {}) if isinstance(manifest_value, Mapping) else {}
+    fallback_fields = {
+        "bsns_year": "bsns_year",
+        "reprt_code": "reprt_code",
+        "fs_div": "fs_div",
+    }
+    if isinstance(request_params, Mapping):
+        for field_name, param_name in fallback_fields.items():
+            if field_name in resolved:
+                continue
+            fallback_value = _text(request_params.get(param_name))
+            if fallback_value is None:
+                continue
+            fallback_column = f"_manifest_{field_name}"
+            if fallback_column not in working_frame.columns:
+                working_frame[fallback_column] = fallback_value
+            resolved[field_name] = fallback_column
     required = ("rcept_no", "corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div")
     missing = [field for field in required if field not in resolved]
     if missing:
         raise DARTPITError(f"financial facts are missing required columns: {', '.join(missing)}")
     rows: list[dict[str, Any]] = []
-    for _, input_row in local.frame.iterrows():
+    for _, input_row in working_frame.iterrows():
+        bsns_year = _text(input_row[resolved["bsns_year"]])
+        reprt_code = _text(input_row[resolved["reprt_code"]])
+        parsed_period_end = (
+            _parse_date(input_row[resolved["period_end"]])
+            if "period_end" in resolved else None
+        )
+        if parsed_period_end is None:
+            parsed_period_end = _infer_period_end_from_report(bsns_year, reprt_code)
         raw_value = input_row[resolved["raw_value"]] if "raw_value" in resolved else None
         numeric = (
             _numeric_value(input_row[resolved["numeric_value"]])
@@ -1162,8 +1211,8 @@ def load_financial_facts(
         row = {
             "rcept_no": _text(input_row[resolved["rcept_no"]]),
             "corp_code": _text(input_row[resolved["corp_code"]]),
-            "bsns_year": _text(input_row[resolved["bsns_year"]]),
-            "reprt_code": _text(input_row[resolved["reprt_code"]]),
+            "bsns_year": bsns_year,
+            "reprt_code": reprt_code,
             "fs_div": _text(input_row[resolved["fs_div"]]),
             "sj_div": _text(input_row[resolved["sj_div"]]),
             "account_id": _text(input_row[resolved["account_id"]]) if "account_id" in resolved else None,
@@ -1175,10 +1224,7 @@ def load_financial_facts(
                 _text(input_row[resolved["account_detail"]])
                 if "account_detail" in resolved else None
             ),
-            "period_end": (
-                _parse_date(input_row[resolved["period_end"]])
-                if "period_end" in resolved else None
-            ),
+            "period_end": parsed_period_end,
             "raw_value": _text(raw_value),
             "numeric_value": numeric,
             "currency": _text(input_row[resolved["currency"]]) if "currency" in resolved else None,
