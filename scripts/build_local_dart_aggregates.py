@@ -40,12 +40,21 @@ def _collect_raw_files(directory: Path, prefix: str) -> list[Path]:
 def _load_frame_bundle(kind: str, files: list[Path]) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     frames: list[pd.DataFrame] = []
     inputs: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
     loader = load_filing_metadata if kind == "filing" else load_financial_facts
     for path in files:
-        manifest = path.with_suffix(path.suffix + ".manifest.json")
-        if not manifest.is_file():
+        manifest_candidates = (
+            path.with_suffix(path.suffix + ".manifest.json"),
+            path.with_suffix(".manifest.json"),
+        )
+        manifest = next((candidate for candidate in manifest_candidates if candidate.is_file()), None)
+        if manifest is None:
             raise RuntimeError(f"missing sidecar manifest for {path.name}")
-        frame = loader(path, manifest=manifest)
+        try:
+            frame = loader(path, manifest=manifest)
+        except Exception as exc:
+            skipped.append({"path": str(path), "error": str(exc)})
+            continue
         frames.append(frame)
         inputs.append({
             "path": str(path),
@@ -54,7 +63,10 @@ def _load_frame_bundle(kind: str, files: list[Path]) -> tuple[pd.DataFrame, list
             "manifest_sha256": _sha256_bytes(manifest.read_bytes()),
         })
     if not frames:
-        raise RuntimeError(f"no valid {kind} raw files were found")
+        detail = f"; skipped={len(skipped)}" if skipped else ""
+        raise RuntimeError(f"no valid {kind} raw files were found{detail}")
+    if skipped:
+        print(f"warning: skipped {len(skipped)} invalid {kind} raw files")
     merged = pd.concat(frames, ignore_index=True)
     merged = merged.drop_duplicates().reset_index(drop=True)
     return merged, inputs
