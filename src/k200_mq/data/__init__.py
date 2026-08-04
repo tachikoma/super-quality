@@ -85,6 +85,15 @@ from k200_mq.data.krx_pit import (
     load_krx_kospi200_snapshot as load_krx_kospi200_snapshot,
     load_krx_kospi200_snapshots as load_krx_kospi200_snapshots,
 )
+from k200_mq.data.sector_pit import (
+    SECTOR_INTERVAL_COLUMNS as SECTOR_INTERVAL_COLUMNS,
+    SectorPITError as SectorPITError,
+    SectorPITValidationResult as SectorPITValidationResult,
+    load_sector_intervals as load_sector_intervals,
+    sector_map_as_of as sector_map_as_of,
+    sector_map_fingerprint as sector_map_fingerprint,
+    validate_sector_intervals as validate_sector_intervals,
+)
 
 
 _UNIVERSE_EXPORTS = frozenset({
@@ -189,5 +198,12 @@ __all__ = [
     "fetch_krx_kospi200_snapshot",
     "load_krx_kospi200_snapshot",
     "load_krx_kospi200_snapshots",
+    "SECTOR_INTERVAL_COLUMNS",
+    "SectorPITError",
+    "SectorPITValidationResult",
+    "load_sector_intervals",
+    "sector_map_as_of",
+    "sector_map_fingerprint",
+    "validate_sector_intervals",
     *_UNIVERSE_EXPORTS,
 ]

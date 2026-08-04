@@ -210,6 +210,11 @@ class PortfolioRebalanceEngine:
 않습니다. `MOMENTUM_WINDOW_SHORT`는 진단용 표시만 계산하며 민감도 또는
 readiness/운영 파라미터로 취급하지 않습니다.
 
+`SECTOR_CAP`과 `MIN_ADV_RATIO`는 현재 엔진 미구현 항목으로, CLI 플래그뿐 아니라
+런타임 설정 채널에서도 비기본값을 명시적으로 거부합니다. `src/k200_mq/data/sector_pit.py`
+계약 레이어는 향후 SECTOR_CAP 연결을 위한 PIT 섹터 맵 정규화/검증 스캐폴딩을 제공하며,
+현재 실행 엔진에는 아직 연결되지 않았습니다.
+
 `--enable-stop-loss`, `--disable-stop-loss`, `--stop-loss`는 `run` 명령의 CLI
 override에만 노출됩니다. `true-walkforward`는 이 플래그들을 노출하지 않고
 `ENABLE_STOP_LOSS`/`SL_STOP_LOSS`의 config/environment 값 또는 기본값을 사용합니다.
