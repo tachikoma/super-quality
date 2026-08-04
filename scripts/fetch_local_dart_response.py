@@ -197,6 +197,23 @@ def main() -> None:
         help="Batch mode file prefix",
     )
     parser.add_argument(
+        "--start-index",
+        type=int,
+        default=1,
+        help="Batch mode 1-based start index (default: 1)",
+    )
+    parser.add_argument(
+        "--max-requests",
+        type=int,
+        default=0,
+        help="Batch mode max number of requests to process (0 means all)",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Batch mode: continue processing remaining specs when a request fails",
+    )
+    parser.add_argument(
         "--retrieved-at-utc",
         default="",
         help="UTC retrieval timestamp (ISO-8601). Default: now in UTC",
@@ -215,8 +232,17 @@ def main() -> None:
             raise RuntimeError("--output-dir is required when --batch-file is used")
         retrieved_at_utc = args.retrieved_at_utc.strip() or datetime.now(timezone.utc).isoformat()
         specs = _load_batch_spec(batch_path)
+        if args.start_index < 1:
+            raise RuntimeError("--start-index must be >= 1")
+        if args.max_requests < 0:
+            raise RuntimeError("--max-requests must be >= 0")
+        start_at = args.start_index - 1
+        selected_specs = specs[start_at:]
+        if args.max_requests > 0:
+            selected_specs = selected_specs[:args.max_requests]
         outputs: list[dict[str, Any]] = []
-        for index, spec in enumerate(specs, start=1):
+        failures: list[dict[str, Any]] = []
+        for index, spec in enumerate(selected_specs, start=args.start_index):
             if not isinstance(spec.get("kind"), str) or spec["kind"] not in OPEN_DART_ENDPOINTS:
                 raise RuntimeError(f"invalid batch request kind at item {index}")
             item_kind = str(spec["kind"])
@@ -228,19 +254,33 @@ def main() -> None:
             item_manifest_name = str(
                 spec.get("manifest_name") or f"{Path(item_output_name).stem}.manifest.json"
             )
-            outputs.append(
-                _fetch_one(
-                    kind=item_kind,
-                    api_key=api_key,
-                    output_file=output_dir / item_output_name,
-                    manifest_file=output_dir / item_manifest_name,
-                    request_params=item_params,
-                    source_url=item_source_url,
-                    retrieved_at_utc=retrieved_at_utc,
+            try:
+                outputs.append(
+                    _fetch_one(
+                        kind=item_kind,
+                        api_key=api_key,
+                        output_file=output_dir / item_output_name,
+                        manifest_file=output_dir / item_manifest_name,
+                        request_params=item_params,
+                        source_url=item_source_url,
+                        retrieved_at_utc=retrieved_at_utc,
+                    )
                 )
-            )
+            except Exception as exc:
+                failures.append({
+                    "index": index,
+                    "kind": item_kind,
+                    "error": str(exc),
+                    "spec": spec,
+                })
+                if not args.continue_on_error:
+                    raise
         batch_summary = output_dir / "batch_summary.json"
         batch_summary.write_text(json.dumps(outputs, ensure_ascii=False, indent=2), encoding="utf-8")
+        if failures:
+            failure_report = output_dir / "batch_failures.json"
+            failure_report.write_text(json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"batch failures: {len(failures)} -> {failure_report}")
         print(f"fetched {len(outputs)} DART responses -> {output_dir}")
         print(f"batch summary written -> {batch_summary}")
         return

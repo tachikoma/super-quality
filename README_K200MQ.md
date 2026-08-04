@@ -243,6 +243,16 @@ uv run python -m k200_mq.main true-walkforward \\
   --batch-file data/raw/dart_batch_spec.json \
   --output-dir data/raw/dart_batch
 
+# 대규모 수집에서 실패 복구/청크 실행 예시
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/fetch_local_dart_response.py \
+  --api-key "$DART_API_KEY" \
+  --batch-file data/raw/dart_batch_spec.json \
+  --output-dir data/raw/dart_batch \
+  --start-index 501 \
+  --max-requests 250 \
+  --continue-on-error
+
 /Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
   scripts/build_local_dart_aggregates.py \
   --input-dir data/raw/dart_batch \
@@ -291,6 +301,9 @@ uv run python -m k200_mq.main true-walkforward \\
 # 있습니다.
 # batch spec은 generate_dart_fetch_batch_spec.py로 corp_code/연도 범위에서
 # 자동 생성할 수 있습니다.
+# batch fetch는 --start-index/--max-requests/--continue-on-error로
+# 실패 복구 및 분할 수집을 지원합니다. 실패 항목은 batch_failures.json으로
+# 저장됩니다.
 # build_local_dart_aggregates.py는 batch 수집 결과를 strict 입력에 바로 연결할
 # 수 있는 merged filing/facts CSV + manifest로 정리합니다.
 # 다음 실제 작업은 이 helper로 수집한 파일을 historical corp/date 범위로

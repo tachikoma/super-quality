@@ -50,6 +50,9 @@
 - [x] batch 수집된 raw DART 응답을 merged filing/facts CSV + manifest로 통합하는
   helper (`scripts/build_local_dart_aggregates.py`)를 추가하여 strict 입력 연결을
   자동화.
+- [x] batch fetch에 청크 실행 및 실패 복구 옵션(`--start-index`,
+  `--max-requests`, `--continue-on-error`)을 추가하여 장기 historical 수집의
+  재시도 비용을 낮춤.
 - [ ] 원시 DART 제출/공시 메타데이터의 역사 범위를 더 넓혀 실제 자료에서 PIT
   유니버스 및 제출일(filing-date) provenance를 검증 완료.
 - [ ] ADV 기반 시장 영향 모델 구현.
