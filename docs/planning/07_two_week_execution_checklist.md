@@ -75,3 +75,10 @@
 - Day 1 판정
   - 상태: 실패 분류 완료 (유니버스 통과, DART 조인 무결성 실패)
   - 다음 액션: Day 2에서 DART duplicate/missing join 정리 우선 수행.
+
+- 실행 3 (strict + mixed key-dedup DART aggregate candidate)
+  - 명령:
+    - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.manifest.json --output outputs_k200mq_day1_20260804_mixed_keydedup`
+  - 결과: invalid
+  - 핵심 원인: DART filing-date를 KRX 세션으로 매핑하는 단계에서 실패 (`one or more filings cannot be mapped to a provided KRX session`).
+  - 근거: outputs_k200mq_day1_20260804_mixed_keydedup/true_walkforward/summary.csv

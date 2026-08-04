@@ -6,7 +6,7 @@
 
 | 항목 | 기준 | 현재 값 | 통과 여부 | 근거 |
 |---|---|---|---|---|
-| strict preflight 실패 건수 | 0 | 2 | 실패 | outputs_k200mq_day1_20260804/true_walkforward/summary.csv, outputs_k200mq_day1_20260804_mapped/true_walkforward/summary.csv |
+| strict preflight 실패 건수 | 0 | 3 | 실패 | outputs_k200mq_day1_20260804/true_walkforward/summary.csv, outputs_k200mq_day1_20260804_mapped/true_walkforward/summary.csv, outputs_k200mq_day1_20260804_mixed_keydedup/true_walkforward/summary.csv |
 | 유니버스 예외 정리 | 완료 | 부분 완료 | 보류 | data/universe/kospi200_bundle_strict/bundle.manifest.json |
 | DART filing-date 커버리지 | 임계치 이상 | 조인 무결성 실패로 미측정 | 실패 | outputs_k200mq_day1_20260804/true_walkforward/selection_and_folds.json |
 
@@ -35,8 +35,8 @@
 임시 판정: Hold
 
 판정 사유 (3줄 요약):
-1. strict true-walkforward는 2회 모두 invalid로 종료되었고, 실패 원인이 DART 조인 무결성으로 수렴했다.
-2. 유니버스 provenance 경로는 확보됐지만, filing-date financial availability를 strict 계약으로 만족시키지 못했다.
+1. strict true-walkforward는 3회 모두 invalid로 종료되었고, 초기 병목은 DART 조인 무결성으로 확인됐다.
+2. key-dedup 후보 적용 후 조인 병목은 완화됐지만, 다음 병목이 KRX 세션 매핑 실패로 이동했다.
 3. 성과/안정성 게이트는 유효 실행이 나오기 전까지 측정 불가다.
 
 다음 액션 (Day 2 우선순위):
@@ -52,3 +52,7 @@
 	- filings 중복 (corp_code, rcept_no): 0 rows
 	- facts missing filing join: 93048 rows
 	- facts 중복 (corp_code, rcept_no, account_id, account_detail): 28020 rows
+- mixed key-dedup candidate
+	- filings 중복 (corp_code, rcept_no): 0 rows
+	- facts 중복 (corp_code, rcept_no, reprt_code, fs_div, sj_div, account_id, account_detail, period_end): 0 rows
+	- strict 실패 원인: `one or more filings cannot be mapped to a provided KRX session`
