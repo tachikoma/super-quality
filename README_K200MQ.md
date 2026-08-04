@@ -163,6 +163,14 @@ validator 결과를 pure runner에 연결하는 후속 작업으로 보류했습
 
 ```bash
 DART_API_KEY="" uv run python -m k200_mq.main true-walkforward --output /tmp/k200mq_true_wf_v4_no_dart
+
+# strict PIT preflight 예시 (로컬 PIT 유니버스 원천/매니페스트 필수)
+uv run python -m k200_mq.main true-walkforward \
+  --strict-pit \
+  --local-pit-universe-path data/universe/kospi200/history.csv \
+  --local-pit-universe-source-kind intervals \
+  --local-pit-universe-manifest data/universe/kospi200/history.manifest.json \
+  --output outputs_k200mq_strict
 ```
 
 - 모멘텀 공식: v4 skipped return `close[t-42] / close[t-252] - 1`
@@ -263,6 +271,9 @@ metadata를 확보하고, 그 공시일을 재무 데이터 가용일로 사용�
 | `--enable-adv-filter` / `--disable-adv-filter` | disabled | ADV 유동성 필터 on/off |
 | `UNIVERSE_SIZE` | 200 | **unsupported/deferred** — 현재 유니버스 로더가 소비하지 않음 |
 | `--strict-pit` | false | PIT 유니버스·filing-date 재무 데이터가 없으면 중단 |
+| `--local-pit-universe-path` | "" | 로컬 PIT 유니버스 파일 경로 (strict 모드에서는 필수) |
+| `--local-pit-universe-source-kind` | "" | 로컬 PIT 유니버스 형식 (`snapshots` 또는 `intervals`) |
+| `--local-pit-universe-manifest` | "" | 로컬 PIT 유니버스 수집 매니페스트 경로 (strict 모드에서는 필수) |
 
 `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`도 현재는
 호환성을 위해 설정에 남아 있지만 지원되지 않거나 inert이다. 이 항목들과

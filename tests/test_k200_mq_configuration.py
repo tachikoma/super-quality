@@ -72,6 +72,26 @@ def test_run_cli_passes_supported_portfolio_settings_to_config() -> None:
     assert manifest["config"]["CORRELATION_LOOKBACK_DAYS"] == 90
 
 
+def test_true_walkforward_cli_wires_strict_local_pit_options_to_config() -> None:
+    parser = main_module._build_parser()
+    args = parser.parse_args([
+        "true-walkforward",
+        "--strict-pit",
+        "--local-pit-universe-path", "local_universe.csv",
+        "--local-pit-universe-source-kind", "intervals",
+        "--local-pit-universe-manifest", "local_universe.manifest.json",
+        "--output", "out",
+    ])
+
+    config = main_module._build_config(args)
+
+    assert config.STRICT_PIT_VALIDATION is True
+    assert config.LOCAL_PIT_UNIVERSE_PATH == "local_universe.csv"
+    assert config.LOCAL_PIT_UNIVERSE_SOURCE_KIND == "intervals"
+    assert config.LOCAL_PIT_UNIVERSE_MANIFEST == "local_universe.manifest.json"
+    assert config.OUTPUT_DIR == "out"
+
+
 def test_config_rejects_invalid_correlation_filter_bounds_when_enabled() -> None:
     with pytest.raises(ValueError, match="MAX_PAIR_CORRELATION"):
         K200MQConfig(ENABLE_CORRELATION_FILTER=True, MAX_PAIR_CORRELATION=1.1)

@@ -132,6 +132,8 @@
    다중 날짜·원시 바이트 해시·타임스탬프·재로딩 검증을 통과시킨 뒤 명시적 로컬
   원천 설정으로 유니버스 전체 기간을 재현합니다. strict 모드에서는
   `LOCAL_PIT_UNIVERSE_PATH`와 `LOCAL_PIT_UNIVERSE_MANIFEST`가 필수입니다.
+  (`true-walkforward` 포함 각 CLI에서 `--local-pit-universe-path`,
+  `--local-pit-universe-source-kind`, `--local-pit-universe-manifest`로 주입 가능)
 2. 원시 DART 제출/공시(filing/publication) 메타데이터와 재무 사실을 API 또는 벌크 수집으로
    확보하고, 기존 로컬 OpenDART 계약 및 `(corp_code, rcept_no)` 조인에 맞춰
    품질 팩터에 연결합니다.

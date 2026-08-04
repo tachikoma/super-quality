@@ -376,6 +376,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="PIT 유니버스와 filing-date 재무 데이터가 없으면 중단",
     )
     run_parser.add_argument(
+        "--local-pit-universe-path",
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 파일 경로 (strict 모드에서는 필수)",
+    )
+    run_parser.add_argument(
+        "--local-pit-universe-source-kind",
+        choices=("snapshots", "intervals"),
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 형식 (snapshots 또는 intervals)",
+    )
+    run_parser.add_argument(
+        "--local-pit-universe-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 수집 매니페스트 경로 (strict 모드에서는 필수)",
+    )
+    run_parser.add_argument(
         "--top-n",
         type=int,
         default=argparse.SUPPRESS,
@@ -556,6 +572,22 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="PIT 유니버스와 filing-date 재무 데이터가 없으면 중단",
     )
+    robustness_parser.add_argument(
+        "--local-pit-universe-path",
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 파일 경로 (strict 모드에서는 필수)",
+    )
+    robustness_parser.add_argument(
+        "--local-pit-universe-source-kind",
+        choices=("snapshots", "intervals"),
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 형식 (snapshots 또는 intervals)",
+    )
+    robustness_parser.add_argument(
+        "--local-pit-universe-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 수집 매니페스트 경로 (strict 모드에서는 필수)",
+    )
 
     true_walkforward_parser = sub.add_parser(
         "true-walkforward",
@@ -585,7 +617,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--strict-pit",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="현재 non-PIT 입력을 실행 전에 거부 (기계적 WF에는 사용 불가)",
+        help="PIT provenance strict preflight를 통과하지 못하면 실행 전에 중단",
+    )
+    true_walkforward_parser.add_argument(
+        "--local-pit-universe-path",
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 파일 경로 (strict 모드에서는 필수)",
+    )
+    true_walkforward_parser.add_argument(
+        "--local-pit-universe-source-kind",
+        choices=("snapshots", "intervals"),
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 형식 (snapshots 또는 intervals)",
+    )
+    true_walkforward_parser.add_argument(
+        "--local-pit-universe-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 PIT 유니버스 수집 매니페스트 경로 (strict 모드에서는 필수)",
     )
 
     return parser
@@ -607,6 +655,14 @@ def _build_config(args: argparse.Namespace) -> Any:
             config_kwargs["STRICT_PIT_VALIDATION"] = True
         if hasattr(args, "dart_api_key") and args.dart_api_key:
             config_kwargs["DART_API_KEY"] = args.dart_api_key
+        local_options = {
+            "local_pit_universe_path": "LOCAL_PIT_UNIVERSE_PATH",
+            "local_pit_universe_source_kind": "LOCAL_PIT_UNIVERSE_SOURCE_KIND",
+            "local_pit_universe_manifest": "LOCAL_PIT_UNIVERSE_MANIFEST",
+        }
+        for argument_name, config_name in local_options.items():
+            if hasattr(args, argument_name):
+                config_kwargs[config_name] = getattr(args, argument_name)
         return K200MQConfig(**config_kwargs)
 
     if getattr(args, "command", None) in {
@@ -624,6 +680,14 @@ def _build_config(args: argparse.Namespace) -> Any:
             config_kwargs["STRICT_PIT_VALIDATION"] = True
         if hasattr(args, "dart_api_key") and args.dart_api_key:
             config_kwargs["DART_API_KEY"] = args.dart_api_key
+        local_options = {
+            "local_pit_universe_path": "LOCAL_PIT_UNIVERSE_PATH",
+            "local_pit_universe_source_kind": "LOCAL_PIT_UNIVERSE_SOURCE_KIND",
+            "local_pit_universe_manifest": "LOCAL_PIT_UNIVERSE_MANIFEST",
+        }
+        for argument_name, config_name in local_options.items():
+            if hasattr(args, argument_name):
+                config_kwargs[config_name] = getattr(args, argument_name)
         return K200MQConfig(**config_kwargs)
 
     config_kwargs = {}
@@ -650,6 +714,9 @@ def _build_config(args: argparse.Namespace) -> Any:
         "max_pair_correlation": "MAX_PAIR_CORRELATION",
         "correlation_lookback_days": "CORRELATION_LOOKBACK_DAYS",
         "enable_correlation_filter": "ENABLE_CORRELATION_FILTER",
+        "local_pit_universe_path": "LOCAL_PIT_UNIVERSE_PATH",
+        "local_pit_universe_source_kind": "LOCAL_PIT_UNIVERSE_SOURCE_KIND",
+        "local_pit_universe_manifest": "LOCAL_PIT_UNIVERSE_MANIFEST",
         "output": "OUTPUT_DIR",
     }
     for argument_name, config_name in explicit_options.items():
