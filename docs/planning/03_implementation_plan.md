@@ -134,6 +134,9 @@
   `LOCAL_PIT_UNIVERSE_PATH`와 `LOCAL_PIT_UNIVERSE_MANIFEST`가 필수입니다.
   (`true-walkforward` 포함 각 CLI에서 `--local-pit-universe-path`,
   `--local-pit-universe-source-kind`, `--local-pit-universe-manifest`로 주입 가능)
+  단일 파일+단일 매니페스트 방식은 strict 다중 날짜 계약에서
+  `verified acquisition tokens do not cover each date exactly once`로 거부되므로,
+  날짜별 identity를 갖는 매니페스트 체인(또는 interval 원천 계약)로 보강해야 합니다.
 2. 원시 DART 제출/공시(filing/publication) 메타데이터와 재무 사실을 API 또는 벌크 수집으로
    확보하고, 기존 로컬 OpenDART 계약 및 `(corp_code, rcept_no)` 조인에 맞춰
    품질 팩터에 연결합니다.

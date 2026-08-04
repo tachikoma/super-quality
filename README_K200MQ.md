@@ -172,6 +172,30 @@ uv run python -m k200_mq.main true-walkforward \
   --local-pit-universe-source-kind intervals \
   --local-pit-universe-manifest data/universe/kospi200/history.manifest.json \
   --output outputs_k200mq_strict
+
+# 주의: --local-pit-universe-path는 디렉터리가 아니라 단일 파일 경로여야 합니다.
+
+# 기존 월별 파일을 단일 스냅샷 파일로 합치기 (입력 형식 정리용)
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \\
+  scripts/build_local_pit_universe_snapshot.py \\
+  --input-glob "data/universe/kospi200_*.parquet" \\
+  --source-url "https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd" \\
+  --source-type krx_official_snapshot \\
+  --source-is-krx \\
+  --output-file data/universe/local_pit_snapshots.csv \\
+  --manifest-file data/universe/local_pit_snapshots.manifest.json
+
+# 위에서 생성한 단일 파일을 strict 입력으로 사용
+uv run python -m k200_mq.main true-walkforward \\
+  --strict-pit \\
+  --exclude-kospi-top-n 0 \\
+  --local-pit-universe-path data/universe/local_pit_snapshots.csv \\
+  --local-pit-universe-source-kind snapshots \\
+  --local-pit-universe-manifest data/universe/local_pit_snapshots.manifest.json \\
+  --output outputs_k200mq_strict
+
+# 주의: 위 스크립트는 입력 파일 형식을 맞추는 도구이며, PIT provenance의 사실성을 자동 보증하지 않습니다.
+# 주의: `--source-is-krx`는 실제 원천이 KRX임을 확인할 때만 사용해야 합니다.
 ```
 
 - 모멘텀 공식: v4 skipped return `close[t-42] / close[t-252] - 1`

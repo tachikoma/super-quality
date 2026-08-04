@@ -107,6 +107,20 @@ def test_explicit_local_pit_failure_does_not_fall_back_to_proxy(monkeypatch, tmp
         )
 
 
+def test_local_pit_directory_path_is_rejected_with_actionable_error(tmp_path: Path) -> None:
+    source_dir = tmp_path / "pit_sources"
+    source_dir.mkdir()
+
+    with pytest.raises(PITUniverseError, match="directory source is unsupported"):
+        universe_module.get_kospi200_history(
+            date(2024, 1, 1),
+            date(2024, 1, 31),
+            "M",
+            local_pit_universe_path=source_dir,
+            local_pit_universe_source_kind="snapshots",
+        )
+
+
 def test_prepare_inputs_wires_configured_local_pit_options(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

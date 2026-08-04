@@ -69,6 +69,14 @@
   또한 strict 실행에서 `EXCLUDE_KOSPI_TOP_N`은 PIT rank 근거가 없으면 거부되므로,
   `true-walkforward`/`robustness` CLI에서는 `--exclude-kospi-top-n 0`로
   명시적으로 비활성화할 수 있습니다.
+- 입력 형식 정리 도구로 `scripts/build_local_pit_universe_snapshot.py`를 추가했습니다.
+  월별 파일 묶음을 단일 canonical snapshot CSV + manifest로 변환해
+  `--local-pit-universe-path`의 파일 경로 계약을 맞출 수 있습니다.
+  이 도구는 형식 변환 유틸리티이며 PIT provenance 사실성을 자동 보증하지 않습니다.
+  strict 프로브 결과, 다중 날짜 스냅샷을 단일 매니페스트 토큰으로 대표하면
+  `verified acquisition tokens do not cover each date exactly once`로 거부됩니다.
+  따라서 strict 유니버스 완주에는 날짜별 identity가 있는 매니페스트 체인 또는
+  동등한 interval provenance 계약이 추가로 필요합니다.
 - provenance 계약은 여러 스냅샷의 날짜별 범위, 원시 해시, 시간대가 있는 타임스탬프,
   행 수, 스냅샷 식별자, 매니페스트, 토큰 및 결합 후 정규화 프레임 fingerprint를
   재검증합니다. 여러 날짜를 하나의 해시나 하나의 매니페스트로 잘못 대표하지

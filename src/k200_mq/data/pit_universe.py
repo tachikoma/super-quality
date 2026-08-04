@@ -1068,6 +1068,11 @@ def _read_source(
         path = Path(unquote(parsed_url.path))
     else:
         path = Path(source)
+    if path.is_dir():
+        raise PITUniverseError(
+            "directory source is unsupported for local PIT import; "
+            "provide a single snapshot/interval file path"
+        )
     if not path.is_file():
         raise FileNotFoundError(path)
     raw_bytes = path.read_bytes()
