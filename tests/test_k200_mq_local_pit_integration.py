@@ -43,6 +43,36 @@ def _verified_snapshot_source(tmp_path: Path) -> tuple[Path, Path]:
     return source, manifest_path
 
 
+def _bundle_member_source(tmp_path: Path, as_of: str, prefix: str) -> tuple[Path, Path]:
+    source = tmp_path / f"{prefix}_{as_of}.parquet"
+    tickers = [f"{number:06d}" for number in range(1, 201)]
+    frame = pd.DataFrame({
+        "index_code": ["KOSPI200"] * len(tickers),
+        "as_of_date": [as_of] * len(tickers),
+        "security_code": tickers,
+        "source_type": ["krx_official_snapshot"] * len(tickers),
+        "source_url": ["https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd"] * len(tickers),
+        "source_file_sha256": ["b" * 64] * len(tickers),
+        "retrieved_at_utc": ["2024-02-01T00:00:00+00:00"] * len(tickers),
+    })
+    frame.to_parquet(source, index=False)
+    manifest = {
+        "official_source_url": "https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd",
+        "query_params": {"bld": "dbms/MDC/STAT/standard/MDCSTAT00601", "indIdx": "1", "indIdx2": "028"},
+        "date_params": {"trdDd": as_of},
+        "retrieved_at_utc": "2024-02-01T00:00:00+00:00",
+        "raw_file_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "source_type": "krx_official_snapshot",
+        "source_is_krx": True,
+        "snapshot_identity_sha256": hashlib.sha256(
+            json.dumps(tickers, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+    manifest_path = source.with_suffix(".manifest.json")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return source, manifest_path
+
+
 def test_local_pit_config_is_empty_by_default() -> None:
     config = K200MQConfig()
 
@@ -111,7 +141,7 @@ def test_local_pit_directory_path_is_rejected_with_actionable_error(tmp_path: Pa
     source_dir = tmp_path / "pit_sources"
     source_dir.mkdir()
 
-    with pytest.raises(PITUniverseError, match="directory source is unsupported"):
+    with pytest.raises(PITUniverseError, match="no snapshot files found"):
         universe_module.get_kospi200_history(
             date(2024, 1, 1),
             date(2024, 1, 31),
@@ -119,6 +149,27 @@ def test_local_pit_directory_path_is_rejected_with_actionable_error(tmp_path: Pa
             local_pit_universe_path=source_dir,
             local_pit_universe_source_kind="snapshots",
         )
+
+
+def test_directory_bundle_with_sidecars_is_pit_valid(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    member_a, _ = _bundle_member_source(bundle_dir, "2024-01-31", "kospi200")
+    member_b, _ = _bundle_member_source(bundle_dir, "2024-02-29", "kospi200")
+    # Ensure the bundle path contains both members and their sidecars.
+    assert member_a.exists() and member_b.exists()
+
+    history = universe_module.get_kospi200_history(
+        date(2024, 1, 1),
+        date(2024, 2, 29),
+        "M",
+        local_pit_universe_path=bundle_dir,
+        local_pit_universe_source_kind="snapshots",
+    )
+
+    assert sorted(history["as_of"].astype(str).unique().tolist()) == ["2024-01-31", "2024-02-29"]
+    assert len(history) == 400
+    assert validate_universe_provenance(history)["pit_valid"] is True
 
 
 def test_prepare_inputs_wires_configured_local_pit_options(monkeypatch) -> None:

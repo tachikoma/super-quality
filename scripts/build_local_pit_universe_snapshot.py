@@ -66,6 +66,7 @@ def _tickers_from_frame(frame: pd.DataFrame, path: Path) -> list[str]:
     if column is None:
         raise ValueError(f"missing ticker/security_code column: {path}")
     tickers = sorted({str(value).strip() for value in frame[column].tolist() if str(value).strip()})
+    tickers = [ticker for ticker in tickers if re.fullmatch(r"\d{6}", ticker)]
     if not tickers:
         raise ValueError(f"no tickers found in {path}")
     return tickers

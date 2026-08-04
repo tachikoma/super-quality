@@ -7,8 +7,10 @@ KOSPI 200 Momentum + Quality 프레임워크로 새 출발한 프로젝트입니
 
 > **Current evidence boundary:** The v4 result currently available is a
 > momentum-only mechanical non-PIT diagnostic, not validated performance
-> evidence. Historical PIT constituents and filing-date financial data are the
-> next gate. The canonical status is
+> evidence. The strict bundle-directory universe gate is now wired, but a
+> historical 198-constituent date still requires a documented transition
+> exception or source correction, and filing-date financial data remains the
+> next major gate. The canonical status is
 > [docs/planning/05_status.md](docs/planning/05_status.md).
 
 ## 전략 개요
@@ -193,6 +195,34 @@ uv run python -m k200_mq.main true-walkforward \\
   --local-pit-universe-source-kind snapshots \\
   --local-pit-universe-manifest data/universe/local_pit_snapshots.manifest.json \\
   --output outputs_k200mq_strict
+
+# 다중 날짜 strict 유니버스는 per-file sidecar manifest가 붙은 bundle 디렉터리가 필요합니다.
+# 이 경로는 현재 다중 날짜 스냅샷을 검증 가능한 형태로 넘기는 권장 방식입니다.
+
+# bundle 디렉터리 생성 예시
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \\
+  scripts/build_local_pit_universe_bundle.py \\
+  --input-glob "data/universe/kospi200_*.parquet" \\
+  --source-url "https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd" \\
+  --source-type krx_official_snapshot \\
+  --source-is-krx \\
+  --output-dir data/universe/kospi200_bundle \\
+  --bundle-manifest data/universe/kospi200_bundle/bundle.manifest.json
+
+# 생성된 bundle 디렉터리를 strict 입력으로 사용
+uv run python -m k200_mq.main true-walkforward \\
+  --strict-pit \\
+  --exclude-kospi-top-n 0 \\
+  --local-pit-universe-path data/universe/kospi200_bundle \\
+  --local-pit-universe-source-kind snapshots \\
+  --local-pit-universe-manifest data/universe/kospi200_bundle/bundle.manifest.json \\
+  --output outputs_k200mq_strict
+
+# 주의: 역사 날짜 중 일부는 198 구성원으로 검증되어 documented transition
+# exception 또는 원천 보정이 필요할 수 있습니다.
+
+# strict true-walkforward는 bundle 유니버스 다음 단계에서 DART PIT provenance
+# 검증으로 진행됩니다.
 
 # 주의: 위 스크립트는 입력 파일 형식을 맞추는 도구이며, PIT provenance의 사실성을 자동 보증하지 않습니다.
 # 주의: `--source-is-krx`는 실제 원천이 KRX임을 확인할 때만 사용해야 합니다.

@@ -979,6 +979,21 @@ def import_local_pit_universe(
     """
     kind = source_kind.strip().casefold()
     dates = _requested_dates(requested_rebalance_dates, requested_rebalance_date)
+    if isinstance(source, (str, Path)):
+        path = Path(source)
+        if path.is_dir():
+            if kind not in {"snapshot", "snapshots"}:
+                raise PITUniverseError(
+                    "directory bundle imports currently support only snapshots"
+                )
+            return _import_local_pit_snapshot_bundle(
+                path,
+                column_mapping=column_mapping,
+                requested_rebalance_dates=dates,
+                target_size=target_size,
+                source_format=source_format,
+                bundle_manifest=manifest,
+            )
     if kind in {"snapshot", "snapshots"}:
         snapshots = load_constituent_snapshots(
             source,
@@ -1023,6 +1038,117 @@ def import_local_pit_universe(
             transition_exceptions=transition_exceptions,
         )
     raise PITUniverseError(f"unknown source_kind: {source_kind!r}")
+
+
+def _import_local_pit_snapshot_bundle(
+    bundle_dir: Path,
+    *,
+    column_mapping: Mapping[str, str] | None,
+    requested_rebalance_dates: Iterable[date | datetime | str] | None,
+    target_size: int | None,
+    source_format: str | None,
+    bundle_manifest: Mapping[str, Any] | str | Path | None,
+) -> pd.DataFrame:
+    data_files = sorted(
+        path for path in bundle_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in {".csv", ".parquet", ".json", ".jsonl"}
+        and not path.name.endswith(".manifest.json")
+    )
+    if not data_files:
+        raise PITUniverseError(f"no snapshot files found in bundle directory: {bundle_dir}")
+
+    combined_frames: list[pd.DataFrame] = []
+    provenance_by_as_of: dict[str, Any] = {}
+    provenance_metadata_by_as_of: dict[str, Any] = {}
+    acquisition_manifests_by_as_of: dict[str, Any] = {}
+    tokens: list[Any] = []
+    bundle_transition_exceptions: dict[date, TransitionExceptionPolicy] = {}
+    if bundle_manifest is not None:
+        parsed_bundle_manifest = _load_manifest_mapping(bundle_manifest)
+        raw_exceptions = parsed_bundle_manifest.get("transition_exceptions_by_as_of", {})
+        if isinstance(raw_exceptions, Mapping):
+            bundle_transition_exceptions = _materialize_transition_exceptions(raw_exceptions)
+
+    for data_file in data_files:
+        sidecar = data_file.with_suffix(".manifest.json")
+        if not sidecar.is_file():
+            raise PITUniverseError(
+                f"directory bundle source requires sidecar manifest for {data_file.name}"
+            )
+        history = import_local_pit_universe(
+            data_file,
+            source_kind="snapshots",
+            column_mapping=column_mapping,
+            requested_rebalance_dates=None,
+            target_size=target_size,
+            source_format=source_format,
+            manifest=sidecar,
+            transition_exceptions=bundle_transition_exceptions,
+        )
+        if not isinstance(history, pd.DataFrame) or history.empty:
+            raise PITUniverseError(f"bundle member produced no history: {data_file.name}")
+        combined_frames.append(history)
+        provenance_by_as_of.update(history.attrs.get("provenance_by_as_of", {}))
+        member_metadata = history.attrs.get("provenance_metadata_by_as_of", {})
+        if isinstance(member_metadata, Mapping):
+            provenance_metadata_by_as_of.update(member_metadata)
+            for as_of_key, metadata in member_metadata.items():
+                if isinstance(metadata, Mapping):
+                    acquisition_manifest = metadata.get("acquisition_manifest")
+                    if isinstance(acquisition_manifest, Mapping):
+                        acquisition_manifests_by_as_of[str(as_of_key)] = dict(acquisition_manifest)
+        member_manifests = history.attrs.get("acquisition_manifests_by_as_of", {})
+        if isinstance(member_manifests, Mapping) and member_manifests:
+            acquisition_manifests_by_as_of.update(
+                {str(key): dict(value) for key, value in member_manifests.items() if isinstance(value, Mapping)}
+            )
+        token = history.attrs.get("_verified_acquisition")
+        if isinstance(token, tuple):
+            tokens.extend(token)
+        elif token is not None:
+            tokens.append(token)
+
+    history = pd.concat(combined_frames, ignore_index=True)
+    history.attrs["provenance_by_as_of"] = dict(provenance_by_as_of)
+    history.attrs["source_by_as_of"] = dict(provenance_by_as_of)
+    history.attrs["provenance_metadata_by_as_of"] = dict(provenance_metadata_by_as_of)
+    history.attrs["acquisition_manifests_by_as_of"] = dict(acquisition_manifests_by_as_of)
+    history.attrs["acquisition_manifest"] = {
+        "manifests_by_as_of": dict(acquisition_manifests_by_as_of),
+        "source_is_krx": True,
+        "verified": True,
+        "bundle_dir": str(bundle_dir),
+    }
+    history.attrs["acquisition_manifest_verified"] = True
+    combined_manifest = history.attrs["acquisition_manifest"]
+    source_hashes = [
+        token.raw_sha256
+        for token in tokens
+        if hasattr(token, "raw_sha256") and isinstance(token.raw_sha256, str)
+    ]
+    history_fingerprint = _history_evidence_fingerprint(
+        history,
+        history.attrs["provenance_by_as_of"],
+        history.attrs["provenance_metadata_by_as_of"],
+        combined_manifest,
+        source_hashes,
+    )
+    if history_fingerprint is not None:
+        tokens = [
+            replace(token, history_fingerprint=history_fingerprint)
+            for token in tokens
+        ]
+    history.attrs["_verified_acquisition"] = tuple(tokens)
+    history.attrs["provenance"] = "pit"
+    history.attrs["source"] = "pit"
+    report = validate_universe_provenance(history)
+    if not report["pit_valid"]:
+        raise PITUniverseError(
+            "directory bundle provenance validation failed: "
+            + str(report.get("reason", "untrusted evidence"))
+        )
+    history.attrs["pit_valid"] = True
+    return history
 
 
 # Descriptive aliases for callers wiring this into universe.py later.

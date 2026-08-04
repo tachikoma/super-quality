@@ -27,8 +27,12 @@
 - [x] `config`·`universe`·`main`을 통한 명시적 로컬 KRX PIT 원천 연결 구현.
   설정하지 않으면 proxy 기본 동작을 유지하고, 설정된 원천의 검증이 실패하면
   즉시 중단(fail closed)합니다.
-- [ ] 유효일이 포함된 KOSPI 200 역사 파일을 충분한 기간에 대해 확보하고,
-  로컬 원천을 운영 성과 근거에 연결된 true PIT 유니버스로 검증.
+- [x] 유효일이 포함된 KOSPI 200 역사 파일을 bundle-directory 경로로 검증 가능하게
+  연결하고, strict preflight가 유니버스 provenance와 per-date manifest identity를
+  fail closed로 검증하도록 구현.
+- [ ] 일부 역사 날짜의 200 미만 구성원은 documented transition exception 또는
+  원천 보정으로만 허용된다. 현재 strict probe에서는 2015-01-30이 198 구성원으로
+  남아 있어 다음 게이트다.
 - [ ] 원시 DART 제출/공시 메타데이터를 확보하고 재무 로더에서 정보 이용 가능일
   (filing availability)을 사용. 회계기간 표시는 제출일이 아닙니다.
 - [ ] 실제 자료에서 PIT 유니버스 및 제출일(filing-date) provenance 검증 완료.
@@ -123,24 +127,18 @@
 
 ## 남은 작업 / 다음 단계
 
-현재 구현의 다음 게이트는 KRX와 DART의 로컬 PIT 입력을 충분한 역사 범위로 확보하고
-검증하여 실제 WF 준비 경로에 연결하는 것입니다. KRX 인증 어댑터의 두 날짜 라이브
-스모크 테스트는 연결 계약의 확인이지, 역사적 유니버스에 대한 성과 근거가 아닙니다.
+현재 구현의 다음 게이트는 strict bundle 유니버스 경로를 통과한 뒤 DART 제출일
+provenance를 실제 자료로 연결하는 것입니다. KRX 인증 어댑터의 두 날짜 라이브 스모크
+테스트는 연결 계약의 확인이지, 역사적 유니버스에 대한 성과 근거가 아닙니다.
 원시 파일과 매니페스트는 로컬에서만 관리하고 커밋하지 않습니다.
 
-1. `src/k200_mq/data/krx_pit.py`로 필요한 리밸런싱 날짜의 KRX 스냅샷을 수집하고,
-   다중 날짜·원시 바이트 해시·타임스탬프·재로딩 검증을 통과시킨 뒤 명시적 로컬
-  원천 설정으로 유니버스 전체 기간을 재현합니다. strict 모드에서는
-  `LOCAL_PIT_UNIVERSE_PATH`와 `LOCAL_PIT_UNIVERSE_MANIFEST`가 필수입니다.
-  (`true-walkforward` 포함 각 CLI에서 `--local-pit-universe-path`,
-  `--local-pit-universe-source-kind`, `--local-pit-universe-manifest`로 주입 가능)
-  단일 파일+단일 매니페스트 방식은 strict 다중 날짜 계약에서
-  `verified acquisition tokens do not cover each date exactly once`로 거부되므로,
-  날짜별 identity를 갖는 매니페스트 체인(또는 interval 원천 계약)로 보강해야 합니다.
+1. 현재 bundle-directory strict 유니버스 경로의 documented transition exception 또는
+  원천 보정을 마무리해, `true-walkforward` strict preflight가 2015-01-30 같은 역사
+  예외를 명시적으로 수용하도록 정리합니다.
 2. 원시 DART 제출/공시(filing/publication) 메타데이터와 재무 사실을 API 또는 벌크 수집으로
    확보하고, 기존 로컬 OpenDART 계약 및 `(corp_code, rcept_no)` 조인에 맞춰
    품질 팩터에 연결합니다.
-3. 위 두 입력의 provenance가 실제 자료에서 확인된 뒤 `strict PIT WF`를 실행합니다.
+3. 위 입력의 provenance가 실제 자료에서 확인된 뒤 `strict PIT WF`를 실행합니다.
 4. strict PIT WF가 통과한 동일 게이트에서 PIT 민감도, 생존자 편향 비교, ADV 기반
    시장 영향, 계획된 스트레스 테스트를 순서대로 실행합니다.
 5. 결과 검토가 끝난 뒤에만 전략 검토, 릴리스 태그, 검증된 성과 해석을 수행합니다.

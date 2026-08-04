@@ -13,7 +13,7 @@
 | 검증된 PIT 근거 | 아직 없음. |
 | 현재 공식 진단 | v4 no-DART 모멘텀 전용 기계적 WF: 연결 수익률 +4.0408%, 최대 낙폭 -32.0408%, OOS 지점 1,231개. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | 충분한 기간의 역사적 KRX 구성원 입력과 제출일 기반 DART 재무 데이터. |
+| 다음 게이트 | bundle-directory 유니버스의 documented transition exception 정리와 제출일 기반 DART 재무 데이터. |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
@@ -45,6 +45,10 @@
   있습니다. CSV/JSON/Parquet/bytes 스냅샷 또는 명시적 유효일 구간을 정규화하지만,
   별도 수집 매니페스트가 공식 KRX 원천 메타데이터와 원시 바이트 SHA-256을 입증하기
   전에는 검증되지 않은 상태입니다.
+- bundle-directory strict 경로가 추가되어, 날짜별 sidecar manifest와 bundle manifest
+  identity를 이용해 다중 날짜 입력을 검증할 수 있습니다. 현재는 2015-01-30처럼
+  198 구성원 날짜가 남아 있는 역사 파일이 있어, `target_size=200`을 통과시키려면
+  documented transition exception 또는 원천 보정이 필요합니다.
 - 인증된 KRX 수집 어댑터가 `src/k200_mq/data/krx_pit.py`에 구현되어 있습니다.
   검증된 라이브 계약은
   `https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd`와
@@ -77,6 +81,9 @@
   `verified acquisition tokens do not cover each date exactly once`로 거부됩니다.
   따라서 strict 유니버스 완주에는 날짜별 identity가 있는 매니페스트 체인 또는
   동등한 interval provenance 계약이 추가로 필요합니다.
+  bundle-directory 경로를 실제로 연결한 뒤에는 일부 날짜(예: 2015-01-30)가
+  198 구성원으로 검증되어 `target_size=200`에서 멈춥니다. 이 경우는 documented
+  transition exception 또는 원천 정리 없이는 strict를 통과할 수 없습니다.
 - provenance 계약은 여러 스냅샷의 날짜별 범위, 원시 해시, 시간대가 있는 타임스탬프,
   행 수, 스냅샷 식별자, 매니페스트, 토큰 및 결합 후 정규화 프레임 fingerprint를
   재검증합니다. 여러 날짜를 하나의 해시나 하나의 매니페스트로 잘못 대표하지
@@ -200,15 +207,13 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 
 현재 다음 우선순위는 다음과 같습니다.
 
-1. `src/k200_mq/data/krx_pit.py`로 필요한 역사적 KOSPI 200 스냅샷을 확보하고,
-   날짜·원시 해시·타임스탬프·재로딩 검증을 통과시킨 뒤 명시적 로컬 원천으로
-   유니버스 전체 기간을 준비합니다. 이 경로를 설정하지 않으면 proxy 기본값을
-   유지합니다.
+1. bundle-directory 유니버스의 198 구성원 역사 날짜를 documented transition exception
+  또는 원천 보정으로 정리해 strict preflight를 통과시킵니다.
 2. 원시 DART 제출/공시 메타데이터와 재무 사실을 API 또는 벌크 수집으로 확보하고,
-   제출일을 안전한 거래 세션 가용일로 매핑하여 회계기간 날짜로 대체하지 않습니다.
+  제출일을 안전한 거래 세션 가용일로 매핑하여 회계기간 날짜로 대체하지 않습니다.
 3. 두 입력의 PIT provenance가 실제 자료에서 확인된 뒤 strict PIT WF를 다시 실행합니다.
 4. strict PIT WF가 통과한 뒤에만 PIT 민감도, 생존자 편향 비교, ADV 영향 및 유동성
-   제약, 계획된 스트레스 테스트를 실행합니다.
+  제약, 계획된 스트레스 테스트를 실행합니다.
 
 이 단계가 완료될 때까지 출력 수치는 기계적 진단으로만 취급합니다.
 
