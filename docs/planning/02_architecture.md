@@ -85,6 +85,7 @@ docs/planning/
     │
     ├── 6. 포트폴리오 구성: 동일 비중 또는 순위 가중
     │    ├─ 섹터 노출 한도: ENABLE_SECTOR_CAP + PIT 섹터 맵 조건에서만 적용
+    │    ├─ ADV 유동성 필터: ENABLE_ADV_FILTER + trailing ADV turnover 조건에서 적용
     │    └─ 상관관계 제약: ENABLE_CORRELATION_FILTER + trailing return 이력 조건에서 적용
     │
     └── 7. 일별: 시가평가, 활성 손절 확인(-15%), 일정에 따른 리밸런싱
@@ -207,7 +208,9 @@ class PortfolioRebalanceEngine:
 | `MOMENTUM_SKIP_DAYS` | 42 | 마지막 2개월 제외 |
 | `MAX_HOLDINGS` | 20 | 동시 보유 최대 종목 수 |
 | `WEIGHT_METHOD` | "equal" | "equal" 또는 "rank_weighted" |
-| `MIN_ADV_RATIO` | 0.01 | **미지원/보류** — 현재 엔진에 적용하지 않음 |
+| `MIN_ADV_RATIO` | 0.01 | `ENABLE_ADV_FILTER=True`에서 최소 ADV turnover 비율 임계값 |
+| `ADV_LOOKBACK_DAYS` | 20 | ADV turnover 계산에 사용하는 trailing 룩백 일수 |
+| `ENABLE_ADV_FILTER` | false | ADV turnover 기반 유동성 필터 적용 여부 |
 
 `MIN_CASH_RATIO`와 `MAX_HOLDINGS`는 현재 엔진에서 각각 최소 현금 버퍼와 동시
 보유 수 상한으로 적용됩니다. `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`,
@@ -216,10 +219,12 @@ class PortfolioRebalanceEngine:
 않습니다. `MOMENTUM_WINDOW_SHORT`는 진단용 표시만 계산하며 민감도 또는
 readiness/운영 파라미터로 취급하지 않습니다.
 
-`MIN_ADV_RATIO`는 현재 엔진 미구현 항목으로, CLI 플래그뿐 아니라 런타임 설정
-채널에서도 비기본값을 명시적으로 거부합니다. `src/k200_mq/data/sector_pit.py`
+`src/k200_mq/data/sector_pit.py`
 계약 레이어는 PIT 섹터 맵 정규화/검증과 as-of 스냅샷 생성을 제공하며, 실행 엔진은
 `ENABLE_SECTOR_CAP=True`에서 해당 준비 산출물의 검증/전체 커버리지를 요구합니다.
+ADV 유동성 필터는 준비 아티팩트 없이 엔진에서 계산되며, 리밸런싱 신호일까지의
+trailing ADV turnover(`volume*close/mcap`) 평균이 `MIN_ADV_RATIO` 이상인 후보만
+유지합니다.
 상관관계 제약은 준비 아티팩트 없이 엔진에서 계산되며, 리밸런싱 신호일까지의 close
 수익률 이력을 사용해 pairwise 상관계수를 계산한 뒤 greedy 방식으로 후보를
 제한합니다.

@@ -497,10 +497,30 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--min-adv-ratio",
-        action=_UnsupportedCLIOption,
-        nargs=0,
+        type=float,
         default=argparse.SUPPRESS,
-        help="[unsupported/deferred] ADV 유동성 비율은 현재 런타임에서 지원하지 않음",
+        help="ENABLE_ADV_FILTER 활성화 시 최소 ADV turnover 비율 (0.0 <= ratio <= 1.0)",
+    )
+    run_parser.add_argument(
+        "--adv-lookback-days",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="ENABLE_ADV_FILTER 활성화 시 ADV turnover 계산 trailing 룩백 일수 (기본 20)",
+    )
+    adv_group = run_parser.add_mutually_exclusive_group()
+    adv_group.add_argument(
+        "--enable-adv-filter",
+        dest="enable_adv_filter",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="ADV turnover 기반 유동성 필터 적용",
+    )
+    adv_group.add_argument(
+        "--disable-adv-filter",
+        dest="enable_adv_filter",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="ADV turnover 기반 유동성 필터 비활성화 (기본값)",
     )
 
     robustness_parser = sub.add_parser(
@@ -624,6 +644,9 @@ def _build_config(args: argparse.Namespace) -> Any:
         "max_holdings": "MAX_HOLDINGS",
         "sector_cap": "SECTOR_CAP",
         "enable_sector_cap": "ENABLE_SECTOR_CAP",
+        "min_adv_ratio": "MIN_ADV_RATIO",
+        "adv_lookback_days": "ADV_LOOKBACK_DAYS",
+        "enable_adv_filter": "ENABLE_ADV_FILTER",
         "max_pair_correlation": "MAX_PAIR_CORRELATION",
         "correlation_lookback_days": "CORRELATION_LOOKBACK_DAYS",
         "enable_correlation_filter": "ENABLE_CORRELATION_FILTER",
@@ -648,7 +671,7 @@ def _enforce_deferred_runtime_options(config: Any) -> None:
     """
     from k200_mq.config import K200MQConfig
 
-    deferred_fields = ("MIN_ADV_RATIO",)
+    deferred_fields: tuple[str, ...] = ()
     for field_name in deferred_fields:
         field_info = K200MQConfig.model_fields.get(field_name)
         if field_info is None:
@@ -693,13 +716,17 @@ def _print_config_summary(config: Any) -> None:
         f"(SECTOR_CAP={config.SECTOR_CAP:.2%})"
     )
     print(
+        f"  ADV 유동성 필터: {'활성' if config.ENABLE_ADV_FILTER else '비활성'} "
+        f"(MIN_ADV_RATIO={config.MIN_ADV_RATIO:.2%}, LOOKBACK={config.ADV_LOOKBACK_DAYS}d)"
+    )
+    print(
         f"  상관관계 제약: {'활성' if config.ENABLE_CORRELATION_FILTER else '비활성'} "
         f"(MAX_PAIR_CORRELATION={config.MAX_PAIR_CORRELATION:.2f}, "
         f"LOOKBACK={config.CORRELATION_LOOKBACK_DAYS}d)"
     )
     print(
-        "  미지원/deferred (미적용): MIN_ADV_RATIO, "
-        "UNIVERSE_SIZE, USE_52WEEK_HIGH, QUALITY_MIN_TTM_QUARTERS"
+        "  미지원/deferred (미적용): UNIVERSE_SIZE, USE_52WEEK_HIGH, "
+        "QUALITY_MIN_TTM_QUARTERS"
     )
     print(
         "  unsupported/inert (runtime consumer 없음): EXCLUDE_MANAGEMENT, "
@@ -1202,7 +1229,10 @@ def _build_run_manifest(
             f"{MOMENTUM_FORMULA_VERSION}: {MOMENTUM_FORMULA}; "
             f"default {MOMENTUM_FORMULA_DEFAULT}; ranking uses momentum_z"
         ),
-        "adv": "unsupported/deferred: MIN_ADV_RATIO is configured but not applied by the current engine",
+        "adv": (
+            "conditional: ENABLE_ADV_FILTER enforces MIN_ADV_RATIO on trailing "
+            "ADV turnover (volume*close/mcap)"
+        ),
         "sector_cap": (
             "conditional: ENABLE_SECTOR_CAP requires LOCAL_PIT_SECTOR_PATH and "
             "full sector coverage; otherwise sector cap is disabled"

@@ -148,7 +148,15 @@ class K200MQConfig(BacktestConfig):
     )
     MIN_ADV_RATIO: float = Field(
         default=0.01,
-        description="미지원/Deferred: 최소 유동성 비율 (현재 엔진에 적용하지 않음)",
+        description="ENABLE_ADV_FILTER=True일 때 적용되는 최소 ADV turnover 비율",
+    )
+    ENABLE_ADV_FILTER: bool = Field(
+        default=False,
+        description="리밸런싱 후보에 ADV turnover 기반 유동성 필터 적용 여부",
+    )
+    ADV_LOOKBACK_DAYS: int = Field(
+        default=20,
+        description="ADV turnover 계산에 사용하는 trailing 룩백 일수 (최소 5)",
     )
 
     # ── 모멘텀 팩터 ────────────────────────────────────────────
@@ -229,6 +237,15 @@ class K200MQConfig(BacktestConfig):
             raise ValueError(
                 "CORRELATION_LOOKBACK_DAYS must be at least 20 when "
                 "ENABLE_CORRELATION_FILTER=True"
+            )
+        if self.ENABLE_ADV_FILTER and not 0.0 <= self.MIN_ADV_RATIO <= 1.0:
+            raise ValueError(
+                "MIN_ADV_RATIO must satisfy 0.0 <= MIN_ADV_RATIO <= 1.0 when "
+                "ENABLE_ADV_FILTER=True"
+            )
+        if self.ENABLE_ADV_FILTER and self.ADV_LOOKBACK_DAYS < 5:
+            raise ValueError(
+                "ADV_LOOKBACK_DAYS must be at least 5 when ENABLE_ADV_FILTER=True"
             )
         return self
 

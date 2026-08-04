@@ -45,6 +45,7 @@ class MomentumQualityStrategy:
         factor_data: pd.DataFrame,
         universe: list[str],
         as_of: Any,
+        adv_ratio_by_ticker: Mapping[str, float] | None = None,
         pair_correlation_map: Mapping[tuple[str, str], float] | None = None,
     ) -> list[dict[str, Any]]:
         """리밸런싱 일자에 포트폴리오를 선택합니다.
@@ -72,6 +73,12 @@ class MomentumQualityStrategy:
         if eligible.empty:
             logger.warning("리밸런싱 %s: eligible 종목 없음", as_of)
             return []
+
+        if bool(getattr(self.config, "ENABLE_ADV_FILTER", False)):
+            eligible = self._apply_adv_filter(eligible, adv_ratio_by_ticker)
+            if eligible.empty:
+                logger.warning("리밸런싱 %s: ADV 필터 통과 종목 없음", as_of)
+                return []
 
         # 모멘텀 가중치 + 품질 가중치 = 복합 스코어
         w_mom = self.config.WEIGHT_MOMENTUM
@@ -131,6 +138,36 @@ class MomentumQualityStrategy:
         )
 
         return selected.to_dict(orient="records")
+
+    def _apply_adv_filter(
+        self,
+        eligible: pd.DataFrame,
+        adv_ratio_by_ticker: Mapping[str, float] | None,
+    ) -> pd.DataFrame:
+        """Filter eligible candidates by trailing ADV turnover ratio."""
+        if adv_ratio_by_ticker is None:
+            raise RuntimeError(
+                "ENABLE_ADV_FILTER requires precomputed ADV turnover ratios"
+            )
+
+        ratio_series = eligible["ticker"].map(
+            lambda ticker: adv_ratio_by_ticker.get(str(ticker))
+        )
+        if ratio_series.isna().any():
+            missing = sorted(
+                str(ticker)
+                for ticker in eligible.loc[ratio_series.isna(), "ticker"].unique()
+            )
+            raise RuntimeError(
+                "ENABLE_ADV_FILTER requires ADV turnover coverage for all eligible "
+                f"tickers; missing: {', '.join(missing)}"
+            )
+
+        eligible = eligible.copy()
+        eligible["adv_ratio"] = ratio_series.astype(float)
+        threshold = float(self.config.MIN_ADV_RATIO)
+        filtered = eligible[eligible["adv_ratio"] >= threshold].copy()
+        return filtered.drop(columns=["adv_ratio"])
 
     def _apply_correlation_filter(
         self,

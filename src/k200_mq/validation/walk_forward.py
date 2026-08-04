@@ -128,7 +128,7 @@ class CandidateSpec:
     """Immutable versioned candidate configuration.
 
     ``parameters`` contains only overrides with current runtime semantics.  It
-    intentionally excludes quality sub-weights, unsupported portfolio/liquidity
+    intentionally excludes quality sub-weights, non-runtime-safe
     settings, ``MAX_HOLDINGS`` and the short momentum window because those are
     not safe candidate dimensions here.
     """

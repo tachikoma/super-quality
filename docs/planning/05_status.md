@@ -81,6 +81,10 @@
   수익률 이력으로 pairwise 상관계수를 계산하고, `MAX_PAIR_CORRELATION` 및
   `CORRELATION_LOOKBACK_DAYS`를 사용해 고상관 페어를 greedy 방식으로 제한합니다.
   선택된 후보 쌍의 상관계수 커버리지가 불완전하면 즉시 중단(fail closed)합니다.
+- `ENABLE_ADV_FILTER=True`일 때는 엔진이 리밸런싱 신호일까지의 trailing ADV
+  turnover(`volume*close/mcap`) 평균을 계산하고, `MIN_ADV_RATIO` 및
+  `ADV_LOOKBACK_DAYS`를 사용해 저유동성 후보를 제외합니다. 선택 후보의 ADV
+  turnover 커버리지가 불완전하면 즉시 중단(fail closed)합니다.
 
 ## 기계적 비-PIT 진단
 
@@ -212,17 +216,16 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 ## 보류 또는 미지원 설정
 
 다음 설정은 호환성 필드 또는 향후 작업으로 남아 있으며 현재 민감도 차원이 아닙니다:
-`MIN_ADV_RATIO`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
+`UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
 `QUALITY_MIN_TTM_QUARTERS`, 그리고
 `EXCLUDE_MANAGEMENT`, `EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`,
 `EXCLUDE_ETF_ETN` 제외 플래그. `MOMENTUM_WINDOW_SHORT`는
 진단 전용입니다.
 
-ADV 계산은 도우미로 존재하지만 ADV 기반 유동성 및 시장 영향 실행은 연결되지
-않았습니다. `--no-cache`와 `--rebalance-lookback`은 명시적으로 미지원/보류이며
-거부됩니다. `MIN_ADV_RATIO`는 CLI 플래그뿐 아니라 런타임 설정 채널에서도
-비기본값을 명시적으로 거부합니다. `SECTOR_CAP`은 `ENABLE_SECTOR_CAP=True`와
+ADV 기반 시장 영향 실행은 연결되지 않았습니다. `--no-cache`와
+`--rebalance-lookback`은 명시적으로 미지원/보류이며 거부됩니다. `SECTOR_CAP`은 `ENABLE_SECTOR_CAP=True`와
 검증된 `LOCAL_PIT_SECTOR_PATH`의 전체 커버리지 조건에서만 활성화됩니다.
+ADV 유동성 필터는 `ENABLE_ADV_FILTER=True`일 때만 활성화됩니다.
 상관관계 제약은 `ENABLE_CORRELATION_FILTER=True`일 때만 활성화됩니다. 손절 플래그는 `run` 전용이고
 `true-walkforward`는 구성/기본값을 사용합니다.
 

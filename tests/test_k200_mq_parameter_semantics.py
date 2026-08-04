@@ -249,8 +249,6 @@ def test_inert_run_cli_options_are_rejected_instead_of_ignored() -> None:
         parser.parse_args(["run", "--no-cache"])
     with pytest.raises(SystemExit):
         parser.parse_args(["run", "--rebalance-lookback", "252"])
-    with pytest.raises(SystemExit):
-        parser.parse_args(["run", "--min-adv-ratio"])
 
 
 def test_true_walkforward_does_not_expose_run_only_stop_loss_flags() -> None:
@@ -445,6 +443,59 @@ def test_correlation_filter_reduces_highly_correlated_pairs() -> None:
     tickers = [row["ticker"] for row in selected]
 
     assert tickers == ["A", "C"]
+    assert sum(row["weight"] for row in selected) == pytest.approx(1.0)
+
+
+def test_adv_filter_requires_adv_coverage_when_enabled() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=2,
+            ENABLE_ADV_FILTER=True,
+            MIN_ADV_RATIO=0.02,
+            EXCLUDE_KOSPI_TOP_N=0,
+        )
+    )
+    factors = pd.DataFrame({
+        "ticker": ["A", "B"],
+        "momentum_z": [2.0, 1.0],
+        "quality_z": [2.0, 1.0],
+    })
+
+    with pytest.raises(RuntimeError, match="ADV turnover"):
+        strategy.select_portfolio(factors, ["A", "B"], pd.Timestamp("2024-01-31"))
+
+
+def test_adv_filter_excludes_low_turnover_names() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=3,
+            WEIGHT_METHOD="equal",
+            ENABLE_ADV_FILTER=True,
+            MIN_ADV_RATIO=0.02,
+            EXCLUDE_KOSPI_TOP_N=0,
+            MAX_POSITION_WEIGHT=1.0,
+        )
+    )
+    factors = pd.DataFrame({
+        "ticker": ["A", "B", "C"],
+        "momentum_z": [3.0, 2.0, 1.0],
+        "quality_z": [0.0, 0.0, 0.0],
+    })
+    adv_ratio_by_ticker = {
+        "A": 0.05,
+        "B": 0.03,
+        "C": 0.005,
+    }
+
+    selected = strategy.select_portfolio(
+        factors,
+        ["A", "B", "C"],
+        pd.Timestamp("2024-01-31"),
+        adv_ratio_by_ticker=adv_ratio_by_ticker,
+    )
+    tickers = [row["ticker"] for row in selected]
+
+    assert tickers == ["A", "B"]
     assert sum(row["weight"] for row in selected) == pytest.approx(1.0)
 
 

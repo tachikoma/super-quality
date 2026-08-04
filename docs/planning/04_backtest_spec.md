@@ -234,12 +234,14 @@ fingerprint에 포함되지 않으면 사용할 수 없습니다. 정확한 조�
 - 계획된 스트레스 테스트.
 
 다음 설정은 현재 미지원 또는 비활성으로 민감도 주장에서 제외합니다:
-`MIN_ADV_RATIO`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
+`UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
 `QUALITY_MIN_TTM_QUARTERS`, 그리고
 management/investment/preferred/ETF-ETN 제외 플래그. `MOMENTUM_WINDOW_SHORT`는
 진단 전용입니다. `SECTOR_CAP`은 `ENABLE_SECTOR_CAP=True`와 검증된
 `LOCAL_PIT_SECTOR_PATH` 전체 커버리지 조건에서만 활성화되며, 상관관계 제약은
 `ENABLE_CORRELATION_FILTER=True`에서 trailing 수익률 이력 기반으로 조건부 적용됩니다.
+ADV 유동성 필터는 `ENABLE_ADV_FILTER=True`에서 trailing ADV turnover
+(`volume*close/mcap`) 이력 기반으로 조건부 적용됩니다.
 
 ## 출력 산출물
 

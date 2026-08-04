@@ -32,7 +32,7 @@
 - [ ] 원시 DART 제출/공시 메타데이터를 확보하고 재무 로더에서 정보 이용 가능일
   (filing availability)을 사용. 회계기간 표시는 제출일이 아닙니다.
 - [ ] 실제 자료에서 PIT 유니버스 및 제출일(filing-date) provenance 검증 완료.
-- [ ] ADV 기반 시장 영향 모델 및 유동성 제약 구현.
+- [ ] ADV 기반 시장 영향 모델 구현.
 
 ## 2단계: 팩터
 
@@ -108,16 +108,18 @@
 ## 현재 보류 또는 미지원 설정
 
 다음 설정은 호환성 필드 또는 향후 작업으로 남아 있으며, 테스트한 민감도 차원으로
-제시해서는 안 됩니다: `MIN_ADV_RATIO`, `UNIVERSE_SIZE`,
+제시해서는 안 됩니다: `UNIVERSE_SIZE`,
 `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`, 그리고 `EXCLUDE_MANAGEMENT`,
 `EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`, `EXCLUDE_ETF_ETN` 제외 플래그.
 `MOMENTUM_WINDOW_SHORT`는 진단 전용입니다. `--no-cache`와
 `--rebalance-lookback`은 미지원/보류 항목으로 명시적으로 거부되며, 손절 CLI
-플래그는 `run`에만 있고 `true-walkforward`에는 없습니다. `MIN_ADV_RATIO`는 CLI뿐
-아니라 런타임 설정 채널에서도 비기본값을 명시적으로 거부합니다. `SECTOR_CAP`은
+플래그는 `run`에만 있고 `true-walkforward`에는 없습니다. `SECTOR_CAP`은
 `ENABLE_SECTOR_CAP=True`와 `LOCAL_PIT_SECTOR_PATH`의 검증/전체 커버리지 조건에서만
-실행됩니다. 상관관계 제약은 `ENABLE_CORRELATION_FILTER=True`일 때만 활성화되며,
-리밸런싱 신호일까지의 close 수익률 이력으로 계산된 pairwise 상관계수를 사용합니다.
+실행됩니다. ADV 유동성 필터는 `ENABLE_ADV_FILTER=True`일 때만 활성화되며,
+리밸런싱 신호일까지의 trailing ADV turnover(`volume*close/mcap`) 평균이
+`MIN_ADV_RATIO` 이상인 후보만 유지합니다. 상관관계 제약은
+`ENABLE_CORRELATION_FILTER=True`일 때만 활성화되며, 리밸런싱 신호일까지의 close
+수익률 이력으로 계산된 pairwise 상관계수를 사용합니다.
 
 ## 남은 작업 / 다음 단계
 

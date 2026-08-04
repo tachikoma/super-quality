@@ -392,9 +392,22 @@ class PortfolioRebalanceEngine:
         else:
             factor_at_date = factor_data
 
+        universe_set = {str(ticker) for ticker in universe}
+        adv_ratio_by_ticker: dict[str, float] | None = None
+        if bool(getattr(self.config, "ENABLE_ADV_FILTER", False)):
+            candidate_tickers = {
+                str(ticker)
+                for ticker in factor_at_date["ticker"].dropna().tolist()
+                if str(ticker) in universe_set
+            }
+            adv_ratio_by_ticker = self._build_adv_ratio_map(
+                price_data=price_data,
+                signal_date=signal_date,
+                tickers=candidate_tickers,
+            )
+
         pair_correlation_map: dict[tuple[str, str], float] | None = None
         if bool(getattr(self.config, "ENABLE_CORRELATION_FILTER", False)):
-            universe_set = {str(ticker) for ticker in universe}
             candidate_tickers = {
                 str(ticker)
                 for ticker in factor_at_date["ticker"].dropna().tolist()
@@ -410,6 +423,7 @@ class PortfolioRebalanceEngine:
             factor_data=factor_at_date,
             universe=universe,
             as_of=signal_date,
+            adv_ratio_by_ticker=adv_ratio_by_ticker,
             pair_correlation_map=pair_correlation_map,
         )
         return {
@@ -417,6 +431,56 @@ class PortfolioRebalanceEngine:
             "selected": selected,
             "regime_scale": self._regime_scale(regime_scale_map, signal_date),
         }
+
+    def _build_adv_ratio_map(
+        self,
+        price_data: pd.DataFrame,
+        signal_date: pd.Timestamp,
+        tickers: set[str],
+    ) -> dict[str, float]:
+        """Build trailing ADV turnover ratios (volume*close/mcap) by ticker."""
+        if not tickers:
+            return {}
+        if price_data.empty or not isinstance(price_data.index, pd.MultiIndex):
+            return {}
+        if "ticker" not in price_data.index.names:
+            return {}
+
+        lookback_days = int(getattr(self.config, "ADV_LOOKBACK_DAYS", 20))
+        ratio_map: dict[str, float] = {}
+        min_history = max(5, min(lookback_days, 10))
+
+        for ticker in sorted(tickers):
+            try:
+                history = price_data.loc[(ticker, slice(None)), ["volume", "close", "mcap"]].copy()
+            except KeyError:
+                continue
+            if history.empty:
+                continue
+
+            history = history.reset_index().sort_values("date")
+            history = history[history["date"] <= signal_date]
+            if history.empty:
+                continue
+            history = history.tail(lookback_days)
+            if len(history) < min_history:
+                continue
+
+            mcap = history["mcap"].astype(float)
+            valid = mcap > 0
+            if valid.sum() < min_history:
+                continue
+
+            turnover = (
+                history.loc[valid, "volume"].astype(float)
+                * history.loc[valid, "close"].astype(float)
+            ) / mcap.loc[valid]
+            turnover = turnover.replace([float("inf"), float("-inf")], pd.NA).dropna()
+            if len(turnover) < min_history:
+                continue
+            ratio_map[str(ticker)] = float(turnover.mean())
+
+        return ratio_map
 
     def _build_pair_correlation_map(
         self,

@@ -649,7 +649,6 @@ def test_strict_preparation_cannot_be_disabled_by_candidate() -> None:
         "REGIME_MA_PERIOD",
         "REGIME_REDUCTION",
         "SECTOR_CAP",
-        "MIN_ADV_RATIO",
         "MIN_CASH_RATIO",
         "USE_52WEEK_HIGH",
         "MAX_HOLDINGS",
@@ -661,6 +660,65 @@ def test_candidate_overrides_requiring_recomputation_are_rejected(field: str) ->
 
     with pytest.raises(ValueError, match=field):
         execute_engine_interval(prepared, CandidateSpec("UNSAFE", {field: 7}))
+
+
+def test_candidate_allows_adv_filter_runtime_overrides() -> None:
+    prepared = _prepared_inputs()
+
+    result = execute_engine_interval(
+        prepared,
+        CandidateSpec(
+            "ADV_RUNTIME",
+            {
+                "TOP_N": 1,
+                "ENABLE_ADV_FILTER": True,
+                "MIN_ADV_RATIO": 0.0,
+                "ADV_LOOKBACK_DAYS": 5,
+            },
+        ),
+        measured_start=pd.Timestamp("2024-01-02"),
+        measured_end=pd.Timestamp("2024-01-09"),
+        active_trading_start=pd.Timestamp("2024-01-08"),
+    )
+
+    assert not result["portfolio_snapshots"].empty
+
+
+def test_adv_filter_fails_closed_on_missing_turnover_coverage() -> None:
+    base = _prepared_inputs()
+    price_data = base.price_data.copy(deep=True)
+    # Remove mcap signal for one name so turnover cannot be validated.
+    b_dates = price_data.loc[("B", slice(None)), :].index.get_level_values("date")
+    for current_date in b_dates:
+        price_data.loc[("B", current_date), "mcap"] = 0.0
+
+    prepared = PreparedK200MQInputs(
+        price_data=price_data,
+        factor_data=base.factor_data,
+        index_data=base.index_data,
+        universe_history=pd.DataFrame([
+            {"as_of": pd.Timestamp("2024-01-04"), "ticker": "A"},
+            {"as_of": pd.Timestamp("2024-01-04"), "ticker": "B"},
+            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "A"},
+            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "B"},
+        ]),
+        regime_scale_map=base.regime_scale_map,
+        runtime_config=base.runtime_config.model_copy(update={
+            "TOP_N": 2,
+            "ENABLE_ADV_FILTER": True,
+            "MIN_ADV_RATIO": 0.01,
+            "ADV_LOOKBACK_DAYS": 5,
+        }),
+    )
+
+    with pytest.raises(RuntimeError, match="ADV turnover coverage"):
+        execute_engine_interval(
+            prepared,
+            CandidateSpec("ADV_FAIL", {"TOP_N": 2}),
+            measured_start=pd.Timestamp("2024-01-02"),
+            measured_end=pd.Timestamp("2024-01-09"),
+            active_trading_start=pd.Timestamp("2024-01-04"),
+        )
 
 
 def test_ranking_metadata_is_explicitly_non_pit_in_manifest() -> None:
