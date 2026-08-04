@@ -244,6 +244,11 @@ uv run python -m k200_mq.main true-walkforward \\
   --output-dir data/raw/dart_batch
 
 /Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/build_local_dart_aggregates.py \
+  --input-dir data/raw/dart_batch \
+  --output-dir data/raw/dart_merged
+
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
   scripts/fetch_local_dart_response.py \
   --kind filing \
   --api-key "$DART_API_KEY" \
@@ -286,6 +291,8 @@ uv run python -m k200_mq.main true-walkforward \\
 # 있습니다.
 # batch spec은 generate_dart_fetch_batch_spec.py로 corp_code/연도 범위에서
 # 자동 생성할 수 있습니다.
+# build_local_dart_aggregates.py는 batch 수집 결과를 strict 입력에 바로 연결할
+# 수 있는 merged filing/facts CSV + manifest로 정리합니다.
 # 다음 실제 작업은 이 helper로 수집한 파일을 historical corp/date 범위로
 # 넓혀서 strict true-walkforward에 넣는 것입니다.
 
