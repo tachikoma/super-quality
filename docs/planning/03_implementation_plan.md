@@ -39,6 +39,9 @@
 - [x] raw DART response를 canonical CSV + manifest로 패키징하는 helper
   (`scripts/build_local_dart_bundle.py`)를 추가하여 실제 수집물을 strict 입력으로
   정리할 수 있게 구현.
+- [x] OpenDART raw response를 파일+매니페스트로 저장하는 fetch helper
+  (`scripts/fetch_local_dart_response.py`)를 추가하여 실제 수집을 시작할 수 있게
+  구현.
 - [ ] 원시 DART 제출/공시 메타데이터의 역사 범위를 더 넓혀 실제 자료에서 PIT
   유니버스 및 제출일(filing-date) provenance를 검증 완료.
 - [ ] ADV 기반 시장 영향 모델 구현.

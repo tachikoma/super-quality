@@ -227,6 +227,27 @@ uv run python -m k200_mq.main true-walkforward \\
 
 # 로컬 DART 원시 응답을 canonical CSV + manifest로 묶기
 /Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/fetch_local_dart_response.py \
+  --kind filing \
+  --api-key "$DART_API_KEY" \
+  --output-file data/raw/dart_filings.json \
+  --manifest-file data/raw/dart_filings.json.manifest.json \
+  --request-param corp_code=00123456 \
+  --request-param bgn_de=20150101 \
+  --request-param end_de=20241231
+
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
+  scripts/fetch_local_dart_response.py \
+  --kind financial \
+  --api-key "$DART_API_KEY" \
+  --output-file data/raw/dart_facts.json \
+  --manifest-file data/raw/dart_facts.json.manifest.json \
+  --request-param corp_code=00123456 \
+  --request-param bsns_year=2023 \
+  --request-param reprt_code=11011 \
+  --request-param fs_div=CFS
+
+/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
   scripts/build_local_dart_bundle.py \
   --kind filing \
   --input-file data/raw/dart_filings.json \
@@ -241,6 +262,11 @@ uv run python -m k200_mq.main true-walkforward \\
   --input-manifest data/raw/dart_facts.json.manifest.json \
   --output-file data/raw/dart_facts.canonical.csv \
   --manifest-file data/raw/dart_facts.canonical.manifest.json
+
+# 위 fetch helper는 OpenDART 응답을 raw bytes로 저장하고, manifest의 해시를
+# 저장소 내부 계약에 맞게 정리합니다.
+# 다음 실제 작업은 이 helper로 수집한 파일을 historical corp/date 범위로
+# 넓혀서 strict true-walkforward에 넣는 것입니다.
 
 # 주의: 위 스크립트는 입력 파일 형식을 맞추는 도구이며, PIT provenance의 사실성을 자동 보증하지 않습니다.
 # 주의: `--source-is-krx`는 실제 원천이 KRX임을 확인할 때만 사용해야 합니다.
