@@ -443,15 +443,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--sector-cap",
-        type=float,
+        action=_UnsupportedCLIOption,
+        nargs=0,
         default=argparse.SUPPRESS,
-        help="[unsupported/deferred] 섹터별 최대 노출 (현재 엔진에 적용하지 않음)",
+        help="[unsupported/deferred] 섹터별 최대 노출은 현재 런타임에서 지원하지 않음",
     )
     run_parser.add_argument(
         "--min-adv-ratio",
-        type=float,
+        action=_UnsupportedCLIOption,
+        nargs=0,
         default=argparse.SUPPRESS,
-        help="[unsupported/deferred] ADV 대비 최소 유동성 비율 (현재 엔진에 적용하지 않음)",
+        help="[unsupported/deferred] ADV 유동성 비율은 현재 런타임에서 지원하지 않음",
     )
 
     robustness_parser = sub.add_parser(
@@ -573,8 +575,6 @@ def _build_config(args: argparse.Namespace) -> Any:
         "stop_loss": "SL_STOP_LOSS",
         "enable_stop_loss": "ENABLE_STOP_LOSS",
         "max_holdings": "MAX_HOLDINGS",
-        "sector_cap": "SECTOR_CAP",
-        "min_adv_ratio": "MIN_ADV_RATIO",
         "output": "OUTPUT_DIR",
     }
     for argument_name, config_name in explicit_options.items():

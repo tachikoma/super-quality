@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from k200_mq import main as main_module
 from k200_mq.backtest import portfolio_engine
@@ -28,7 +29,7 @@ def test_run_cli_uses_documented_output_default_and_preserves_env(monkeypatch) -
     assert env_config.OUTPUT_DIR == "configured-output"
 
 
-def test_run_cli_passes_portfolio_and_liquidity_settings_to_config() -> None:
+def test_run_cli_passes_supported_portfolio_settings_to_config() -> None:
     parser = main_module._build_parser()
     args = parser.parse_args([
         "run",
@@ -36,21 +37,28 @@ def test_run_cli_passes_portfolio_and_liquidity_settings_to_config() -> None:
         "--end", "2024-12-31",
         "--top-n", "12",
         "--max-holdings", "8",
-        "--sector-cap", "0.22",
-        "--min-adv-ratio", "0.04",
     ])
 
     config = main_module._build_config(args)
 
     assert config.TOP_N == 12
     assert config.MAX_HOLDINGS == 8
-    assert config.SECTOR_CAP == 0.22
-    assert config.MIN_ADV_RATIO == 0.04
+    assert config.SECTOR_CAP == 0.30
+    assert config.MIN_ADV_RATIO == 0.01
 
     manifest = main_module._build_run_manifest(config)
     assert manifest["config"]["MAX_HOLDINGS"] == 8
-    assert manifest["config"]["SECTOR_CAP"] == 0.22
-    assert manifest["config"]["MIN_ADV_RATIO"] == 0.04
+    assert manifest["config"]["SECTOR_CAP"] == 0.30
+    assert manifest["config"]["MIN_ADV_RATIO"] == 0.01
+
+
+def test_run_cli_rejects_deferred_liquidity_and_sector_options() -> None:
+    parser = main_module._build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run", "--sector-cap"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run", "--min-adv-ratio"])
 
 
 def test_disabled_regime_filter_skips_scaling_and_reports_manifest_status(

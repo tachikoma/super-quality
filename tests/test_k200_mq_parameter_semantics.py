@@ -249,6 +249,10 @@ def test_inert_run_cli_options_are_rejected_instead_of_ignored() -> None:
         parser.parse_args(["run", "--no-cache"])
     with pytest.raises(SystemExit):
         parser.parse_args(["run", "--rebalance-lookback", "252"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run", "--sector-cap"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run", "--min-adv-ratio"])
 
 
 def test_true_walkforward_does_not_expose_run_only_stop_loss_flags() -> None:

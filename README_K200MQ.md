@@ -247,8 +247,8 @@ metadata를 확보하고, 그 공시일을 재무 데이터 가용일로 사용�
 | `--no-cache` | — | **unsupported/deferred** — 사용 시 명확히 거부 |
 | `--rebalance-lookback` | — | **unsupported/deferred** — 사용 시 명확히 거부 |
 | `--max-holdings` | 20 | 최대 동시 보유 종목 수 |
-| `--sector-cap` | 0.30 | **unsupported/deferred** — 현재 엔진에 적용하지 않음 |
-| `--min-adv-ratio` | 0.01 | **unsupported/deferred** — 현재 엔진에 적용하지 않음 |
+| `--sector-cap` | 0.30 | **unsupported/deferred** — 사용 시 명확히 거부 |
+| `--min-adv-ratio` | 0.01 | **unsupported/deferred** — 사용 시 명확히 거부 |
 | `UNIVERSE_SIZE` | 200 | **unsupported/deferred** — 현재 유니버스 로더가 소비하지 않음 |
 | `--strict-pit` | false | PIT 유니버스·filing-date 재무 데이터가 없으면 중단 |
 
