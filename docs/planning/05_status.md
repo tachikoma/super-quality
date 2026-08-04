@@ -97,6 +97,10 @@
   manifest와 함께 받아들입니다. API 키가 없어도 검증된 로컬 DART 파일로
   filing-date provenance를 세울 수 있지만, 역사 범위가 더 넓어야 검증된 PIT
   근거로 승격할 수 있습니다.
+- 2026-08-04 기준, local DART facts의 `period_end` 보정은 로더 정규화 단계에서
+  수행되도록 이동되었습니다. 준비 단계 이후 DataFrame 변형으로 lineage fingerprint가
+  깨지던 문제가 제거되어, session-bounded pilot quick check에서는
+  `pit_filing_date`/`pit_valid=true`를 확인했습니다.
 - raw DART 응답을 canonical CSV + manifest로 정리하는 helper가 추가되어,
   로컬 수집 결과를 strict 입력으로 빠르게 패키징할 수 있습니다.
 - OpenDART raw response를 raw bytes와 sanitized manifest로 저장하는 fetch helper도
@@ -196,6 +200,11 @@ DART_API_KEY="" uv run python -m k200_mq.main true-walkforward \
 strict 모드 `true-walkforward`는 더 이상 옵션 자체를 사전 거부하지 않습니다.
 대신 실행 전 prepared 입력의 유니버스/재무 provenance를 strict preflight로
 검증하며, validator-backed PIT 계약이 불충분하면 즉시 중단(fail closed)합니다.
+현재 local DART session-bounded pilot에서는 재무 provenance preflight가
+`non_pit_fiscal_period`에서 벗어났고, 2026-08-04 strict true-walkforward 실행은
+산출물 저장까지 완료되었습니다(분류는 여전히
+`mechanical_expanding_walk_forward_non_pit`). 남은 병목은 유니버스 경계와
+역사 범위 확대입니다.
 
 구성원 importer는 구조적 후보 계약을 정의합니다: `index_code`, `as_of_date` 또는
 `effective_date`, `security_code`. 원천 메타데이터는 존재할 때 정규화하지만 원시

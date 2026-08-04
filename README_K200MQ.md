@@ -371,8 +371,9 @@ fallback은 **`mcap_proxy`**입니다. 둘 다 PIT(point-in-time) 유니버스�
 이 날짜 키는 PIT 복원을 보장하지 않는 **as-of-keyed proxy cache**일 뿐이며,
 구조화된 source/effective-date contract/fingerprint가 없는 레거시 캐시는
 **`legacy_proxy_unknown`**으로 분류합니다.
-현재 정규화된 DART 재무 데이터도 공시일을 보존하지 않으므로 품질 데이터
-모드는 **`non_pit_fiscal_period`**입니다.
+기본 경로의 정규화 DART 재무 데이터는 여전히 비-PIT일 수 있습니다. 다만
+검증된 로컬 DART filing/facts 파일과 sidecar manifest를 strict 입력으로 연결하면
+품질 데이터 모드는 **`pit_filing_date`**로 승격될 수 있습니다.
 
 검증 가능한 실행이 필요하면 다음처럼 strict 모드를 사용합니다.
 
