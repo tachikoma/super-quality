@@ -567,6 +567,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="리밸런싱 주기: M(월간) 또는 Q(분기)",
     )
     robustness_parser.add_argument(
+        "--exclude-kospi-top-n",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="모멘텀에서 제외할 KOSPI 상위 N개 (strict 권장: 0)",
+    )
+    robustness_parser.add_argument(
         "--strict-pit",
         action="store_true",
         default=argparse.SUPPRESS,
@@ -614,6 +620,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="결과 출력 디렉토리 (기본값: outputs_k200mq)",
     )
     true_walkforward_parser.add_argument(
+        "--exclude-kospi-top-n",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="모멘텀에서 제외할 KOSPI 상위 N개 (strict 권장: 0)",
+    )
+    true_walkforward_parser.add_argument(
         "--strict-pit",
         action="store_true",
         default=argparse.SUPPRESS,
@@ -651,6 +663,8 @@ def _build_config(args: argparse.Namespace) -> Any:
             config_kwargs["TOP_N"] = args.top_n
         if hasattr(args, "rebalance_freq"):
             config_kwargs["REBALANCE_FREQ"] = args.rebalance_freq
+        if hasattr(args, "exclude_kospi_top_n"):
+            config_kwargs["EXCLUDE_KOSPI_TOP_N"] = args.exclude_kospi_top_n
         if getattr(args, "strict_pit", False):
             config_kwargs["STRICT_PIT_VALIDATION"] = True
         if hasattr(args, "dart_api_key") and args.dart_api_key:
@@ -676,6 +690,8 @@ def _build_config(args: argparse.Namespace) -> Any:
         }
         if hasattr(args, "output"):
             config_kwargs["OUTPUT_DIR"] = args.output
+        if hasattr(args, "exclude_kospi_top_n"):
+            config_kwargs["EXCLUDE_KOSPI_TOP_N"] = args.exclude_kospi_top_n
         if getattr(args, "strict_pit", False):
             config_kwargs["STRICT_PIT_VALIDATION"] = True
         if hasattr(args, "dart_api_key") and args.dart_api_key:

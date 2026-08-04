@@ -77,6 +77,7 @@ def test_true_walkforward_cli_wires_strict_local_pit_options_to_config() -> None
     args = parser.parse_args([
         "true-walkforward",
         "--strict-pit",
+        "--exclude-kospi-top-n", "0",
         "--local-pit-universe-path", "local_universe.csv",
         "--local-pit-universe-source-kind", "intervals",
         "--local-pit-universe-manifest", "local_universe.manifest.json",
@@ -86,6 +87,7 @@ def test_true_walkforward_cli_wires_strict_local_pit_options_to_config() -> None
     config = main_module._build_config(args)
 
     assert config.STRICT_PIT_VALIDATION is True
+    assert config.EXCLUDE_KOSPI_TOP_N == 0
     assert config.LOCAL_PIT_UNIVERSE_PATH == "local_universe.csv"
     assert config.LOCAL_PIT_UNIVERSE_SOURCE_KIND == "intervals"
     assert config.LOCAL_PIT_UNIVERSE_MANIFEST == "local_universe.manifest.json"

@@ -167,6 +167,7 @@ DART_API_KEY="" uv run python -m k200_mq.main true-walkforward --output /tmp/k20
 # strict PIT preflight 예시 (로컬 PIT 유니버스 원천/매니페스트 필수)
 uv run python -m k200_mq.main true-walkforward \
   --strict-pit \
+  --exclude-kospi-top-n 0 \
   --local-pit-universe-path data/universe/kospi200/history.csv \
   --local-pit-universe-source-kind intervals \
   --local-pit-universe-manifest data/universe/kospi200/history.manifest.json \
@@ -271,6 +272,7 @@ metadata를 확보하고, 그 공시일을 재무 데이터 가용일로 사용�
 | `--enable-adv-filter` / `--disable-adv-filter` | disabled | ADV 유동성 필터 on/off |
 | `UNIVERSE_SIZE` | 200 | **unsupported/deferred** — 현재 유니버스 로더가 소비하지 않음 |
 | `--strict-pit` | false | PIT 유니버스·filing-date 재무 데이터가 없으면 중단 |
+| `--exclude-kospi-top-n` | 50 | 모멘텀에서 제외할 KOSPI 상위 N개 (strict 권장: `0`) |
 | `--local-pit-universe-path` | "" | 로컬 PIT 유니버스 파일 경로 (strict 모드에서는 필수) |
 | `--local-pit-universe-source-kind` | "" | 로컬 PIT 유니버스 형식 (`snapshots` 또는 `intervals`) |
 | `--local-pit-universe-manifest` | "" | 로컬 PIT 유니버스 수집 매니페스트 경로 (strict 모드에서는 필수) |

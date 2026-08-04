@@ -66,6 +66,9 @@
   이 입력은 `run`/`robustness`/`true-walkforward` CLI에서
   `--local-pit-universe-path`, `--local-pit-universe-source-kind`,
   `--local-pit-universe-manifest`로 직접 전달할 수 있습니다.
+  또한 strict 실행에서 `EXCLUDE_KOSPI_TOP_N`은 PIT rank 근거가 없으면 거부되므로,
+  `true-walkforward`/`robustness` CLI에서는 `--exclude-kospi-top-n 0`로
+  명시적으로 비활성화할 수 있습니다.
 - provenance 계약은 여러 스냅샷의 날짜별 범위, 원시 해시, 시간대가 있는 타임스탬프,
   행 수, 스냅샷 식별자, 매니페스트, 토큰 및 결합 후 정규화 프레임 fingerprint를
   재검증합니다. 여러 날짜를 하나의 해시나 하나의 매니페스트로 잘못 대표하지
