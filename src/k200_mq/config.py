@@ -49,7 +49,7 @@ class BacktestConfig(BaseSettings):
     )
     MAX_HOLDINGS: int = Field(
         default=20,
-        description="미지원/Deferred: 동시 보유 최대 종목 수 (현재 엔진에 적용하지 않음)",
+        description="동시 보유 최대 종목 수 (0보다 큰 정수)",
     )
 
     # ── 비용 ─────────────────────────────────────────────────
@@ -202,6 +202,15 @@ class K200MQConfig(BacktestConfig):
             raise ValueError("quality component weights must have a positive sum")
         return self
 
+    @model_validator(mode="after")
+    def validate_portfolio_limits(self) -> "K200MQConfig":
+        """Validate portfolio limits consumed by strategy and engine."""
+        if self.MAX_HOLDINGS < 1:
+            raise ValueError("MAX_HOLDINGS must be at least 1")
+        if not 0.0 <= self.MIN_CASH_RATIO <= 1.0:
+            raise ValueError("MIN_CASH_RATIO must satisfy 0.0 <= MIN_CASH_RATIO <= 1.0")
+        return self
+
     # ── 리짓 필터 ──────────────────────────────────────────────
     REGIME_FILTER_ENABLED: bool = Field(
         default=True,
@@ -244,7 +253,7 @@ class K200MQConfig(BacktestConfig):
     )
     MIN_CASH_RATIO: float = Field(
         default=0.05,
-        description="미지원/Deferred: 최소 현금 버퍼 (현재 엔진에 적용하지 않음)",
+        description="최소 현금 버퍼 비율 (0.0 이상 1.0 이하)",
     )
     MAX_POSITION_WEIGHT: float = Field(
         default=0.10,

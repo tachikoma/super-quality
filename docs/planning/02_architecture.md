@@ -199,16 +199,16 @@ class PortfolioRebalanceEngine:
 | `MOMENTUM_WINDOW_LONG` | 252 | skipped return v4 순위 특성: `close[t-42] / close[t-252] - 1` (기본) |
 | `MOMENTUM_WINDOW_SHORT` | 126 | **진단 전용** `momentum_6m` 표시; 순위/readiness/민감도에 사용하지 않음 |
 | `MOMENTUM_SKIP_DAYS` | 42 | 마지막 2개월 제외 |
-| `MAX_HOLDINGS` | 20 | **미지원/보류** — 현재 엔진에 적용하지 않음 |
+| `MAX_HOLDINGS` | 20 | 동시 보유 최대 종목 수 |
 | `WEIGHT_METHOD` | "equal" | "equal" 또는 "rank_weighted" |
 | `MIN_ADV_RATIO` | 0.01 | **미지원/보류** — 현재 엔진에 적용하지 않음 |
 
-`MIN_CASH_RATIO`, `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`도 현재 구성에
-남아 있지만 각각 현금 버퍼, 52주 고점 순위 보조 신호, TTM 분기 필터를 구현하지
-않습니다. `MAX_HOLDINGS`도 동시 보유 수를 제한하지 않습니다. `UNIVERSE_SIZE`도
-현재 유니버스 로더가 실행 중 이 값을 참조하지 않습니다. 이 값들은 민감도 후보로
-사용하지 않습니다. `MOMENTUM_WINDOW_SHORT`는 진단용 표시만 계산하며 민감도
-또는 readiness/운영 파라미터로 취급하지 않습니다.
+`MIN_CASH_RATIO`와 `MAX_HOLDINGS`는 현재 엔진에서 각각 최소 현금 버퍼와 동시
+보유 수 상한으로 적용됩니다. `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`,
+`UNIVERSE_SIZE`는 현재 구성에 남아 있지만 52주 고점 보조 신호, TTM 분기 필터,
+유니버스 크기 제어를 아직 구현하지 않습니다. 이 값들은 민감도 후보로 사용하지
+않습니다. `MOMENTUM_WINDOW_SHORT`는 진단용 표시만 계산하며 민감도 또는
+readiness/운영 파라미터로 취급하지 않습니다.
 
 `--enable-stop-loss`, `--disable-stop-loss`, `--stop-loss`는 `run` 명령의 CLI
 override에만 노출됩니다. `true-walkforward`는 이 플래그들을 노출하지 않고

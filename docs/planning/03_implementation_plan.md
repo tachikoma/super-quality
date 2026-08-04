@@ -1,6 +1,6 @@
 # 구현 계획 - KOSPI 200 모멘텀 + 품질
 
-2026-08-03 기준. 이 계획은 전략이 검증된 성과를 냈다는 주장이 아니라 현재 구현
+2026-08-04 기준. 이 계획은 전략이 검증된 성과를 냈다는 주장이 아니라 현재 구현
 범위를 기록합니다.
 
 범례: `[x]` 현재 코드/테스트로 구현 및 확인됨, `[ ]` 보류·연기되었거나 PIT 성과
@@ -56,8 +56,9 @@
 - [x] 현금 및 목표 비중 변경을 엔진 전체에 올바르게 전파.
 - [x] 체결에 설정된 명시적 수수료, 매도세, 슬리피지 적용.
 - [x] 전략·엔진·통합 테스트 추가.
-- [ ] 섹터 한도, MAX_HOLDINGS, MIN_CASH_RATIO, 상관관계 제약 구현. 현재는
-  미지원/보류 상태입니다.
+- [x] `MAX_HOLDINGS` 동시 보유 상한 및 `MIN_CASH_RATIO` 최소 현금 버퍼를
+  전략/엔진에 반영.
+- [ ] 섹터 한도 및 상관관계 제약 구현. 현재는 미지원/보류 상태입니다.
 
 ## 4단계: 통합과 검증
 
@@ -99,13 +100,12 @@
 ## 현재 보류 또는 미지원 설정
 
 다음 설정은 호환성 필드 또는 향후 작업으로 남아 있으며, 테스트한 민감도 차원으로
-제시해서는 안 됩니다: `SECTOR_CAP`, `MIN_ADV_RATIO`, `MIN_CASH_RATIO`,
-`MAX_HOLDINGS`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`,
-그리고 `EXCLUDE_MANAGEMENT`, `EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`,
-`EXCLUDE_ETF_ETN` 제외 플래그. `MOMENTUM_WINDOW_SHORT`는
-진단 전용입니다. `--no-cache`와 `--rebalance-lookback`은 미지원/보류 항목으로
-명시적으로 거부되며, 손절 CLI 플래그는 `run`에만 있고 `true-walkforward`에는
-없습니다.
+제시해서는 안 됩니다: `SECTOR_CAP`, `MIN_ADV_RATIO`, `UNIVERSE_SIZE`,
+`USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`, 그리고 `EXCLUDE_MANAGEMENT`,
+`EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`, `EXCLUDE_ETF_ETN` 제외 플래그.
+`MOMENTUM_WINDOW_SHORT`는 진단 전용입니다. `--no-cache`와
+`--rebalance-lookback`은 미지원/보류 항목으로 명시적으로 거부되며, 손절 CLI
+플래그는 `run`에만 있고 `true-walkforward`에는 없습니다.
 
 ## 남은 작업 / 다음 단계
 

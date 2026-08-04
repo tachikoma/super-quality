@@ -234,8 +234,8 @@ fingerprint에 포함되지 않으면 사용할 수 없습니다. 정확한 조�
 - 계획된 스트레스 테스트.
 
 다음 설정은 현재 미지원 또는 비활성으로 민감도 주장에서 제외합니다:
-`SECTOR_CAP`, `MIN_ADV_RATIO`, `MIN_CASH_RATIO`, `MAX_HOLDINGS`, `UNIVERSE_SIZE`,
-`USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`, 그리고
+`SECTOR_CAP`, `MIN_ADV_RATIO`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
+`QUALITY_MIN_TTM_QUARTERS`, 그리고
 management/investment/preferred/ETF-ETN 제외 플래그. `MOMENTUM_WINDOW_SHORT`는
 진단 전용입니다.
 

@@ -439,7 +439,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-holdings",
         type=int,
         default=argparse.SUPPRESS,
-        help="[unsupported/deferred] 최대 동시 보유 종목 수 (현재 엔진에 적용하지 않음)",
+        help="최대 동시 보유 종목 수 (기본 20)",
     )
     run_parser.add_argument(
         "--sector-cap",
@@ -603,8 +603,12 @@ def _print_config_summary(config: Any) -> None:
     print(f"  DART API: {'설정됨' if config.DART_API_KEY else '미설정 (품질 팩터 비활성)'}")
     print(f"  Strict PIT 검증: {'활성' if config.STRICT_PIT_VALIDATION else '비활성'}")
     print(
-        "  미지원/deferred (미적용): SECTOR_CAP, MIN_ADV_RATIO, MIN_CASH_RATIO, "
-        "MAX_HOLDINGS, UNIVERSE_SIZE, USE_52WEEK_HIGH, QUALITY_MIN_TTM_QUARTERS"
+        f"  포트폴리오 제한: MAX_HOLDINGS={config.MAX_HOLDINGS}, "
+        f"MIN_CASH_RATIO={config.MIN_CASH_RATIO:.2%}"
+    )
+    print(
+        "  미지원/deferred (미적용): SECTOR_CAP, MIN_ADV_RATIO, "
+        "UNIVERSE_SIZE, USE_52WEEK_HIGH, QUALITY_MIN_TTM_QUARTERS"
     )
     print(
         "  unsupported/inert (runtime consumer 없음): EXCLUDE_MANAGEMENT, "
@@ -1110,8 +1114,8 @@ def _build_run_manifest(
         "adv": "unsupported/deferred: MIN_ADV_RATIO is configured but not applied by the current engine",
         "sector_cap": "unsupported/deferred: SECTOR_CAP is configured but not applied by the current engine",
         "portfolio_limits": (
-            "unsupported/deferred: MAX_HOLDINGS and MIN_CASH_RATIO are configured but "
-            "not applied by the current engine"
+            "active: MAX_HOLDINGS caps concurrent holdings and MIN_CASH_RATIO "
+            "reserves a minimum cash buffer during buy sizing"
         ),
         "universe_size": (
             "unsupported/deferred: UNIVERSE_SIZE is configured but the current universe "

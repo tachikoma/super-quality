@@ -10,6 +10,7 @@ from k200_mq.config import K200MQConfig
 from k200_mq.factors.momentum import MomentumFactor
 from k200_mq.factors.quality import QualityFactor
 from k200_mq.factors.regime import RegimeFactor
+from k200_mq.strategies.momentum_quality import MomentumQualityStrategy
 from k200_mq.main import _build_config, _build_parser, _build_run_manifest
 
 
@@ -301,3 +302,81 @@ def test_disabled_stop_loss_does_not_generate_stop_orders() -> None:
     )
 
     assert not (result["trade_log"]["exit_reason"] == "stop_loss").any()
+
+
+def test_portfolio_limit_config_validation_is_explicit() -> None:
+    with pytest.raises(ValueError, match="MAX_HOLDINGS"):
+        K200MQConfig(MAX_HOLDINGS=0)
+    with pytest.raises(ValueError, match="MIN_CASH_RATIO"):
+        K200MQConfig(MIN_CASH_RATIO=-0.01)
+    with pytest.raises(ValueError, match="MIN_CASH_RATIO"):
+        K200MQConfig(MIN_CASH_RATIO=1.01)
+
+
+def test_strategy_caps_selected_count_by_max_holdings() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=3,
+            MAX_HOLDINGS=2,
+            EXCLUDE_KOSPI_TOP_N=0,
+            MAX_POSITION_WEIGHT=1.0,
+        )
+    )
+    factors = pd.DataFrame({
+        "ticker": ["A", "B", "C"],
+        "momentum_z": [3.0, 2.0, 1.0],
+        "quality_z": [0.0, 0.0, 0.0],
+    })
+
+    selected = strategy.select_portfolio(factors, ["A", "B", "C"], pd.Timestamp("2024-01-31"))
+
+    assert [row["ticker"] for row in selected] == ["A", "B"]
+    assert len(selected) == 2
+    assert sum(row["weight"] for row in selected) == pytest.approx(1.0)
+
+
+def test_min_cash_ratio_reserves_cash_during_rebalance_buys() -> None:
+    dates = pd.date_range("2024-01-02", periods=2, freq="B")
+    price_data = pd.DataFrame([
+        {
+            "ticker": "A",
+            "date": current_date,
+            "open": 10.0,
+            "high": 10.0,
+            "low": 10.0,
+            "close": 10.0,
+            "volume": 1_000_000.0,
+            "mcap": 1_000_000.0,
+        }
+        for current_date in dates
+    ]).set_index(["ticker", "date"])
+    factors = pd.DataFrame({
+        "ticker": ["A", "A"],
+        "date": dates,
+        "momentum_z": [1.0, 1.0],
+        "quality_z": [0.0, 0.0],
+    })
+    config = K200MQConfig(
+        INITIAL_CAPITAL=1_000,
+        TOP_N=1,
+        MAX_HOLDINGS=1,
+        MIN_CASH_RATIO=0.20,
+        EXCLUDE_KOSPI_TOP_N=0,
+        MAX_POSITION_WEIGHT=1.0,
+        COMMISSION_RATE=0.0,
+        TAX_RATE=0.0,
+        SLIPPAGE=0.0,
+    )
+
+    result = PortfolioRebalanceEngine(config).run(
+        price_data,
+        pd.DataFrame(),
+        factors,
+        pd.DataFrame({"as_of": [dates[0]], "ticker": ["A"]}),
+    )
+
+    final_cash = float(result["portfolio_snapshots"].iloc[-1]["cash"])
+    buy_trade = result["trade_log"].loc[result["trade_log"]["buy_price"].notna()].iloc[0]
+
+    assert final_cash == pytest.approx(200.0)
+    assert int(buy_trade["shares"]) == 80

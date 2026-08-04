@@ -2,7 +2,7 @@
 
 이 문서는 현재 상태를 기록하는 정식 문서입니다.
 
-최종 갱신: 2026-08-03
+최종 갱신: 2026-08-04
 
 ## 한눈에 보는 상태
 
@@ -201,8 +201,8 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 ## 보류 또는 미지원 설정
 
 다음 설정은 호환성 필드 또는 향후 작업으로 남아 있으며 현재 민감도 차원이 아닙니다:
-`SECTOR_CAP`, `MIN_ADV_RATIO`, `MIN_CASH_RATIO`, `MAX_HOLDINGS`, `UNIVERSE_SIZE`,
-`USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`, 그리고
+`SECTOR_CAP`, `MIN_ADV_RATIO`, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`,
+`QUALITY_MIN_TTM_QUARTERS`, 그리고
 `EXCLUDE_MANAGEMENT`, `EXCLUDE_INVESTMENT_NOTICE`, `EXCLUDE_PREFERRED`,
 `EXCLUDE_ETF_ETN` 제외 플래그. `MOMENTUM_WINDOW_SHORT`는
 진단 전용입니다.

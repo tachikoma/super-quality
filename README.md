@@ -171,7 +171,7 @@ K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리�
 
 PIT historical universe, filing-date financials, strict PIT WF, PIT
 sensitivity, and stress tests are pending. ADV impact/liquidity execution,
-sector caps, `MAX_HOLDINGS`, `MIN_CASH_RATIO`, `UNIVERSE_SIZE`,
+sector caps, `UNIVERSE_SIZE`,
 `USE_52WEEK_HIGH`, and `QUALITY_MIN_TTM_QUARTERS` are unsupported or inert and
 are excluded from current sensitivity claims. `MOMENTUM_WINDOW_SHORT` is
 diagnostic-only. Cost attribution is implemented for actual filled trades; the

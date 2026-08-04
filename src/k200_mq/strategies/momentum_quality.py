@@ -79,6 +79,10 @@ class MomentumQualityStrategy:
         if self.config.EXCLUDE_KOSPI_TOP_N > 0:
             selected = self._exclude_kospi_top(selected)
 
+        max_holdings = int(self.config.MAX_HOLDINGS)
+        if len(selected) > max_holdings:
+            selected = selected.nlargest(max_holdings, "composite_z")
+
         # SECTOR_CAP is intentionally not applied until a PIT-safe GICS
         # mapping is available.  The setting remains documented as deferred.
 

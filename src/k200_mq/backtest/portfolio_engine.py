@@ -441,6 +441,8 @@ class PortfolioRebalanceEngine:
         nav = cash + self._holdings_value(
             positions, price_data, execution_date, "open"
         )
+        max_holdings = int(self.config.MAX_HOLDINGS)
+        reserve_cash = max(nav * float(self.config.MIN_CASH_RATIO), 0.0)
         regime_scale = float(order.get("regime_scale", 1.0))
         if pd.isna(regime_scale):
             regime_scale = 1.0
@@ -512,25 +514,33 @@ class PortfolioRebalanceEngine:
         # common affordability factor accounts for buy-side costs while
         # avoiding selected-order-dependent cash exhaustion.
         buy_requests: list[tuple[str, int, float]] = []
+        open_slots = max(max_holdings - len(positions), 0)
         for ticker in sorted(target_shares):
             if ticker in stopped_tickers:
                 continue
             buy_price = target_prices[ticker]
             current_shares = int(positions[ticker]["shares"]) if ticker in positions else 0
             requested = target_shares[ticker] - current_shares
-            if requested > 0:
-                buy_requests.append((ticker, requested, buy_price))
+            if requested <= 0:
+                continue
+            if ticker not in positions:
+                if open_slots <= 0:
+                    continue
+                open_slots -= 1
+            buy_requests.append((ticker, requested, buy_price))
 
         buy_factor = 1.0 + self.config.COMMISSION_RATE + self.config.SLIPPAGE
         requested_cost = sum(shares * price * buy_factor for _, shares, price in buy_requests)
-        affordability = min(1.0, max(cash, 0.0) / requested_cost) if requested_cost > 0 else 0.0
+        spendable_cash = max(cash - reserve_cash, 0.0)
+        affordability = min(1.0, spendable_cash / requested_cost) if requested_cost > 0 else 0.0
 
         for ticker, requested, buy_price in buy_requests:
             shares = int(requested * affordability)
             if shares <= 0:
                 continue
             unit_cost = buy_price * buy_factor
-            shares = min(shares, int(max(cash, 0.0) / unit_cost))
+            available_cash_for_buys = max(cash - reserve_cash, 0.0)
+            shares = min(shares, int(available_cash_for_buys / unit_cost))
             if shares <= 0:
                 continue
             entry_notional = shares * buy_price
