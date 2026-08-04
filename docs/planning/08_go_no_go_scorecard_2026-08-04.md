@@ -42,3 +42,13 @@
 다음 액션 (Day 2 우선순위):
 - DART facts 기준으로 (corp_code, rcept_no) 중복/누락 조인 키를 정리한다.
 - 정리 후 aggregate 재생성, strict 재실행 1회, scorecard 재갱신.
+
+진단 스냅샷 (2026-08-04):
+- mixed aggregate
+	- filings 중복 (corp_code, rcept_no): 9788 rows
+	- facts missing filing join: 0 rows
+	- facts 중복 (corp_code, rcept_no, account_id, account_detail): 4839 rows
+- mapped aggregate
+	- filings 중복 (corp_code, rcept_no): 0 rows
+	- facts missing filing join: 93048 rows
+	- facts 중복 (corp_code, rcept_no, account_id, account_detail): 28020 rows

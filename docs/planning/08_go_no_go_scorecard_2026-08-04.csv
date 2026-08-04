@@ -1,7 +1,7 @@
 section,metric,threshold,current_value,pass,evidence_path,notes
 validation,strict_preflight_failures,0,2,false,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv;outputs_k200mq_day1_20260804_mapped/true_walkforward/summary.csv","both strict runs invalid"
 validation,universe_exception_resolution,completed,partial,pending,"data/universe/kospi200_bundle_strict/bundle.manifest.json","bundle path in place; date exceptions not fully closed"
-validation,dart_filing_date_coverage,above_threshold,not_measurable_due_to_join_integrity,false,"outputs_k200mq_day1_20260804/true_walkforward/selection_and_folds.json","STRICT_PIT_VALIDATION could not establish filing-date financial availability"
+validation,dart_filing_date_coverage,above_threshold,not_measurable_due_to_join_integrity,false,"outputs_k200mq_day1_20260804/true_walkforward/selection_and_folds.json","mixed: filing dup=9788 facts dup(key)=4839; mapped: facts missing join=93048 facts dup(key)=28020"
 performance,oos_cagr,>=0.05,N/A_invalid_run,pending,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv","run status invalid"
 performance,oos_mdd,>=-0.25,N/A_invalid_run,pending,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv","run status invalid"
 performance,oos_sharpe,>=0.7,N/A_invalid_run,pending,"outputs_k200mq_day1_20260804/true_walkforward/summary.csv","run status invalid"
