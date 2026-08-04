@@ -229,7 +229,8 @@ uv run python -m k200_mq.main true-walkforward \\
 /Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/.venv/bin/python \
   scripts/generate_dart_fetch_batch_spec.py \
   --mode both \
-  --corp-codes-file data/raw/dart_corp_codes.txt \
+  --tickers-file data/raw/kospi200_tickers.txt \
+  --corp-map-file data/raw/dart_corp_map.csv \
   --filing-bgn-de 20150101 \
   --filing-end-de 20241231 \
   --financial-start-year 2015 \
@@ -301,6 +302,8 @@ uv run python -m k200_mq.main true-walkforward \\
 # 있습니다.
 # batch spec은 generate_dart_fetch_batch_spec.py로 corp_code/연도 범위에서
 # 자동 생성할 수 있습니다.
+# corp_code를 직접 준비하지 못한 경우에도 ticker 목록과 corp map
+# (--tickers-file/--corp-map-file)으로 자동 변환할 수 있습니다.
 # batch fetch는 --start-index/--max-requests/--continue-on-error로
 # 실패 복구 및 분할 수집을 지원합니다. 실패 항목은 batch_failures.json으로
 # 저장됩니다.

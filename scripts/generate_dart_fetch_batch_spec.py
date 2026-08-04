@@ -9,11 +9,76 @@ collection. The output format is directly consumable by
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 
 
 DEFAULT_REPRT_CODES = ("11011",)
+
+
+def _normal_label(value: str) -> str:
+    return "".join(char for char in value.strip().casefold() if char.isalnum())
+
+
+def _load_tickers(path_text: str) -> list[str]:
+    if not path_text.strip():
+        return []
+    path = Path(path_text)
+    values = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    return sorted({value for value in values if value})
+
+
+def _load_mapping_records(path: Path) -> list[dict[str, str]]:
+    suffix = path.suffix.casefold()
+    if suffix == ".json":
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, list):
+            raise RuntimeError("corp-map-file JSON must be an array of objects")
+        records: list[dict[str, str]] = []
+        for row in value:
+            if isinstance(row, dict):
+                records.append({str(k): str(v) for k, v in row.items()})
+        return records
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return [{str(k): str(v) for k, v in row.items()} for row in reader if isinstance(row, dict)]
+
+
+def _map_tickers_to_corp_codes(tickers: list[str], map_file_text: str) -> list[str]:
+    if not tickers:
+        return []
+    if not map_file_text.strip():
+        raise RuntimeError("--corp-map-file is required when --tickers-file is used")
+    path = Path(map_file_text)
+    records = _load_mapping_records(path)
+    if not records:
+        raise RuntimeError("corp-map-file contains no usable rows")
+
+    ticker_keys = {
+        "stockcode", "stock_code", "stock", "ticker", "securitycode", "security_code",
+    }
+    corp_keys = {"corpcode", "corp_code"}
+    resolved: dict[str, str] = {}
+
+    for row in records:
+        ticker_value = ""
+        corp_value = ""
+        for key, value in row.items():
+            label = _normal_label(key)
+            if label in {_normal_label(name) for name in ticker_keys} and value.strip():
+                ticker_value = value.strip()
+            if label in {_normal_label(name) for name in corp_keys} and value.strip():
+                corp_value = value.strip()
+        if ticker_value and corp_value:
+            resolved[ticker_value] = corp_value
+
+    missing = [ticker for ticker in tickers if ticker not in resolved]
+    if missing:
+        raise RuntimeError(
+            "corp-map-file is missing corp_code rows for tickers: " + ", ".join(missing[:20])
+        )
+    return sorted({resolved[ticker] for ticker in tickers})
 
 
 def _load_corp_codes(codes_text: str, codes_file: str) -> list[str]:
@@ -24,8 +89,6 @@ def _load_corp_codes(codes_text: str, codes_file: str) -> list[str]:
         path = Path(codes_file)
         values.extend(line.strip() for line in path.read_text(encoding="utf-8").splitlines())
     normalized = sorted({value for value in values if value})
-    if not normalized:
-        raise RuntimeError("at least one corp_code is required")
     return normalized
 
 
@@ -106,6 +169,16 @@ def main() -> None:
         help="Path to newline-separated corp_code file",
     )
     parser.add_argument(
+        "--tickers-file",
+        default="",
+        help="Path to newline-separated ticker list used with --corp-map-file",
+    )
+    parser.add_argument(
+        "--corp-map-file",
+        default="",
+        help="CSV/JSON mapping file containing ticker and corp_code columns",
+    )
+    parser.add_argument(
         "--filing-bgn-de",
         default="20150101",
         help="Filing request bgn_de (YYYYMMDD)",
@@ -146,6 +219,11 @@ def main() -> None:
     args = parser.parse_args()
 
     corp_codes = _load_corp_codes(args.corp_codes, args.corp_codes_file)
+    ticker_codes = _load_tickers(args.tickers_file)
+    mapped_codes = _map_tickers_to_corp_codes(ticker_codes, args.corp_map_file)
+    corp_codes = sorted(set(corp_codes) | set(mapped_codes))
+    if not corp_codes:
+        raise RuntimeError("at least one corp_code is required")
     reprt_codes = _load_reprt_codes(args.reprt_codes)
 
     if args.financial_start_year > args.financial_end_year:

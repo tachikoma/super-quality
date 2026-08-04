@@ -47,6 +47,8 @@
 - [x] corp_code/연도 범위에서 batch fetch spec(JSON)을 생성하는 helper
   (`scripts/generate_dart_fetch_batch_spec.py`)를 추가하여 반복 수집 spec 작성을
   자동화.
+- [x] batch spec 생성기에서 ticker 목록 + corp map 입력으로 corp_code를 자동
+  유도하는 옵션을 추가해, 수집 대상 작성의 수작업 부담을 감소.
 - [x] batch 수집된 raw DART 응답을 merged filing/facts CSV + manifest로 통합하는
   helper (`scripts/build_local_dart_aggregates.py`)를 추가하여 strict 입력 연결을
   자동화.

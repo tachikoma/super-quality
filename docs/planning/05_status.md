@@ -105,6 +105,8 @@
   있습니다.
 - corp_code/연도 범위로 batch spec을 자동 생성하는 helper가 추가되어, 반복 수집
   spec 작성이 수동 작업 없이 가능합니다.
+- batch spec 생성기는 ticker 목록과 corp map을 받아 corp_code를 자동 유도할 수
+  있어, 수집 대상 정합성 확보가 쉬워졌습니다.
 - batch 수집 결과를 merged filing/facts CSV + manifest로 통합하는 helper가 추가되어,
   strict LOCAL_DART 입력으로 바로 연결할 수 있습니다.
 - batch fetch는 청크 실행과 실패 복구를 지원하여, 대규모 historical 수집을
