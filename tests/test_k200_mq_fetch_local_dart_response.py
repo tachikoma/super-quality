@@ -53,3 +53,54 @@ def test_build_url_includes_api_key_and_preserves_request_params() -> None:
     assert "crtfc_key=secret-key" in url
     assert "corp_code=001" in url
     assert "bsns_year=2023" in url
+
+
+def test_batch_mode_writes_multiple_responses_and_summary(tmp_path: Path, monkeypatch) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+
+    payloads = {
+        "https://opendart.fss.or.kr/api/list.json?bgn_de=20240101&corp_code=001&crtfc_key=secret":
+            json.dumps({"status": "000", "page_no": 1, "total_page": 1}, ensure_ascii=False).encode("utf-8"),
+        "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?bsns_year=2023&corp_code=001&crtfc_key=secret":
+            json.dumps({"status": "000", "page_no": 1, "total_page": 1}, ensure_ascii=False).encode("utf-8"),
+    }
+
+    monkeypatch.setattr(script, "_fetch_response_bytes", lambda url: payloads[url])
+
+    batch_spec = tmp_path / "batch.json"
+    batch_spec.write_text(json.dumps([
+        {
+            "kind": "filing",
+            "request_params": ["corp_code=001", "bgn_de=20240101"],
+            "output_name": "filing.json",
+            "manifest_name": "filing.manifest.json",
+        },
+        {
+            "kind": "financial",
+            "request_params": ["corp_code=001", "bsns_year=2023"],
+            "output_name": "facts.json",
+            "manifest_name": "facts.manifest.json",
+        },
+    ], ensure_ascii=False), encoding="utf-8")
+
+    argv_backup = sys.argv[:]
+    try:
+        sys.argv = [
+            "fetch_local_dart_response.py",
+            "--api-key", "secret",
+            "--batch-file", str(batch_spec),
+            "--output-dir", str(tmp_path / "out"),
+        ]
+        script.main()
+    finally:
+        sys.argv = argv_backup
+
+    output_dir = tmp_path / "out"
+    assert (output_dir / "filing.json").is_file()
+    assert (output_dir / "facts.json").is_file()
+    assert (output_dir / "filing.manifest.json").is_file()
+    assert (output_dir / "facts.manifest.json").is_file()
+    summary = json.loads((output_dir / "batch_summary.json").read_text(encoding="utf-8"))
+    assert len(summary) == 2
+    assert summary[0]["kind"] == "filing"
+    assert summary[1]["kind"] == "financial"

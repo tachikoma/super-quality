@@ -265,6 +265,8 @@ uv run python -m k200_mq.main true-walkforward \\
 
 # 위 fetch helper는 OpenDART 응답을 raw bytes로 저장하고, manifest의 해시를
 # 저장소 내부 계약에 맞게 정리합니다.
+# batch mode는 JSON 배열 spec을 받아 여러 raw response를 한 번에 쌓을 수
+# 있습니다.
 # 다음 실제 작업은 이 helper로 수집한 파일을 historical corp/date 범위로
 # 넓혀서 strict true-walkforward에 넣는 것입니다.
 

@@ -101,6 +101,8 @@
   로컬 수집 결과를 strict 입력으로 빠르게 패키징할 수 있습니다.
 - OpenDART raw response를 raw bytes와 sanitized manifest로 저장하는 fetch helper도
   추가되어, 실제 수집을 시작할 수 있는 최종 plumbing이 마련되었습니다.
+- fetch helper는 batch mode도 지원하여, historical corp/date 조합을 반복 수집할 수
+  있습니다.
 - 로컬 PIT 섹터 맵 계약 스캐폴딩이 `src/k200_mq/data/sector_pit.py`에 구현되어
   있으며, 준비 경로에서 as-of 섹터 스냅샷으로 연결됩니다.
 - 선택적 `LOCAL_PIT_SECTOR_PATH`가 준비 경로(`prepare_k200mq_inputs`)에 연결되어,
