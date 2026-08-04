@@ -33,9 +33,11 @@
 - [ ] 일부 역사 날짜의 200 미만 구성원은 documented transition exception 또는
   원천 보정으로만 허용된다. 현재 strict probe에서는 2015-01-30이 198 구성원으로
   남아 있어 다음 게이트다.
-- [ ] 원시 DART 제출/공시 메타데이터를 확보하고 재무 로더에서 정보 이용 가능일
-  (filing availability)을 사용. 회계기간 표시는 제출일이 아닙니다.
-- [ ] 실제 자료에서 PIT 유니버스 및 제출일(filing-date) provenance 검증 완료.
+- [x] 로컬 DART filing metadata와 financial facts를 sidecar manifest와 함께
+  strict 준비 경로에 연결하여, filing-date provenance가 API 키 없이도 검증되도록
+  구현.
+- [ ] 원시 DART 제출/공시 메타데이터의 역사 범위를 더 넓혀 실제 자료에서 PIT
+  유니버스 및 제출일(filing-date) provenance를 검증 완료.
 - [ ] ADV 기반 시장 영향 모델 구현.
 
 ## 2단계: 팩터

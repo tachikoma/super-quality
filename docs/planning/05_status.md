@@ -13,7 +13,7 @@
 | 검증된 PIT 근거 | 아직 없음. |
 | 현재 공식 진단 | v4 no-DART 모멘텀 전용 기계적 WF: 연결 수익률 +4.0408%, 최대 낙폭 -32.0408%, OOS 지점 1,231개. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | bundle-directory 유니버스의 documented transition exception 정리와 제출일 기반 DART 재무 데이터. |
+| 다음 게이트 | bundle-directory 유니버스의 documented transition exception 정리와 더 넓은 역사 범위의 DART 제출일 데이터. |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
@@ -93,6 +93,10 @@
   확인하며, `(corp_code, rcept_no)`로만 조인하고, 철회/모호한 조인을 거부하고,
   공식 날짜 전용 `rcept_dt`를 제출일보다 엄격히 뒤인 첫 KRX 세션으로 매핑합니다.
   다만 실시간 API/벌크 수집과 현재 품질 팩터 기본 경로 연결은 아직 없습니다.
+- strict 준비 경로는 이제 local DART filing metadata와 financial facts를 sidecar
+  manifest와 함께 받아들입니다. API 키가 없어도 검증된 로컬 DART 파일로
+  filing-date provenance를 세울 수 있지만, 역사 범위가 더 넓어야 검증된 PIT
+  근거로 승격할 수 있습니다.
 - 로컬 PIT 섹터 맵 계약 스캐폴딩이 `src/k200_mq/data/sector_pit.py`에 구현되어
   있으며, 준비 경로에서 as-of 섹터 스냅샷으로 연결됩니다.
 - 선택적 `LOCAL_PIT_SECTOR_PATH`가 준비 경로(`prepare_k200mq_inputs`)에 연결되어,
@@ -209,8 +213,9 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 
 1. bundle-directory 유니버스의 198 구성원 역사 날짜를 documented transition exception
   또는 원천 보정으로 정리해 strict preflight를 통과시킵니다.
-2. 원시 DART 제출/공시 메타데이터와 재무 사실을 API 또는 벌크 수집으로 확보하고,
-  제출일을 안전한 거래 세션 가용일로 매핑하여 회계기간 날짜로 대체하지 않습니다.
+2. 원시 DART 제출/공시 메타데이터와 재무 사실을 API 또는 벌크 수집으로 확보하거나,
+   검증된 로컬 파일로 확보하고, 제출일을 안전한 거래 세션 가용일로 매핑하여
+   회계기간 날짜로 대체하지 않습니다.
 3. 두 입력의 PIT provenance가 실제 자료에서 확인된 뒤 strict PIT WF를 다시 실행합니다.
 4. strict PIT WF가 통과한 뒤에만 PIT 민감도, 생존자 편향 비교, ADV 영향 및 유동성
   제약, 계획된 스트레스 테스트를 실행합니다.

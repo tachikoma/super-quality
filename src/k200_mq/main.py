@@ -348,6 +348,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="OpenDartReader API 키",
     )
     run_parser.add_argument(
+        "--local-dart-filing-path",
+        default=argparse.SUPPRESS,
+        help="로컬 DART filing metadata 파일 경로",
+    )
+    run_parser.add_argument(
+        "--local-dart-filing-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 DART filing metadata 매니페스트 경로",
+    )
+    run_parser.add_argument(
+        "--local-dart-financial-path",
+        default=argparse.SUPPRESS,
+        help="로컬 DART financial facts 파일 경로",
+    )
+    run_parser.add_argument(
+        "--local-dart-financial-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 DART financial facts 매니페스트 경로",
+    )
+    run_parser.add_argument(
         "--start",
         default=argparse.SUPPRESS,
         help="시작일 YYYY-MM-DD (기본값: 2015-01-01)",
@@ -550,6 +570,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="OpenDartReader API 키",
     )
     robustness_parser.add_argument(
+        "--local-dart-filing-path",
+        default=argparse.SUPPRESS,
+        help="로컬 DART filing metadata 파일 경로",
+    )
+    robustness_parser.add_argument(
+        "--local-dart-filing-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 DART filing metadata 매니페스트 경로",
+    )
+    robustness_parser.add_argument(
+        "--local-dart-financial-path",
+        default=argparse.SUPPRESS,
+        help="로컬 DART financial facts 파일 경로",
+    )
+    robustness_parser.add_argument(
+        "--local-dart-financial-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 DART financial facts 매니페스트 경로",
+    )
+    robustness_parser.add_argument(
         "--output",
         "-o",
         default=argparse.SUPPRESS,
@@ -614,6 +654,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="OpenDartReader API 키 (재무 입력 준비용)",
     )
     true_walkforward_parser.add_argument(
+        "--local-dart-filing-path",
+        default=argparse.SUPPRESS,
+        help="로컬 DART filing metadata 파일 경로",
+    )
+    true_walkforward_parser.add_argument(
+        "--local-dart-filing-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 DART filing metadata 매니페스트 경로",
+    )
+    true_walkforward_parser.add_argument(
+        "--local-dart-financial-path",
+        default=argparse.SUPPRESS,
+        help="로컬 DART financial facts 파일 경로",
+    )
+    true_walkforward_parser.add_argument(
+        "--local-dart-financial-manifest",
+        default=argparse.SUPPRESS,
+        help="로컬 DART financial facts 매니페스트 경로",
+    )
+    true_walkforward_parser.add_argument(
         "--output",
         "-o",
         default=argparse.SUPPRESS,
@@ -673,6 +733,10 @@ def _build_config(args: argparse.Namespace) -> Any:
             "local_pit_universe_path": "LOCAL_PIT_UNIVERSE_PATH",
             "local_pit_universe_source_kind": "LOCAL_PIT_UNIVERSE_SOURCE_KIND",
             "local_pit_universe_manifest": "LOCAL_PIT_UNIVERSE_MANIFEST",
+            "local_dart_filing_path": "LOCAL_DART_FILING_PATH",
+            "local_dart_filing_manifest": "LOCAL_DART_FILING_MANIFEST",
+            "local_dart_financial_path": "LOCAL_DART_FINANCIAL_PATH",
+            "local_dart_financial_manifest": "LOCAL_DART_FINANCIAL_MANIFEST",
         }
         for argument_name, config_name in local_options.items():
             if hasattr(args, argument_name):
@@ -700,6 +764,10 @@ def _build_config(args: argparse.Namespace) -> Any:
             "local_pit_universe_path": "LOCAL_PIT_UNIVERSE_PATH",
             "local_pit_universe_source_kind": "LOCAL_PIT_UNIVERSE_SOURCE_KIND",
             "local_pit_universe_manifest": "LOCAL_PIT_UNIVERSE_MANIFEST",
+            "local_dart_filing_path": "LOCAL_DART_FILING_PATH",
+            "local_dart_filing_manifest": "LOCAL_DART_FILING_MANIFEST",
+            "local_dart_financial_path": "LOCAL_DART_FINANCIAL_PATH",
+            "local_dart_financial_manifest": "LOCAL_DART_FINANCIAL_MANIFEST",
         }
         for argument_name, config_name in local_options.items():
             if hasattr(args, argument_name):
@@ -733,6 +801,10 @@ def _build_config(args: argparse.Namespace) -> Any:
         "local_pit_universe_path": "LOCAL_PIT_UNIVERSE_PATH",
         "local_pit_universe_source_kind": "LOCAL_PIT_UNIVERSE_SOURCE_KIND",
         "local_pit_universe_manifest": "LOCAL_PIT_UNIVERSE_MANIFEST",
+        "local_dart_filing_path": "LOCAL_DART_FILING_PATH",
+        "local_dart_filing_manifest": "LOCAL_DART_FILING_MANIFEST",
+        "local_dart_financial_path": "LOCAL_DART_FINANCIAL_PATH",
+        "local_dart_financial_manifest": "LOCAL_DART_FINANCIAL_MANIFEST",
         "output": "OUTPUT_DIR",
     }
     for argument_name, config_name in explicit_options.items():
@@ -798,6 +870,47 @@ def _enforce_strict_input_sources(config: Any) -> None:
         )
 
 
+def _local_dart_source_ready(config: Any) -> bool:
+    filing_path = str(getattr(config, "LOCAL_DART_FILING_PATH", "") or "").strip()
+    filing_manifest = str(getattr(config, "LOCAL_DART_FILING_MANIFEST", "") or "").strip()
+    financial_path = str(getattr(config, "LOCAL_DART_FINANCIAL_PATH", "") or "").strip()
+    financial_manifest = str(getattr(config, "LOCAL_DART_FINANCIAL_MANIFEST", "") or "").strip()
+    return bool(filing_path and filing_manifest and financial_path and financial_manifest)
+
+
+def _load_local_dart_financial_inputs(
+    config: Any,
+    all_full_dates: pd.DatetimeIndex,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    from k200_mq.data.dart_pit import (
+        load_financial_facts,
+        load_filing_metadata,
+        prepare_financial_facts,
+    )
+    from k200_mq.data.provenance import has_usable_filing_dates, validate_financial_provenance
+
+    filing_path = str(getattr(config, "LOCAL_DART_FILING_PATH", "") or "").strip()
+    filing_manifest = str(getattr(config, "LOCAL_DART_FILING_MANIFEST", "") or "").strip()
+    financial_path = str(getattr(config, "LOCAL_DART_FINANCIAL_PATH", "") or "").strip()
+    financial_manifest = str(getattr(config, "LOCAL_DART_FINANCIAL_MANIFEST", "") or "").strip()
+
+    filings = load_filing_metadata(filing_path, manifest=filing_manifest)
+    facts = load_financial_facts(financial_path, manifest=financial_manifest)
+    financial_data = prepare_financial_facts(
+        facts,
+        filings,
+        all_full_dates,
+        amendment_policy="first_filing",
+    )
+    financial_provenance = validate_financial_provenance(
+        financial_data,
+        filing_date_used=has_usable_filing_dates(financial_data),
+    )
+    daily_financial = _convert_financial_to_daily(financial_data, all_full_dates)
+    financial_provenance = daily_financial.attrs.get("financial_provenance", financial_provenance)
+    return financial_data, daily_financial, dict(financial_provenance)
+
+
 def _print_config_summary(config: Any) -> None:
     """구성 요약을 출력합니다."""
     print("\n" + "=" * 60)
@@ -810,7 +923,14 @@ def _print_config_summary(config: Any) -> None:
     print(f"  모멘텀 가중치: {config.WEIGHT_MOMENTUM}")
     print(f"  품질 가중치: {config.WEIGHT_QUALITY}")
     print(f"  KOSPI 상위 제외: {config.EXCLUDE_KOSPI_TOP_N}")
-    print(f"  DART API: {'설정됨' if config.DART_API_KEY else '미설정 (품질 팩터 비활성)'}")
+    dart_source_status = (
+        "로컬 파일"
+        if _local_dart_source_ready(config)
+        else "API 키"
+        if config.DART_API_KEY
+        else "미설정 (품질 팩터 비활성)"
+    )
+    print(f"  DART 입력: {dart_source_status}")
     print(f"  Strict PIT 검증: {'활성' if config.STRICT_PIT_VALIDATION else '비활성'}")
     print(
         f"  포트폴리오 제한: MAX_HOLDINGS={config.MAX_HOLDINGS}, "
@@ -898,6 +1018,9 @@ def _convert_financial_to_daily(
 
     records: list[dict[str, Any]] = []
     for _, row in financial_data.iterrows():
+        ticker_value = row.get("ticker", row.get("stock_code"))
+        if ticker_value is None or pd.isna(ticker_value):
+            continue
         if use_filing_dates and filing_date_field is not None:
             dt = filing_to_trading_session(
                 row[filing_date_field],
@@ -920,7 +1043,7 @@ def _convert_financial_to_daily(
         total_equity = float(row.get("total_equity", 0) or 0)
 
         records.append({
-            "ticker": str(row["ticker"]),
+            "ticker": str(ticker_value),
             "date": dt,
             "net_income": float(row.get("net_income", 0) or 0),
             "total_equity": total_equity,
@@ -1113,7 +1236,7 @@ def _build_run_manifest(
 ) -> dict[str, Any]:
     """Build the auditable, secret-free metadata for one pipeline run."""
     context = context or {}
-    dart_configured = bool(getattr(config, "DART_API_KEY", ""))
+    dart_configured = bool(getattr(config, "DART_API_KEY", "")) or _local_dart_source_ready(config)
     costs = {
         "commission_rate": _manifest_safe(getattr(config, "COMMISSION_RATE", None)),
         "tax_rate": _manifest_safe(getattr(config, "TAX_RATE", None)),
@@ -1644,13 +1767,13 @@ def prepare_k200mq_inputs(
     universe_provenance = validate_universe_provenance(universe_history)
     if strict_pit and not universe_provenance["pit_valid"]:
         _enforce_strict_pit_validation(universe_provenance)
-    if strict_pit and not config.DART_API_KEY:
+    if strict_pit and not (config.DART_API_KEY or _local_dart_source_ready(config)):
         raise RuntimeError(
             "STRICT_PIT_VALIDATION requires DART financial data with an explicit "
             "source/schema filing contract and a meaningful timestamp or documented "
-            "next-session policy. Set DART_API_KEY "
-            "and provide raw DART filing metadata; the current fiscal-period-only "
-            "loader is not PIT-valid."
+            "next-session policy. Set DART_API_KEY or provide verified local DART "
+            "filing metadata and financial facts with sidecar manifests; the current "
+            "fiscal-period-only loader is not PIT-valid."
         )
 
     all_tickers = sorted(universe_history["ticker"].unique().tolist())
@@ -1777,7 +1900,30 @@ def prepare_k200mq_inputs(
     financial_data = pd.DataFrame()
     daily_financial = pd.DataFrame()
     financial_provenance = validate_financial_provenance(financial_data)
-    if config.DART_API_KEY:
+    if _local_dart_source_ready(config):
+        logger.info("  재무 데이터 로드 중 (로컬 DART provenance)...")
+        try:
+            financial_data, daily_financial, financial_provenance = _load_local_dart_financial_inputs(
+                config,
+                all_full_dates,
+            )
+            logger.info("  재무 데이터: %d행", len(financial_data))
+            if strict_pit and not financial_provenance["pit_valid"]:
+                _enforce_strict_pit_validation(
+                    universe_provenance,
+                    financial_provenance,
+                    config=config,
+                )
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            if strict_pit:
+                raise RuntimeError(
+                    "STRICT_PIT_VALIDATION could not establish filing-date "
+                    "financial availability from local DART inputs."
+                ) from exc
+            logger.warning("  로컬 DART 재무 데이터 로드 실패 (%s) — 모멘텀 전용으로 진행", exc)
+    elif config.DART_API_KEY:
         logger.info("  재무 데이터 로드 중 (DART API)...")
         try:
             years = list(range(start_date.year - 1, end_date.year + 1))

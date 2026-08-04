@@ -21,6 +21,22 @@ class BacktestConfig(BaseSettings):
         default="",
         description="opendart.fss.or.kr의 OpenDartReader API 키",
     )
+    LOCAL_DART_FILING_PATH: str = Field(
+        default="",
+        description="선택적 로컬 DART filing metadata 파일 경로",
+    )
+    LOCAL_DART_FILING_MANIFEST: str = Field(
+        default="",
+        description="로컬 DART filing metadata acquisition manifest 경로",
+    )
+    LOCAL_DART_FINANCIAL_PATH: str = Field(
+        default="",
+        description="선택적 로컬 DART financial facts 파일 경로",
+    )
+    LOCAL_DART_FINANCIAL_MANIFEST: str = Field(
+        default="",
+        description="로컬 DART financial facts acquisition manifest 경로",
+    )
     KRX_ID: str = Field(
         default="",
         description="KRX 데이터(data.krx.co.kr) 로그인 ID (pykrx)",

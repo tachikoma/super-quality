@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
+import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -92,6 +95,97 @@ def test_true_walkforward_cli_wires_strict_local_pit_options_to_config() -> None
     assert config.LOCAL_PIT_UNIVERSE_SOURCE_KIND == "intervals"
     assert config.LOCAL_PIT_UNIVERSE_MANIFEST == "local_universe.manifest.json"
     assert config.OUTPUT_DIR == "out"
+
+
+def test_true_walkforward_cli_wires_local_dart_options_to_config() -> None:
+    parser = main_module._build_parser()
+    args = parser.parse_args([
+        "true-walkforward",
+        "--local-dart-filing-path", "filings.json",
+        "--local-dart-filing-manifest", "filings.manifest.json",
+        "--local-dart-financial-path", "facts.json",
+        "--local-dart-financial-manifest", "facts.manifest.json",
+    ])
+
+    config = main_module._build_config(args)
+
+    assert config.LOCAL_DART_FILING_PATH == "filings.json"
+    assert config.LOCAL_DART_FILING_MANIFEST == "filings.manifest.json"
+    assert config.LOCAL_DART_FINANCIAL_PATH == "facts.json"
+    assert config.LOCAL_DART_FINANCIAL_MANIFEST == "facts.manifest.json"
+
+
+def test_local_dart_inputs_can_prepare_financial_provenance_without_api_key(tmp_path: Path) -> None:
+    filing_source = tmp_path / "filings.json"
+    filing_rows = [{
+        "corp_code": "001",
+        "stock_code": "005930",
+        "corp_name": "Example",
+        "rcept_no": "R1",
+        "rcept_dt": "20240102",
+        "report_nm": "사업보고서",
+        "pblntf_ty": "A",
+        "pblntf_detail_ty": "B",
+        "rm": "",
+    }]
+    filing_source.write_text(json.dumps(filing_rows, ensure_ascii=False), encoding="utf-8")
+    filing_manifest = filing_source.with_suffix(".manifest.json")
+    filing_manifest.write_text(json.dumps({
+        "response_sha256": hashlib.sha256(filing_source.read_bytes()).hexdigest(),
+        "source_url": "https://opendart.fss.or.kr/api/list.json",
+        "request_params": {"fixture_name": "filings.json"},
+        "request_params_sha256": hashlib.sha256(
+            json.dumps({"fixture_name": "filings.json"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "api_status": "000",
+        "pagination": {"complete": True},
+        "retrieved_at_utc": "2024-01-03T00:00:00+00:00",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    fact_source = tmp_path / "facts.json"
+    fact_rows = [{
+        "rcept_no": "R1",
+        "corp_code": "001",
+        "bsns_year": "2023",
+        "reprt_code": "11011",
+        "fs_div": "CFS",
+        "sj_div": "BS",
+        "account_id": "ifrs-full_Revenue",
+        "account_nm": "Revenue",
+        "account_detail": "consolidated",
+        "period_end": "20231231",
+        "thstrm_amount": "1,000",
+        "currency": "KRW",
+    }]
+    fact_source.write_text(json.dumps(fact_rows, ensure_ascii=False), encoding="utf-8")
+    fact_manifest = fact_source.with_suffix(".manifest.json")
+    fact_manifest.write_text(json.dumps({
+        "response_sha256": hashlib.sha256(fact_source.read_bytes()).hexdigest(),
+        "source_url": "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json",
+        "request_params": {"fixture_name": "facts.json"},
+        "request_params_sha256": hashlib.sha256(
+            json.dumps({"fixture_name": "facts.json"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "api_status": "000",
+        "pagination": {"complete": True},
+        "retrieved_at_utc": "2024-01-03T00:00:00+00:00",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    config = K200MQConfig(
+        LOCAL_DART_FILING_PATH=str(filing_source),
+        LOCAL_DART_FILING_MANIFEST=str(filing_manifest),
+        LOCAL_DART_FINANCIAL_PATH=str(fact_source),
+        LOCAL_DART_FINANCIAL_MANIFEST=str(fact_manifest),
+    )
+    financial_data, daily_financial, financial_provenance = main_module._load_local_dart_financial_inputs(
+        config,
+        pd.DatetimeIndex(pd.bdate_range("2024-01-02", periods=3)),
+    )
+
+    assert not financial_data.empty
+    assert not daily_financial.empty
+    assert financial_provenance["pit_valid"] is True
+    assert "filing_date" in financial_data.columns
 
 
 def test_config_rejects_invalid_correlation_filter_bounds_when_enabled() -> None:

@@ -7,10 +7,11 @@ KOSPI 200 Momentum + Quality 프레임워크로 새 출발한 프로젝트입니
 
 > **Current evidence boundary:** The v4 result currently available is a
 > momentum-only mechanical non-PIT diagnostic, not validated performance
-> evidence. The strict bundle-directory universe gate is now wired, but a
-> historical 198-constituent date still requires a documented transition
-> exception or source correction, and filing-date financial data remains the
-> next major gate. The canonical status is
+> evidence. The strict bundle-directory universe gate is now wired, local DART
+> filing/facts inputs with sidecar manifests can now satisfy the filing-date
+> path without an API key, and a historical 198-constituent date still
+> requires a documented transition exception or source correction. The
+> canonical status is
 > [docs/planning/05_status.md](docs/planning/05_status.md).
 
 ## 전략 개요
