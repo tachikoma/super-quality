@@ -201,3 +201,16 @@
   - 결론:
     - 네트워크 신규 수집(fetch) 없이는 Day 4 coverage 개선 불가
     - 다음 액션의 선행조건은 `DART_API_KEY` 세팅
+
+- Day 4 재개 자동화 (2026-08-05, 추가)
+  - 신규 스크립트:
+    - `scripts/run_day4_dart_backfill.sh`
+  - 목적:
+    - fetch -> aggregate -> strict rerun을 one-shot으로 실행
+  - 검증:
+    - API 키 미설정 상태에서 guard 동작 확인 (`exit_code=2`)
+  - 실행:
+    - `export DART_API_KEY="..."`
+    - `./scripts/run_day4_dart_backfill.sh`
+  - 선택 파라미터(환경변수 override):
+    - `SPEC_FILE`, `BATCH_OUT_DIR`, `AGG_OUT_DIR`, `RUN_OUT_DIR`
