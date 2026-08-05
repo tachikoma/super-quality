@@ -154,3 +154,31 @@
   - 현재 상태:
     - median 0.0303, min 0.0000으로 제안 A/B 모두 미달
     - Day 4 우선순위로 수집 구간 보강(fetch batch 재실행 + aggregate 재생성)을 즉시 수행해야 함
+
+## Day 4 진행 기록 (2026-08-05)
+
+- 백필 타깃 산출 (strict universe vs current DART prepared)
+  - strict 유니버스 고유 종목수: 198
+  - 현재 prepared 커버 종목수: 7
+  - 미커버 종목수: 191
+  - corp_map 매핑 가능 미커버 종목수: 187
+  - corp_map 미매핑 종목수: 4 (`000155`, `005385`, `005387`, `005935`)
+  - 산출 파일:
+    - `data/raw/k200_day4_missing_tickers.txt` (191 lines)
+    - `data/raw/k200_day4_missing_corp_codes.txt` (187 lines)
+
+- Day 4 배치 스펙 생성 완료
+  - 생성 명령:
+    - `uv run python scripts/generate_dart_fetch_batch_spec.py --mode both --corp-codes-file data/raw/k200_day4_missing_corp_codes.txt --filing-bgn-de 20150101 --filing-end-de 20241231 --financial-start-year 2015 --financial-end-year 2024 --reprt-codes 11011,11013,11012,11014 --output-file data/raw/dart_batch_spec_day4_missing_both.json`
+  - 생성 결과:
+    - `data/raw/dart_batch_spec_day4_missing_both.json`
+    - request spec count: 7,667
+
+- Day 4 다음 실행 순서 (API key 필요)
+  1. 배치 fetch 실행
+     - `uv run python scripts/fetch_local_dart_response.py --api-key "$DART_API_KEY" --batch-file data/raw/dart_batch_spec_day4_missing_both.json --output-dir data/raw/dart_batch_day4_missing --continue-on-error`
+  2. aggregate 재생성
+     - `uv run python scripts/build_local_dart_aggregates.py --input-dir data/raw/dart_batch_day4_missing --output-dir data/raw/dart_aggregated_day4_missing`
+  3. strict true-walkforward 재실행
+     - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_day4_missing/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_day4_missing/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_day4_missing/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_day4_missing/dart_facts_merged.manifest.json --output /tmp/k200mq_day4_20260805_strict_recheck`
+  4. Day 3 지표 재측정 및 scorecard 재판정

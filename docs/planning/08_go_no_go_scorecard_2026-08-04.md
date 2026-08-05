@@ -144,3 +144,32 @@
 1. strict preflight 자체는 통과했지만, financial availability coverage 절대량이 매우 낮다.
 2. key-level 결측률은 양호하나(0.00%), 종목/기간 커버리지가 Gate 2 병목으로 남아 있다.
 3. Day 4는 fetch batch 재구성과 aggregate 재생성으로 coverage 확장이 최우선이다.
+
+## 7) Day 4 착수 갱신 (2026-08-05)
+
+### 백필 타깃 확정
+
+- strict universe 고유 종목수: 198
+- current prepared 커버 종목수: 7
+- 미커버 종목수: 191
+- corp_map 매핑 가능 종목수: 187
+- corp_map 미매핑 종목수: 4 (`000155`, `005385`, `005387`, `005935`)
+- 생성 아티팩트:
+  - `data/raw/k200_day4_missing_tickers.txt` (191 lines)
+  - `data/raw/k200_day4_missing_corp_codes.txt` (187 lines)
+  - `data/raw/dart_batch_spec_day4_missing_both.json` (7,667 specs)
+
+### Gate 영향 (중간)
+
+| 항목 | 상태 | 코멘트 |
+|---|---|---|
+| Gate 1 strict preflight | 유지 | 기존 통과 상태 유지 |
+| Gate 2 filing-date coverage | 개선 작업 착수 | 백필 대상 및 배치 스펙 생성 완료, fetch/merge/재실행 대기 |
+| Gate 3 completeness | 개선 작업 착수 | 대량 백필 후 재측정 필요 |
+
+### Day 4 실행 런북
+
+1. Fetch: `scripts/fetch_local_dart_response.py` 배치 실행
+2. Merge: `scripts/build_local_dart_aggregates.py`로 merged artifacts 재생성
+3. Strict rerun: `k200_mq.main true-walkforward --strict-pit` 재실행
+4. 재측정: Day 3 coverage 지표(min/median/max) 재계산 후 본 문서 Gate 재판정
