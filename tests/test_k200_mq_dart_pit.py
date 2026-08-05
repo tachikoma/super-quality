@@ -143,6 +143,24 @@ def test_no_same_day_session_is_accepted(tmp_path: Path) -> None:
         )
 
 
+def test_unmappable_session_error_includes_examples_and_session_range(tmp_path: Path) -> None:
+    filings, facts = _sources(tmp_path)
+    joined = join_financial_facts_to_filings(facts, filings)
+
+    with pytest.raises(DARTPITError) as excinfo:
+        map_filing_availability(
+            joined,
+            pd.to_datetime(["2024-01-02"]),
+            amendment_policy="first_filing",
+        )
+
+    message = str(excinfo.value)
+    assert "unmapped=1" in message
+    assert "session_range=2024-01-02..2024-01-02" in message
+    assert "corp_code=001" in message
+    assert "rcept_no=R1" in message
+
+
 def test_post_join_timestamp_injection_cannot_promote_to_pit(tmp_path: Path) -> None:
     filings, facts = _sources(tmp_path)
     joined = join_financial_facts_to_filings(facts, filings)

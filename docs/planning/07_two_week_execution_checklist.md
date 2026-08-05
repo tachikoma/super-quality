@@ -82,3 +82,39 @@
   - 결과: invalid
   - 핵심 원인: DART filing-date를 KRX 세션으로 매핑하는 단계에서 실패 (`one or more filings cannot be mapped to a provided KRX session`).
   - 근거: outputs_k200mq_day1_20260804_mixed_keydedup/true_walkforward/summary.csv
+
+## Day 2 진행 기록 (2026-08-05)
+
+- 코드 수정 1
+  - 내용: DART filing-date 세션 매핑 실패 시 `unmapped` 건수, 세션 범위, 예시 `(corp_code, rcept_no, rcept_date)`를 포함한 진단 메시지를 추가.
+  - 목적: strict preflight 실패를 당일에 바로 분류할 수 있도록 원인 가시성을 높임.
+
+- 코드 수정 2
+  - 내용: local DART filing/facts 입력에서 prepared session 상한(이번 실행은 2024-12-30) 이후의 접수 행을 사전 제외하도록 로더를 보강.
+  - 목적: 2025 접수 자료가 2024 세션 검증을 막는 비본질적 실패를 제거.
+
+- 테스트
+  - 명령:
+    - `uv run pytest -q tests/test_k200_mq_dart_pit.py tests/test_k200_mq_configuration.py`
+  - 결과: `41 passed, 2 warnings`
+  - 의미: DART 진단 메시지 보강과 future receipt 범위 필터링 회귀 테스트를 포함해 관련 단위 검증 통과.
+
+- strict 재실행 1회
+  - 명령:
+    - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.manifest.json --output /tmp/k200mq_day2_20260805_strict_recheck`
+  - 결과: invalid
+  - 개선 확인:
+    - 이전 blocker였던 `one or more filings cannot be mapped to a provided KRX session`는 재현되지 않음.
+    - 로더 로그에서 `세션 상한 이후 filings=1461행, facts=1615행 제외`를 확인.
+  - 현재 blocker:
+    - strict preflight가 `financial quality mode is 'non_pit_fiscal_period'`로 중단.
+  - 해석:
+    - DART 조인/세션 범위 문제는 일부 정리되었지만, 현 aggregate가 validator-backed `pit_filing_date` 계약으로 승격되지는 못함.
+
+- Day 2 판정
+  - 상태: 부분 완료
+  - 닫힌 항목: DART 세션 매핑 실패 원인 식별 및 비본질적 미래 접수행 차단.
+  - 미완료 항목: 198 constituent 날짜 예외 목록 고정, documented transition exception 초안 작성.
+  - 다음 액션:
+    - strict financial provenance가 왜 `non_pit_fiscal_period`로 남는지 진단한다.
+    - 198 constituent 역사 날짜 예외를 문서화하고 transition exception 초안을 작성한다.

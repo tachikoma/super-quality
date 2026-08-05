@@ -1594,6 +1594,36 @@ def _availability_lineage_errors(
     return list(dict.fromkeys(errors))
 
 
+def _unmapped_availability_message(
+    frame: pd.DataFrame,
+    availability: Sequence[pd.Timestamp | None],
+    sessions: pd.DatetimeIndex,
+    *,
+    max_examples: int = 3,
+) -> str:
+    """Return an actionable failure message for unmapped filing availability."""
+    failed_indices = [index for index, value in enumerate(availability) if value is None]
+    total = len(failed_indices)
+    session_start = pd.Timestamp(sessions.min()).date().isoformat()
+    session_end = pd.Timestamp(sessions.max()).date().isoformat()
+    examples: list[str] = []
+    for index in failed_indices[:max_examples]:
+        row = frame.iloc[index]
+        corp_code = str(row.get("corp_code", ""))
+        rcept_no = str(row.get("rcept_no", ""))
+        rcept_date = _parse_date(row.get("rcept_date"))
+        date_text = rcept_date.isoformat() if rcept_date is not None else "missing"
+        examples.append(
+            f"corp_code={corp_code}, rcept_no={rcept_no}, rcept_date={date_text}"
+        )
+    suffix = "; ".join(examples) if examples else "no row details"
+    return (
+        "one or more filings cannot be mapped to a provided KRX session "
+        f"(unmapped={total}, session_range={session_start}..{session_end}, "
+        f"examples: {suffix})"
+    )
+
+
 def map_filing_availability(
     joined_facts: pd.DataFrame,
     trading_dates: Sequence[Any] | pd.DatetimeIndex,
@@ -1673,7 +1703,7 @@ def map_filing_availability(
     output["availability_session"] = availability
     output["filing_date"] = output["rcept_date"]
     if not all(value is not None for value in availability):
-        raise DARTPITError("one or more filings cannot be mapped to a provided KRX session")
+        raise DARTPITError(_unmapped_availability_message(output, availability, sessions))
     mapping_errors = _availability_lineage_errors(
         output, sessions, policy, timezone_name, cutoff, timestamp_field,
     )

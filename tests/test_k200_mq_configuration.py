@@ -188,6 +188,109 @@ def test_local_dart_inputs_can_prepare_financial_provenance_without_api_key(tmp_
     assert "filing_date" in financial_data.columns
 
 
+def test_local_dart_inputs_drop_future_receipts_outside_session_range(tmp_path: Path) -> None:
+    filing_source = tmp_path / "filings_future.json"
+    filing_rows = [
+        {
+            "corp_code": "001",
+            "stock_code": "005930",
+            "corp_name": "Example",
+            "rcept_no": "R1",
+            "rcept_dt": "20240102",
+            "report_nm": "사업보고서",
+            "pblntf_ty": "A",
+            "pblntf_detail_ty": "B",
+            "rm": "",
+        },
+        {
+            "corp_code": "001",
+            "stock_code": "005930",
+            "corp_name": "Example",
+            "rcept_no": "R2",
+            "rcept_dt": "20250331",
+            "report_nm": "사업보고서",
+            "pblntf_ty": "A",
+            "pblntf_detail_ty": "B",
+            "rm": "",
+        },
+    ]
+    filing_source.write_text(json.dumps(filing_rows, ensure_ascii=False), encoding="utf-8")
+    filing_manifest = filing_source.with_suffix(".manifest.json")
+    filing_manifest.write_text(json.dumps({
+        "response_sha256": hashlib.sha256(filing_source.read_bytes()).hexdigest(),
+        "source_url": "https://opendart.fss.or.kr/api/list.json",
+        "request_params": {"fixture_name": "filings_future.json"},
+        "request_params_sha256": hashlib.sha256(
+            json.dumps({"fixture_name": "filings_future.json"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "api_status": "000",
+        "pagination": {"complete": True},
+        "retrieved_at_utc": "2024-01-03T00:00:00+00:00",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    fact_source = tmp_path / "facts_future.json"
+    fact_rows = [
+        {
+            "rcept_no": "R1",
+            "corp_code": "001",
+            "bsns_year": "2023",
+            "reprt_code": "11011",
+            "fs_div": "CFS",
+            "sj_div": "BS",
+            "account_id": "ifrs-full_Revenue",
+            "account_nm": "Revenue",
+            "account_detail": "consolidated",
+            "period_end": "20231231",
+            "thstrm_amount": "1,000",
+            "currency": "KRW",
+        },
+        {
+            "rcept_no": "R2",
+            "corp_code": "001",
+            "bsns_year": "2024",
+            "reprt_code": "11011",
+            "fs_div": "CFS",
+            "sj_div": "BS",
+            "account_id": "ifrs-full_Revenue",
+            "account_nm": "Revenue",
+            "account_detail": "consolidated",
+            "period_end": "20241231",
+            "thstrm_amount": "2,000",
+            "currency": "KRW",
+        },
+    ]
+    fact_source.write_text(json.dumps(fact_rows, ensure_ascii=False), encoding="utf-8")
+    fact_manifest = fact_source.with_suffix(".manifest.json")
+    fact_manifest.write_text(json.dumps({
+        "response_sha256": hashlib.sha256(fact_source.read_bytes()).hexdigest(),
+        "source_url": "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json",
+        "request_params": {"fixture_name": "facts_future.json"},
+        "request_params_sha256": hashlib.sha256(
+            json.dumps({"fixture_name": "facts_future.json"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "api_status": "000",
+        "pagination": {"complete": True},
+        "retrieved_at_utc": "2024-01-03T00:00:00+00:00",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    config = K200MQConfig(
+        LOCAL_DART_FILING_PATH=str(filing_source),
+        LOCAL_DART_FILING_MANIFEST=str(filing_manifest),
+        LOCAL_DART_FINANCIAL_PATH=str(fact_source),
+        LOCAL_DART_FINANCIAL_MANIFEST=str(fact_manifest),
+    )
+
+    financial_data, daily_financial, financial_provenance = main_module._load_local_dart_financial_inputs(
+        config,
+        pd.DatetimeIndex(pd.bdate_range("2024-01-02", periods=3)),
+    )
+
+    assert not financial_data.empty
+    assert financial_data["rcept_no"].tolist() == ["R1"]
+    assert isinstance(daily_financial, pd.DataFrame)
+    assert isinstance(financial_provenance, dict)
+
+
 def test_config_rejects_invalid_correlation_filter_bounds_when_enabled() -> None:
     with pytest.raises(ValueError, match="MAX_PAIR_CORRELATION"):
         K200MQConfig(ENABLE_CORRELATION_FILTER=True, MAX_PAIR_CORRELATION=1.1)

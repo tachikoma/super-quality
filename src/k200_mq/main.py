@@ -878,6 +878,29 @@ def _local_dart_source_ready(config: Any) -> bool:
     return bool(filing_path and filing_manifest and financial_path and financial_manifest)
 
 
+def _restrict_dart_inputs_to_session_range(
+    filings: pd.DataFrame,
+    facts: pd.DataFrame,
+    sessions: pd.DatetimeIndex,
+) -> tuple[pd.DataFrame, pd.DataFrame, int, int]:
+    """Keep only DART rows that can be mapped within the prepared session window."""
+    if not len(sessions):
+        return filings, facts, 0, 0
+    max_session = pd.Timestamp(sessions.max()).date()
+    rcept_dates = pd.to_datetime(filings.get("rcept_date"), errors="coerce")
+    in_range = rcept_dates.notna() & (rcept_dates.dt.date <= max_session)
+
+    filtered_filings = filings.loc[in_range].copy()
+    filtered_filings.attrs = dict(filings.attrs)
+    dropped_filings = int((~in_range).sum())
+
+    keys = filtered_filings[["corp_code", "rcept_no"]].drop_duplicates()
+    filtered_facts = facts.merge(keys, on=["corp_code", "rcept_no"], how="inner")
+    filtered_facts.attrs = dict(facts.attrs)
+    dropped_facts = len(facts) - len(filtered_facts)
+    return filtered_filings, filtered_facts, dropped_filings, dropped_facts
+
+
 def _load_local_dart_financial_inputs(
     config: Any,
     all_full_dates: pd.DatetimeIndex,
@@ -896,6 +919,17 @@ def _load_local_dart_financial_inputs(
 
     filings = load_filing_metadata(filing_path, manifest=filing_manifest)
     facts = load_financial_facts(financial_path, manifest=financial_manifest)
+    filings, facts, dropped_filings, dropped_facts = _restrict_dart_inputs_to_session_range(
+        filings,
+        facts,
+        all_full_dates,
+    )
+    if dropped_filings or dropped_facts:
+        logger.info(
+            "  로컬 DART 범위 정리: 세션 상한 이후 filings=%d행, facts=%d행 제외",
+            dropped_filings,
+            dropped_facts,
+        )
     financial_data = prepare_financial_facts(
         facts,
         filings,
