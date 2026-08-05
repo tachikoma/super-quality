@@ -100,3 +100,47 @@
 
 - local DART aggregate가 `non_pit_fiscal_period`로 판정되는 validator evidence를 추적한다.
 - 198 constituent 날짜 예외 목록과 documented transition exception 초안을 문서화한다.
+
+## 6) Day 3 갱신 (2026-08-05)
+
+### DART coverage 정량 결과
+
+- 측정 입력
+	- `data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.csv`
+	- `data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.csv`
+	- `data/universe/kospi200_bundle_strict/bundle.manifest.json` (120개 월말 as-of)
+- 측정 방식
+	- `prepare_financial_facts(..., amendment_policy="first_filing")`로 strict 로컬 DART 준비 프레임 생성
+	- 각 as-of에서 `availability_session <= as_of`인 고유 `stock_code` 개수를 198로 나눠 커버리지 비율 계산
+- 결과
+	- filings: 10,465행
+	- facts: 8,996행
+	- prepared facts: 7,381행
+	- facts key missing ratio: 0.00%
+	- filing date range: 2016-03-30 ~ 2024-03-28
+	- prepared unique stock_code: 7개
+	- as-of coverage ratio (min/median/max): 0.0000 / 0.0303 / 0.0354
+	- as-of covered tickers (min/median/max): 0 / 6 / 7
+
+### Gate 영향 재판정
+
+| 항목 | 기준 | 현재 값 | 통과 여부 | 근거 |
+|---|---|---|---|---|
+| strict preflight 실패 건수 | 0 | 0 | 통과 | `/tmp/k200mq_day2_20260805_strict_recheck_v2` 실행 로그 |
+| 유니버스 예외 정리 | 완료 | 문서화 완료 | 통과 | data/universe/kospi200_bundle_strict/bundle.manifest.json |
+| DART filing-date 커버리지 | 임계치 이상 | min 0.0000 / median 0.0303 / max 0.0354 | 실패 | Day 3 coverage 측정 결과 |
+
+### Day 3 임계치 제안
+
+- 연구 지속 최소선: median >= 0.80, min >= 0.60
+- strict PIT WF 실행선: median >= 0.90, min >= 0.80
+- 현재 측정치는 두 기준 모두 미달
+
+### Day 3 임시 판정
+
+- Hold 유지
+
+판정 사유 (업데이트):
+1. strict preflight 자체는 통과했지만, financial availability coverage 절대량이 매우 낮다.
+2. key-level 결측률은 양호하나(0.00%), 종목/기간 커버리지가 Gate 2 병목으로 남아 있다.
+3. Day 4는 fetch batch 재구성과 aggregate 재생성으로 coverage 확장이 최우선이다.

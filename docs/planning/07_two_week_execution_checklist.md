@@ -122,3 +122,35 @@
   - 개수: 120개 월말 리밸런싱 일자
   - 성격: 각 날짜의 구성원 수가 198인 documented historical transition size
   - 근거: `data/universe/kospi200_bundle_strict/bundle.manifest.json`
+
+## Day 3 진행 기록 (2026-08-05)
+
+- DART filing/facts 커버리지 측정
+  - 대상 입력:
+    - `data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.csv`
+    - `data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.csv`
+    - `data/universe/kospi200_bundle_strict/bundle.manifest.json` (120개 월말 as-of)
+  - 측정 방법:
+    - `prepare_financial_facts(..., amendment_policy="first_filing")`로 strict 로컬 DART 준비 프레임을 생성
+    - 각 as-of에서 `availability_session <= as_of`인 고유 `stock_code` 수를 198로 나누어 커버리지 비율 계산
+  - 측정 결과:
+    - filings 행수: 10,465
+    - facts 행수: 8,996
+    - prepared 행수: 7,381
+    - facts 키 결측 비율: 0.00% (0 / 8,996×9)
+    - filing date 범위: 2016-03-30 ~ 2024-03-28
+    - prepared 고유 종목수: 7개
+    - as-of 커버리지 비율(min/median/max): 0.0000 / 0.0303 / 0.0354
+    - as-of 커버드 종목수(min/median/max): 0 / 6 / 7
+    - 최저 5개 as-of: 2015-01-30, 2015-02-27, 2015-03-31, 2015-04-30, 2015-05-29 (모두 0)
+
+- Day 3 임계치 제안 (초안)
+  - 제안 A(연구 지속 최소선):
+    - 전체 as-of median coverage_ratio >= 0.80
+    - 전체 as-of min coverage_ratio >= 0.60
+  - 제안 B(strict PIT WF 실행선):
+    - 전체 as-of median coverage_ratio >= 0.90
+    - 전체 as-of min coverage_ratio >= 0.80
+  - 현재 상태:
+    - median 0.0303, min 0.0000으로 제안 A/B 모두 미달
+    - Day 4 우선순위로 수집 구간 보강(fetch batch 재실행 + aggregate 재생성)을 즉시 수행해야 함
