@@ -1624,6 +1624,33 @@ def _unmapped_availability_message(
     )
 
 
+def _drop_future_unmappable_rows(
+    frame: pd.DataFrame,
+    availability: Sequence[pd.Timestamp | None],
+    sessions: pd.DatetimeIndex,
+) -> tuple[pd.DataFrame, list[pd.Timestamp | None], int]:
+    """Drop only rows whose filing date is strictly after the session range."""
+    if not len(sessions):
+        return frame, list(availability), 0
+    session_max = pd.Timestamp(sessions.max()).date()
+    keep_indices: list[int] = []
+    dropped = 0
+    for index, value in enumerate(availability):
+        if value is not None:
+            keep_indices.append(index)
+            continue
+        filing_date = _parse_date(frame.iloc[index].get("rcept_date"))
+        if filing_date is not None and filing_date > session_max:
+            dropped += 1
+            continue
+        keep_indices.append(index)
+    if dropped == 0:
+        return frame, list(availability), 0
+    trimmed = frame.iloc[keep_indices].copy(deep=True).reset_index(drop=True)
+    trimmed_availability = [availability[index] for index in keep_indices]
+    return trimmed, trimmed_availability, dropped
+
+
 def map_filing_availability(
     joined_facts: pd.DataFrame,
     trading_dates: Sequence[Any] | pd.DatetimeIndex,
@@ -1700,6 +1727,11 @@ def map_filing_availability(
         availability.append(_map_one_session(
             row, sessions, policy, timezone_name, cutoff, timestamp_field,
         ))
+    output, availability, dropped_future = _drop_future_unmappable_rows(
+        output,
+        availability,
+        sessions,
+    )
     output["availability_session"] = availability
     output["filing_date"] = output["rcept_date"]
     if not all(value is not None for value in availability):
@@ -1717,6 +1749,7 @@ def map_filing_availability(
         "dart_policy_timezone": timezone_name,
         "dart_policy_cutoff_time": cutoff.isoformat() if cutoff is not None else None,
         "dart_amendment_policy": amendment_policy,
+        "dart_future_receipts_dropped": dropped_future,
         "krx_trading_dates": [pd.Timestamp(value).date().isoformat() for value in sessions],
     })
     resolved = _resolve_amendments(output, amendment_policy)

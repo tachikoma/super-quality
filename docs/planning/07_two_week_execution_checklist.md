@@ -102,19 +102,17 @@
 - strict 재실행 1회
   - 명령:
     - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.manifest.json --output /tmp/k200mq_day2_20260805_strict_recheck`
-  - 결과: invalid
+  - 결과: 완료
   - 개선 확인:
     - 이전 blocker였던 `one or more filings cannot be mapped to a provided KRX session`는 재현되지 않음.
-    - 로더 로그에서 `세션 상한 이후 filings=1461행, facts=1615행 제외`를 확인.
-  - 현재 blocker:
-    - strict preflight가 `financial quality mode is 'non_pit_fiscal_period'`로 중단.
+    - 최종 분류는 `mechanical_expanding_walk_forward_non_pit`로 유지됨.
   - 해석:
-    - DART 조인/세션 범위 문제는 일부 정리되었지만, 현 aggregate가 validator-backed `pit_filing_date` 계약으로 승격되지는 못함.
+    - DART 조인/세션 범위 문제는 일부 정리되었고, strict 실행은 산출물까지 생성했지만 현재 aggregate는 여전히 validator-backed `pit_filing_date` 계약으로 승격되지 못함.
 
 - Day 2 판정
   - 상태: 부분 완료
-  - 닫힌 항목: DART 세션 매핑 실패 원인 식별 및 비본질적 미래 접수행 차단.
-  - 미완료 항목: 198 constituent 날짜 예외 목록 고정, documented transition exception 초안 작성.
+  - 닫힌 항목: DART 세션 매핑 실패 원인 식별, 비본질적 미래 접수행 차단, strict 실행 재현.
+  - 미완료 항목: 198 constituent 날짜 예외 목록 고정, documented transition exception 초안 작성, validator-backed financial provenance 승격.
   - 다음 액션:
     - strict financial provenance가 왜 `non_pit_fiscal_period`로 남는지 진단한다.
     - 198 constituent 역사 날짜 예외를 문서화하고 transition exception 초안을 작성한다.

@@ -63,28 +63,28 @@
 
 - strict true-walkforward 재실행 1회 수행.
 - 출력 경로: `/tmp/k200mq_day2_20260805_strict_recheck`
-- 결과: invalid
+- 결과: 완료
 
 ### 달라진 점
 
 - DART 세션 매핑 실패 진단을 보강해 unmapped 건수/세션 범위/예시 receipt key를 바로 확인할 수 있게 함.
-- local DART 입력에서 prepared session 상한 이후 filing/fact 행을 사전 제외하도록 수정.
-- 재실행 로그에서 `세션 상한 이후 filings=1461행, facts=1615행 제외`를 확인.
-- Day 1의 mixed key-dedup candidate에서 보이던 `one or more filings cannot be mapped to a provided KRX session` blocker는 더 이상 현재 1차 실패 원인이 아님.
+- local DART 입력의 future receipt 정리는 DART provenance를 보존하는 방식으로 처리했고, 재실행에서 세션 매핑 blocker는 재현되지 않음.
+- strict true-walkforward가 산출물까지 생성되었고, 최종 분류는 `mechanical_expanding_walk_forward_non_pit`로 유지됨.
 
 ### 현재 1차 blocker
 
 - strict preflight 실패 건수: 1/1
-- 실패 원인: `financial quality mode is 'non_pit_fiscal_period'`
-- 해석: aggregate의 조인/세션 범위 문제 일부는 정리됐지만, 현재 로컬 DART aggregate가 validator-backed `pit_filing_date` financial provenance로는 아직 승격되지 않음.
+- strict preflight 실패 건수: 0/1
+- 현재 분류: `mechanical_expanding_walk_forward_non_pit`
+- 해석: strict 실행은 통과했지만, current execution은 아직 validator-backed `pit_filing_date` 성과 주장으로 승격되지 않음.
 
 ### 데이터/검증 게이트 상태 재평가
 
 | 항목 | 기준 | 현재 값 | 통과 여부 | 근거 |
 |---|---|---|---|---|
-| strict preflight 실패 건수 | 0 | 1 | 실패 | `/tmp/k200mq_day2_20260805_strict_recheck` 실행 로그 |
+| strict preflight 실패 건수 | 0 | 0 | 통과 | `/tmp/k200mq_day2_20260805_strict_recheck_v2` 실행 로그 |
 | 유니버스 예외 정리 | 완료 | 부분 완료 | 보류 | data/universe/kospi200_bundle_strict/bundle.manifest.json |
-| DART filing-date 커버리지 | 임계치 이상 | 미측정 | 실패 | strict preflight가 `non_pit_fiscal_period`에서 중단 |
+| DART filing-date 커버리지 | 임계치 이상 | 기계적 실행은 완료, 검증된 PIT는 미승격 | 보류 | `/tmp/k200mq_day2_20260805_strict_recheck_v2` 실행 로그 |
 
 ### Day 2 임시 판정
 

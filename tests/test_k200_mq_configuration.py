@@ -288,7 +288,7 @@ def test_local_dart_inputs_drop_future_receipts_outside_session_range(tmp_path: 
     assert not financial_data.empty
     assert financial_data["rcept_no"].tolist() == ["R1"]
     assert isinstance(daily_financial, pd.DataFrame)
-    assert isinstance(financial_provenance, dict)
+    assert financial_provenance["pit_valid"] is True
 
 
 def test_config_rejects_invalid_correlation_filter_bounds_when_enabled() -> None:

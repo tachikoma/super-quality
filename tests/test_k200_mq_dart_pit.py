@@ -161,6 +161,74 @@ def test_unmappable_session_error_includes_examples_and_session_range(tmp_path: 
     assert "rcept_no=R1" in message
 
 
+def test_future_receipt_after_last_session_is_trimmed_not_fatal(tmp_path: Path) -> None:
+    filing_source, filing_manifest = _write_json(tmp_path, "filings-future-trim.json", [
+        {
+            "corp_code": "001",
+            "stock_code": "005930",
+            "corp_name": "Example",
+            "rcept_no": "R1",
+            "rcept_dt": "20240102",
+            "report_nm": "사업보고서",
+            "pblntf_ty": "A",
+            "pblntf_detail_ty": "B",
+            "rm": "",
+        },
+        {
+            "corp_code": "001",
+            "stock_code": "005930",
+            "corp_name": "Example",
+            "rcept_no": "R2",
+            "rcept_dt": "20250331",
+            "report_nm": "사업보고서",
+            "pblntf_ty": "A",
+            "pblntf_detail_ty": "B",
+            "rm": "",
+        },
+    ])
+    fact_source, fact_manifest = _write_json(tmp_path, "facts-future-trim.json", [
+        {
+            "rcept_no": "R1",
+            "corp_code": "001",
+            "bsns_year": "2023",
+            "reprt_code": "11011",
+            "fs_div": "CFS",
+            "sj_div": "BS",
+            "account_id": "ifrs-full_Revenue",
+            "account_nm": "Revenue",
+            "account_detail": "consolidated",
+            "period_end": "20231231",
+            "thstrm_amount": "1,000",
+            "currency": "KRW",
+        },
+        {
+            "rcept_no": "R2",
+            "corp_code": "001",
+            "bsns_year": "2024",
+            "reprt_code": "11011",
+            "fs_div": "CFS",
+            "sj_div": "BS",
+            "account_id": "ifrs-full_Revenue",
+            "account_nm": "Revenue",
+            "account_detail": "consolidated",
+            "period_end": "20241231",
+            "thstrm_amount": "2,000",
+            "currency": "KRW",
+        },
+    ])
+    filings = load_filing_metadata(filing_source, manifest=filing_manifest)
+    facts = load_financial_facts(fact_source, manifest=fact_manifest)
+    prepared = prepare_financial_facts(
+        facts,
+        filings,
+        pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]),
+        amendment_policy="first_filing",
+    )
+    assert prepared["rcept_no"].tolist() == ["R1"]
+    assert prepared.attrs["dart_future_receipts_dropped"] == 1
+    assert prepared.attrs["financial_provenance"]["mode"] == "pit_filing_date"
+
+
 def test_post_join_timestamp_injection_cannot_promote_to_pit(tmp_path: Path) -> None:
     filings, facts = _sources(tmp_path)
     joined = join_financial_facts_to_filings(facts, filings)
