@@ -173,3 +173,25 @@
 2. Merge: `scripts/build_local_dart_aggregates.py`로 merged artifacts 재생성
 3. Strict rerun: `k200_mq.main true-walkforward --strict-pit` 재실행
 4. 재측정: Day 3 coverage 지표(min/median/max) 재계산 후 본 문서 Gate 재판정
+
+### Day 4 실행 결과 (2026-08-05, 추가)
+
+- 현재 blocker:
+	- `DART_API_KEY=unset`로 네트워크 fetch 실행 불가
+- 오프라인 대안 실행:
+	- 기존 로컬 배치(`dart_batch_pilot_mapped`, `dart_batch_pilot_mixed`) union aggregate 재생성
+	- 결과: aggregate 생성은 성공했으나 strict 준비 조인 무결성 실패
+		- duplicate `(corp_code, rcept_no)`
+		- facts duplicate identity
+		- missing filing joins
+- 로컬 아티팩트 조합 탐색(30개) 결과:
+	- strict 준비 통과 조합: 5개
+	- 최상위 조합 coverage: min 0.0000 / median 0.0303 / max 0.0354 (기존과 동일)
+
+### Gate 상태 (최신)
+
+| 항목 | 상태 | 코멘트 |
+|---|---|---|
+| Gate 1 strict preflight | 유지 | 기존 통과 상태 유지 |
+| Gate 2 filing-date coverage | 실패 유지 | 로컬 재조합만으로 개선 불가; 신규 fetch 필요 |
+| Gate 3 completeness | 실패 유지 | 신규 수집 후 재측정 전까지 변경 없음 |

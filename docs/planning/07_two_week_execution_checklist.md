@@ -182,3 +182,22 @@
   3. strict true-walkforward 재실행
      - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_day4_missing/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_day4_missing/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_day4_missing/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_day4_missing/dart_facts_merged.manifest.json --output /tmp/k200mq_day4_20260805_strict_recheck`
   4. Day 3 지표 재측정 및 scorecard 재판정
+
+- Day 4 실행 결과 (2026-08-05, 추가)
+  - 환경 확인:
+    - `DART_API_KEY=unset` 확인 (배치 fetch 즉시 실행 불가)
+  - 오프라인 대안 검증:
+    - `dart_batch_pilot_mapped` + `dart_batch_pilot_mixed` union으로
+      `data/raw/dart_aggregated_day4_union_local` 재생성 시도
+    - aggregate 생성 자체는 성공 (filings 19,887 / facts 93,048)
+    - 그러나 strict 준비 조인에서 무결성 실패:
+      - duplicate `(corp_code, rcept_no)`
+      - facts duplicate identity
+      - missing filing joins
+  - 유효 조합 탐색 결과:
+    - 로컬 조합 30개 중 strict 준비 통과 조합 5개
+    - 통과 조합의 coverage는 기존과 동일:
+      - min 0.0000 / median 0.0303 / max 0.0354
+  - 결론:
+    - 네트워크 신규 수집(fetch) 없이는 Day 4 coverage 개선 불가
+    - 다음 액션의 선행조건은 `DART_API_KEY` 세팅
