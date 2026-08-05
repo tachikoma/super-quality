@@ -112,7 +112,13 @@
 - Day 2 판정
   - 상태: 부분 완료
   - 닫힌 항목: DART 세션 매핑 실패 원인 식별, 비본질적 미래 접수행 차단, strict 실행 재현.
-  - 미완료 항목: 198 constituent 날짜 예외 목록 고정, documented transition exception 초안 작성, validator-backed financial provenance 승격.
+  - 미완료 항목: validator-backed financial provenance 승격.
   - 다음 액션:
     - strict financial provenance가 왜 `non_pit_fiscal_period`로 남는지 진단한다.
-    - 198 constituent 역사 날짜 예외를 문서화하고 transition exception 초안을 작성한다.
+    - 198 constituent 역사 날짜 예외는 `data/universe/kospi200_bundle_strict/bundle.manifest.json`의 `transition_exceptions_by_as_of`에 120개 월말 날짜(2015-01-30 ~ 2024-12-31)로 이미 고정되어 있으므로, 이를 문서에서 요약하고 전이 예외 초안을 최종화한다.
+
+- 예외 요약
+  - 범위: 2015-01-30 ~ 2024-12-31
+  - 개수: 120개 월말 리밸런싱 일자
+  - 성격: 각 날짜의 구성원 수가 198인 documented historical transition size
+  - 근거: `data/universe/kospi200_bundle_strict/bundle.manifest.json`

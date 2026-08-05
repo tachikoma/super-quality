@@ -77,13 +77,14 @@
 - strict preflight 실패 건수: 0/1
 - 현재 분류: `mechanical_expanding_walk_forward_non_pit`
 - 해석: strict 실행은 통과했지만, current execution은 아직 validator-backed `pit_filing_date` 성과 주장으로 승격되지 않음.
+- transition exception: `data/universe/kospi200_bundle_strict/bundle.manifest.json`의 `transition_exceptions_by_as_of`에 120개 월말 일자가 문서화되어 있음(2015-01-30 ~ 2024-12-31, 각 날짜 198 구성원).
 
 ### 데이터/검증 게이트 상태 재평가
 
 | 항목 | 기준 | 현재 값 | 통과 여부 | 근거 |
 |---|---|---|---|---|
 | strict preflight 실패 건수 | 0 | 0 | 통과 | `/tmp/k200mq_day2_20260805_strict_recheck_v2` 실행 로그 |
-| 유니버스 예외 정리 | 완료 | 부분 완료 | 보류 | data/universe/kospi200_bundle_strict/bundle.manifest.json |
+| 유니버스 예외 정리 | 완료 | 문서화 완료 | 통과 | data/universe/kospi200_bundle_strict/bundle.manifest.json |
 | DART filing-date 커버리지 | 임계치 이상 | 기계적 실행은 완료, 검증된 PIT는 미승격 | 보류 | `/tmp/k200mq_day2_20260805_strict_recheck_v2` 실행 로그 |
 
 ### Day 2 임시 판정
