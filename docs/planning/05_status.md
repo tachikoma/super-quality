@@ -26,6 +26,8 @@
   equity 정확성도 확인: 57/57 보고서가 exact equity 행을 가지며 equity ≤ assets.
 - 현재 환경에서는 `DART_API_KEY`가 설정되어 있지 않아 live fetch는 실행될 수 없고, 이 상태에서는 신규 DART 수집을 통한 coverage 개선이 불가능하다.
 - 로컬 union 기반 오프라인 대안으로도 strict 준비 조인 불안정성이 해소되지 않아, 현재는 데이터 확보 단계가 여전히 병목이다.
+- strict PIT 로컬 상한 조사(2026-08-06): 로더의 `join_financial_facts_to_filings`는 `(corp_code, rcept_no)`로 모든 facts가 filings에 존재해야 하며, `_reject_fact_provenance_collisions`가 facts로부터 일자 파생을 금지한다. mapped 배치는 corp당 filing 1페이지만(`pagination.complete: false`)이고 20 corp는 filing 파일이 전혀 없어, **strict PIT 커버리지는 로컬 데이터로 7종목 상한**이다. 확장은 DART API(키·쿼터)에 전적으로 종속된다.
+- Option D 실행(2026-08-06): keydedup 7종목 DART + bundle 유니버스로 `true-walkforward` 2020-2024를 실행해 `outputs_k200mq_mechanical_full/`에 저장했다. 품질 팩터 18,305행 계산(51행 재무 입력), stitched OOS 수익률 +79.7%(5년), CAGR 12.4%, 최대 낙폭 -20.9%, OOS 1,231점. 단 유니버스가 현재 시점 mcap proxy라 `mechanical_expanding_walk_forward_non_pit`으로 분류되며 검증된 성과 주장이 아니다.
 - 따라서 현재 공식 진단은 계속해서 비-PIT 기계적 진단으로 유지되며, strict PIT 근거 승격은 API key 확보 후 재실행이 필요하다.
 
 ## 한눈에 보는 상태
@@ -35,7 +37,7 @@
 | 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, 테스트가 구현됨. |
 | 기계적 비-PIT 진단 | `robustness` 독립 하위 기간 테스트와 expanding-window `true-walkforward`를 사용할 수 있음. |
 | 검증된 PIT 근거 | 아직 없음. |
-| 현재 공식 진단 | v4 no-DART 모멘텀 전용 기계적 WF: 연결 수익률 +4.0408%, 최대 낙폭 -32.0408%, OOS 지점 1,231개. |
+| 현재 공식 진단 | 7종목 DART 품질 + bundle 유니버스 기계적 WF(2020-2024): stitched +79.7%, CAGR 12.4%, MDD -20.9%, OOS 1,231점 (`mechanical_expanding_walk_forward_non_pit`). v4 no-DART 모멘텀 전용 기계적 WF(+4.0408%, -32.0408%)는 여전히 모멘텀 전용 참조. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
 | 다음 게이트 | 198 구성원 전이 예외는 manifest로 해소됨(2026-08-06). 남은 병목은 더 넓은 역사 범위의 DART 제출일 데이터 확보. |
 

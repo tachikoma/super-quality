@@ -16,6 +16,7 @@ data/universe/
 data/processed/
 outputs/
 outputs_k200mq/
+outputs_k200mq_mechanical_full/
 docs_cache/
 
 # Environment variables

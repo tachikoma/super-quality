@@ -309,3 +309,27 @@
 - 회귀: 관련 스위트 49 passed, 전체 409 passed + 기존 무관 레거시 실패 1건, ruff clean.
 - 함의: 191개 신규 종목 수집 전에 매핑이 대부분의 실제 계정명을 처리함을 확인. cogs처럼
   공백 변형 계정명이 더 발견되면 후보를 확장한다.
+
+## Option D 실행 — 7종목 DART 품질 기계적 WF (2026-08-06, 추가)
+
+- 배경: strict PIT 로컬 상한이 7종목임을 확정(로더는 `(corp_code, rcept_no)`로 전 facts→filings
+  조인을 요구하고, mapped 배치는 corp당 filing 1페이지뿐, 20 corp는 filing 파일 부재,
+  `rcept_no` 일자 파생은 `_reject_fact_provenance_collisions`가 금지). Oracle 검토로
+  7종목 strict 실행은 infra 검증으로도 미미(대형주 서바이버 편향)하므로 보류하고,
+  **로컬 가용 데이터로 최대의 기계적 진단**(Option D)을 우선 실행하기로 결정.
+- 실행 명령:
+  - `uv run python -m k200_mq.main true-walkforward --local-dart-filing-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_pilot_mixed_keydedup/dart_facts_merged.manifest.json --output outputs_k200mq_mechanical_full --exclude-kospi-top-n 0`
+- 결과 (keydedup 7종목 DART + bundle 유니버스, 2015-2024 expanding WF):
+  - 품질 팩터: 재무 입력 51행 → 품질 팩터 18,305행 계산 (로컬 DART provenance 활성)
+  - 폴드별(모두 TOP_N_10 선택, status=valid):
+    - 2020: +27.1% / Sharpe 1.32 / MDD -12.6%
+    - 2021: +4.3% / Sharpe 0.13 / MDD -13.1%
+    - 2022: -6.4% / Sharpe -0.90 / MDD -14.6%
+    - 2023: +13.1% / Sharpe 0.61 / MDD -20.9%
+    - 2024: +27.9% / Sharpe 1.13 / MDD -20.5%
+  - Stitched OOS: 수익률 +79.7% (5년), CAGR 12.4%, MDD -20.9%, OOS 1,231점 (2020-2024)
+- 분류: `mechanical_expanding_walk_forward_non_pit` — 유니버스가 현재 시점 mcap proxy
+  (`contract: current_market_cap_snapshot`)라 **검증된 성과 주장이 아님**. 성과 자체보다
+  7종목 PIT 품질 → 엔진 전체 경로가 기계적 WF에서 동작함을 확인한 것이 본 실행의 가치.
+- 산출물: `outputs_k200mq_mechanical_full/true_walkforward/{summary.csv,oos_returns.csv,selection_and_folds.json}`
+- 함의: strict PIT 근거 승격은 여전히 광범위 DART filing 메타데이터 확보(API 키·쿼터) 후에만 가능.
