@@ -10,6 +10,8 @@ SPEC_FILE="${SPEC_FILE:-data/raw/dart_batch_spec_day4_missing_both.json}"
 BATCH_OUT_DIR="${BATCH_OUT_DIR:-data/raw/dart_batch_day4_missing}"
 AGG_OUT_DIR="${AGG_OUT_DIR:-data/raw/dart_aggregated_day4_missing}"
 RUN_OUT_DIR="${RUN_OUT_DIR:-/tmp/k200mq_day4_$(date +%Y%m%d)_strict_recheck}"
+FETCH_START_INDEX="${FETCH_START_INDEX:-1}"
+FETCH_MAX_REQUESTS="${FETCH_MAX_REQUESTS:-0}"
 
 if [[ ! -f "$SPEC_FILE" ]]; then
   echo "[ERROR] Missing batch spec: $SPEC_FILE"
@@ -27,6 +29,8 @@ echo "[INFO] SPEC_FILE=$SPEC_FILE"
 echo "[INFO] BATCH_OUT_DIR=$BATCH_OUT_DIR"
 echo "[INFO] AGG_OUT_DIR=$AGG_OUT_DIR"
 echo "[INFO] RUN_OUT_DIR=$RUN_OUT_DIR"
+echo "[INFO] FETCH_START_INDEX=$FETCH_START_INDEX"
+echo "[INFO] FETCH_MAX_REQUESTS=$FETCH_MAX_REQUESTS"
 
 mkdir -p "$BATCH_OUT_DIR" "$AGG_OUT_DIR"
 
@@ -34,6 +38,8 @@ echo "[STEP 1/3] Fetch local DART responses"
 uv run python scripts/fetch_local_dart_response.py \
   --batch-file "$SPEC_FILE" \
   --output-dir "$BATCH_OUT_DIR" \
+  --start-index "$FETCH_START_INDEX" \
+  --max-requests "$FETCH_MAX_REQUESTS" \
   --continue-on-error
 
 echo "[CHECK] Validate fetched API status before aggregation"
