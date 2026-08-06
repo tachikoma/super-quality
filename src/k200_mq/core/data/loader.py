@@ -15,11 +15,12 @@ from __future__ import annotations
 import logging
 import time
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 
+from k200_mq.data.account_mapping import ACCOUNT_COLUMN_MAPPING
 from super_quality.data.cache import DataCache
 
 logger = logging.getLogger(__name__)
@@ -813,43 +814,11 @@ def get_financial_data(
 
         dart = OpenDartReader(api_key)
 
-        account_mapping: dict[str, list[str]] = {
-            "revenue": [
-                "ifrs-full_Revenue",
-                "ifrs_Revenue",
-                "매출액",
-            ],
-            "cogs": [
-                "ifrs-full_CostOfSales",
-                "ifrs_CostOfSales",
-                "매출원가",
-            ],
-            "net_income": [
-                "ifrs-full_ProfitLoss",
-                "ifrs_ProfitLoss",
-                "당기순이익",
-            ],
-            "operating_cf": [
-                "ifrs-full_CashFlowsFromOperatingActivities",
-                "ifrs_CashFlowsFromOperatingActivities",
-                "영업활동현금흐름",
-                "영업현금흐름",
-            ],
-            "total_assets": [
-                "ifrs-full_Assets",
-                "ifrs_Assets",
-                "자산총계",
-            ],
-            "total_equity": [
-                "ifrs-full_Equity",
-                "ifrs_Equity",
-                "자본총계",
-            ],
-        }
+        account_mapping = ACCOUNT_COLUMN_MAPPING
 
         def _find_account(
             data: list[dict[str, Any]] | pd.DataFrame,
-            possible_names: list[str],
+            possible_names: Sequence[str],
             column_name: str | None = None,
         ) -> float | None:
             def _get_name(item: Any) -> str:

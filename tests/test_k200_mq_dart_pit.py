@@ -18,6 +18,7 @@ from k200_mq.data.dart_pit import (
     load_filing_metadata,
     join_financial_facts_to_filings,
     map_filing_availability,
+    pivot_financial_facts_to_wide,
     prepare_financial_facts,
     validate_dart_pit,
 )
@@ -488,4 +489,103 @@ def test_package_exports_are_unambiguous_dart_apis() -> None:
     assert hasattr(data_api, "load_dart_financial_facts")
     assert hasattr(data_api, "prepare_dart_financial_facts")
     assert not hasattr(data_api, "load_financial_facts")
+
+
+def test_pivot_merges_long_facts_into_wide_quality_columns() -> None:
+    prepared = pd.DataFrame([
+        {
+            "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-03").date(),
+            "account_id": "ifrs-full_Revenue", "account_name": "Revenue",
+            "numeric_value": 1000.0,
+        },
+        {
+            "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-03").date(),
+            "account_id": "ifrs-full_CostOfSales", "account_name": "CostOfSales",
+            "numeric_value": 400.0,
+        },
+        {
+            "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-03").date(),
+            "account_id": "ifrs-full_ProfitLoss", "account_name": "ProfitLoss",
+            "numeric_value": 100.0,
+        },
+        {
+            "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-03").date(),
+            "account_id": "ifrs-full_CashFlowsFromOperatingActivities",
+            "account_name": "OperatingCashFlows", "numeric_value": 80.0,
+        },
+        {
+            "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-03").date(),
+            "account_id": "ifrs-full_Assets", "account_name": "Assets",
+            "numeric_value": 2000.0,
+        },
+        {
+            "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-03").date(),
+            "account_id": "ifrs-full_Equity", "account_name": "Equity",
+            "numeric_value": 1200.0,
+        },
+    ])
+    prepared.attrs["financial_provenance_contract"] = {
+        "source": "unverified_local_dart_response",
+        "schema": {
+            "filing_date": {"type": "date", "role": "filing availability date from rcept_dt"},
+        },
+        "availability_policy": "next_session",
+    }
+
+    wide = pivot_financial_facts_to_wide(prepared)
+
+    assert len(wide) == 1
+    assert wide.loc[0, "ticker"] == "005930"
+    assert wide.loc[0, "revenue"] == 1000.0
+    assert wide.loc[0, "cogs"] == 400.0
+    assert wide.loc[0, "net_income"] == 100.0
+    assert wide.loc[0, "operating_cf"] == 80.0
+    assert wide.loc[0, "total_assets"] == 2000.0
+    assert wide.loc[0, "total_equity"] == 1200.0
+    assert wide.attrs["financial_provenance_contract"] is prepared.attrs["financial_provenance_contract"]
+
+
+def test_pivot_keeps_one_row_per_report(tmp_path: Path) -> None:
+    facts = pd.DataFrame([
+        {
+            "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-03").date(),
+            "account_id": "ifrs-full_Revenue", "account_name": "Revenue",
+            "numeric_value": 1000.0,
+        },
+        {
+            "rcept_no": "R2", "corp_code": "001", "stock_code": "005930",
+            "filing_date": pd.Timestamp("2024-01-05").date(),
+            "account_id": "ifrs-full_Revenue", "account_name": "Revenue",
+            "numeric_value": 2000.0,
+        },
+    ])
+
+    wide = pivot_financial_facts_to_wide(facts)
+
+    assert wide["ticker"].tolist() == ["005930", "005930"]
+    assert wide["revenue"].tolist() == [1000.0, 2000.0]
+    assert wide["filing_date"].tolist() == [
+        pd.Timestamp("2024-01-03").date(),
+        pd.Timestamp("2024-01-05").date(),
+    ]
+
+
+def test_pivot_matches_account_id_when_name_is_noncanonical() -> None:
+    facts = pd.DataFrame([{
+        "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+        "filing_date": pd.Timestamp("2024-01-03").date(),
+        "account_id": "ifrs-full_Revenue", "account_name": "NonCanonicalLabel",
+        "numeric_value": 500.0,
+    }])
+
+    wide = pivot_financial_facts_to_wide(facts)
+
+    assert wide.loc[0, "revenue"] == 500.0
     assert not hasattr(data_api, "prepare_financial_facts")

@@ -286,7 +286,8 @@ def test_local_dart_inputs_drop_future_receipts_outside_session_range(tmp_path: 
     )
 
     assert not financial_data.empty
-    assert financial_data["rcept_no"].tolist() == ["R1"]
+    assert financial_data["ticker"].tolist() == ["005930"]
+    assert financial_data["revenue"].tolist() == [1000.0]
     assert isinstance(daily_financial, pd.DataFrame)
     assert financial_provenance["pit_valid"] is True
 

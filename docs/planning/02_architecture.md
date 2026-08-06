@@ -10,6 +10,7 @@ src/
 │   ├── main.py                  # CLI 진입점
 │   ├── data/
 │   │   ├── __init__.py
+│   │   ├── account_mapping.py    # 공용 OpenDART account→wide 매핑
 │   │   ├── dart_pit.py           # 로컬 OpenDART 제출일 provenance 계약
 │   │   ├── krx_pit.py            # 인증된 KRX KOSPI 200 스냅샷 어댑터
 │   │   ├── pit_universe.py       # 로컬 PIT 후보 importer와 검증
@@ -74,6 +75,7 @@ docs/planning/
     ├── 3. 팩터 (리밸런싱 일자별 횡단면):
     │    ├── momentum.py → skipped-return v4 → z-score 순위
     │    ├── quality.py  → ROE, DE, OpMargin, CashConv → z-score 순위
+    │    │         └─ 입력: 정규화 로더 또는 로컬 DART pivot(account_mapping)
     │    └── regime.py   → KPI200 > MA(REGIME_MA_PERIOD) AND
     │                       20일 수익률 > REGIME_MIN_RETURN
     │
@@ -107,8 +109,10 @@ docs/planning/
 
 provenance 계약은 여러 스냅샷의 날짜별 원천, 원시 바이트 SHA-256, 시간대가 있는
 타임스탬프, 행 수, 스냅샷 식별자, 재로딩 결과와 최종 정규화 프레임의 일치를
-검증합니다. 로컬 OpenDART 계약은 존재하지만 원시 API/벌크 수집과 품질 팩터 기본
-경로 연결은 아직 남아 있습니다.
+검증합니다. 로컬 OpenDART 계약은 존재하며, 2026-08-06부터 공용 account→wide 매핑
+(`data/account_mapping.py`)과 long→wide pivot(`dart_pit.pivot_financial_facts_to_wide`)을
+통해 품질 팩터 기본 경로에 연결되었습니다. 남은 작업은 원시 API/벌크 수집으로
+역사 데이터를 확보하는 것입니다.
 
 ## 팩터 설계 상세
 
@@ -129,8 +133,11 @@ provenance 계약은 여러 스냅샷의 날짜별 원천, 원시 바이트 SHA-
   필터 없음)
 - **TTM quarter filter**: `QUALITY_MIN_TTM_QUARTERS`는 비활성·미지원/보류
 - **정규화**: 리밸런싱 일자별 횡단면 z-score
-- **DART 계정 매핑**: 명시적 계정 코드 매핑은 보류. 현재는 정규화 로더 입력을
-  사용하며 OpenDART 원시 수집과 품질 팩터 연결이 필요합니다.
+- **DART 계정 매핑**: `ACCOUNT_COLUMN_MAPPING`(`src/k200_mq/data/account_mapping.py`)이
+  OpenDART 계정명/계정코드를 wide 6컬럼(revenue, cogs, net_income, operating_cf,
+  total_assets, total_equity)으로 매핑하고, `dart_pit.pivot_financial_facts_to_wide`가
+  long facts를 wide로 피벗해 로컬 DART 입력이 품질 팩터로 직접 흐릅니다.
+  정규화 로더(API 경로)도 동일 매핑을 공유합니다.
 
 ### 레짐(Regime) 팩터 (`factors/regime.py`)
 

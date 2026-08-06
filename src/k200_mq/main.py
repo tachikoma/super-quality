@@ -885,6 +885,7 @@ def _load_local_dart_financial_inputs(
     from k200_mq.data.dart_pit import (
         load_financial_facts,
         load_filing_metadata,
+        pivot_financial_facts_to_wide,
         prepare_financial_facts,
     )
     from k200_mq.data.provenance import has_usable_filing_dates, validate_financial_provenance
@@ -896,12 +897,13 @@ def _load_local_dart_financial_inputs(
 
     filings = load_filing_metadata(filing_path, manifest=filing_manifest)
     facts = load_financial_facts(financial_path, manifest=financial_manifest)
-    financial_data = prepare_financial_facts(
+    prepared = prepare_financial_facts(
         facts,
         filings,
         all_full_dates,
         amendment_policy="first_filing",
     )
+    financial_data = pivot_financial_facts_to_wide(prepared)
     financial_provenance = validate_financial_provenance(
         financial_data,
         filing_date_used=has_usable_filing_dates(financial_data),
@@ -1985,9 +1987,9 @@ def prepare_k200mq_inputs(
     )
     logger.info("  모멘텀 팩터: %d행", len(momentum_df))
 
-    # 4b. 품질 팩터 (DART API 필요)
+    # 4b. 품질 팩터 (로컬 DART 파일 또는 DART API 필요)
     quality_df = pd.DataFrame()
-    if config.DART_API_KEY and not daily_financial.empty:
+    if (config.DART_API_KEY or _local_dart_source_ready(config)) and not daily_financial.empty:
         logger.info("  4b. 품질 팩터 계산 중 (DART API)...")
         try:
             quality_factor = QualityFactor(

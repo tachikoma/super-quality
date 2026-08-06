@@ -284,3 +284,12 @@
     - 120개 월말 날짜(2015-01-30 ~ 2024-12-31) 모두 `allowed_sizes: [198]`로 이미 고정.
     - 실제 CSV도 모든 날짜가 198 구성원으로 일치(`pit_universe.py`가 bundle manifest의 예외를 로드해 검증에 반영).
   - 결론: 198-member strict 게이트 병목은 **이미 manifest 전이 예외로 해소된 상태**이며, Day 4 재개 시 별도 조치 불필요.
+
+## 품질 배선 수정 (2026-08-06, 추가)
+
+- 확인: 로컬 DART facts가 품질 팩터로 흐르지 않던 배선 결함 2건을 oracle 검토로 확정하고 수정했다.
+  - 공용 매핑: `src/k200_mq/data/account_mapping.py`의 `ACCOUNT_COLUMN_MAPPING`이 계정명/계정코드를 wide 6컬럼(revenue, cogs, net_income, operating_cf, total_assets, total_equity)으로 매핑(정규화 로더 API 경로와 공유).
+  - pivot: `dart_pit.pivot_financial_facts_to_wide`가 long format facts를 wide로 피벗해 `_load_local_dart_financial_inputs`에 연결.
+  - 게이트: `main.py` 품질 활성 조건을 `DART_API_KEY` 단독에서 `(DART_API_KEY or 로컬 원천 준비) and daily_financial 비어있지 않음`으로 수정.
+- 검증: `tests/test_k200_mq_local_dart_quality.py` 통합 테스트로 ROE 8.3% / D/E 0.67 / OpMargin 60% / CashConv 0.8 확인, 관련 스위트 전체 통과(408 passed + 기존 무관 실패 1건), ruff clean.
+- 함의: 연간(11011) 축소 스펙 판정이 품질 팩터 실제 소비 경로에서 검증됨. API 키 확보 후 축소 스펙(2,057건)으로 재개하면 로컬 DART 품질 입력이 strict 실행에 반영된다.

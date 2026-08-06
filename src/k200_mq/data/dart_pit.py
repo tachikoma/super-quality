@@ -32,9 +32,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 
+from k200_mq.data.account_mapping import ACCOUNT_COLUMN_MAPPING, find_account_value
 from k200_mq.data.provenance import (
     FINANCIAL_PROVENANCE_CONTRACT_ATTR,
     NEXT_SESSION_POLICY,
+    find_filing_date_field,
 )
 
 
@@ -2217,6 +2219,73 @@ def prepare_financial_facts(
             else "filing_date"
         ),
     )
+
+
+def pivot_financial_facts_to_wide(
+    prepared: pd.DataFrame,
+    *,
+    account_mapping: Mapping[str, Sequence[str]] | None = None,
+) -> pd.DataFrame:
+    """Convert long-format prepared DART facts into the wide quality-factor schema.
+
+    ``prepare_financial_facts`` returns one row per ``(rcept_no, account_id)``
+    fact.  The quality factor and ``_convert_financial_to_daily`` expect one
+    row per report with the six semantic financial columns
+    (``revenue``, ``cogs``, ``net_income``, ``operating_cf``,
+    ``total_assets``, ``total_equity``) resolved from account ids/names.
+
+    The output keeps the PIT contract attached by ``prepare_financial_facts``
+    (``financial_provenance_contract``, filing-date field, availability
+    session) so downstream validation and daily conversion remain PIT valid.
+
+    Parameters
+    ----------
+    prepared : pd.DataFrame
+        ``prepare_financial_facts`` output (long format).  Requires
+        ``stock_code``, ``filing_date`` (or a supported timestamp field) and
+        the fact columns.
+    account_mapping : dict, optional
+        Override for the account id/name -> wide column mapping.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per report: ``ticker``, the availability date field, and the
+        six wide financial columns.
+    """
+    if prepared.empty:
+        return pd.DataFrame()
+
+    mapping = dict(ACCOUNT_COLUMN_MAPPING if account_mapping is None else account_mapping)
+
+    stock_code_field = "stock_code" if "stock_code" in prepared.columns else "corp_code"
+    filing_field = find_filing_date_field(prepared)
+    if filing_field is None:
+        raise DARTPITError("wide pivot requires a validated filing availability field")
+
+    # Group facts by report so each output row aggregates one filing.  The
+    # report identity keeps facts of the same filing together even when they
+    # carry different statement sections (BS/IS/CF).
+    report_keys = [column for column in ("rcept_no", "corp_code") if column in prepared.columns]
+    if not report_keys:
+        raise DARTPITError("wide pivot requires rcept_no or corp_code to group facts")
+    if len(report_keys) == 1:
+        report_keys.append("corp_code") if "corp_code" in prepared.columns else report_keys.append("rcept_no")
+
+    records: list[dict[str, Any]] = []
+    for _, group in prepared.groupby(report_keys, sort=False, dropna=False):
+        rows = [dict(row) for row in group.to_dict("records")]
+        record: dict[str, Any] = {
+            "ticker": str(group[stock_code_field].iloc[0]),
+            filing_field: group[filing_field].iloc[0],
+        }
+        for column in mapping:
+            record[column] = find_account_value(rows, column)
+        records.append(record)
+
+    result = pd.DataFrame(records)
+    result.attrs = dict(prepared.attrs)
+    return result
 
 
 # Naming aliases keep the importer easy to discover and preserve room for a

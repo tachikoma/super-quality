@@ -10,7 +10,12 @@
 - Day 4 배치 스펙(`data/raw/dart_batch_spec_day4_missing_both.json`)이 워크스페이스에서 누락되어 있었으나, 결손 ticker/corp_code 목록 재산출 후 동일 조건(7,667 requests)으로 복구했다.
 - 2026-08-06 재개 시도에서 7,667건(187 filing + 7,480 financial) 요청이 전부 OpenDART `status=020`(요청 제한 초과)으로 반환되어, fetch 후 aggregate 전에 중단되었다. 근본 제약은 API 일일 쿼터(일반적으로 2만 건 수준)이며 자정 리셋 후 청크 재수집이 필요하다.
 - fetch 스크립트와 day4 runner는 멱등 청크 재개를 지원한다: `--skip-verified`(이미 verified된 파일 재수집 방지), `--delay-seconds`(초당 제한 회피), `FETCH_ONLY`(청크 수집 중 aggregate/WF 재실행 방지).
-- 연간 전용 축소 배치 스펙(`data/raw/dart_batch_spec_day4_missing_annual.json`, 2,057건)이 추가되었다. 품질 팩터 입력은 신호일 기준 최신 facts를 ffill로 쓰고 TTM 필터가 inert여서, 통제된 fixture에서 연간(11011)만으로 PIT 준비 파이프라인(`pit_valid=True`)이 통과함을 확인했다. 재개 실행은 이 축소 스펙을 우선 사용해 020 재발 위험을 3.7배 낮춘다.
+- 연간 전용 축소 배치 스펙(`data/raw/dart_batch_spec_day4_missing_annual.json`, 2,057건)이 추가되었다. 품질 팩터 입력은 신호일 기준 최신 facts를 ffill로 쓰고 TTM 필터가 inert여서, 통제된 fixture에서 연간(11011)만으로 PIT 준비 파이프라인(`pit_valid=True`)이 통과함을 확인했다. 재개 실행은   이 축소 스펙을 우선 사용해 020 재발 위험을 3.7배 낮춘다.
+- 로컬 DART → 품질 팩터 배선 결함이 수정되었다(2026-08-06). `ACCOUNT_COLUMN_MAPPING`
+  (`src/k200_mq/data/account_mapping.py`)이 계정명/계정코드를 wide 6컬럼으로 매핑하고,
+  `dart_pit.pivot_financial_facts_to_wide`가 long format facts를 wide로 피벗하며,
+  `main.py` 품질 게이트가 `DART_API_KEY` 또는 로컬 원천 준비 상태를 검사한다.
+  통합 테스트로 ROE 8.3% / D/E 0.67 / OpMargin 60% / CashConv 0.8을 확인했다.
 - 현재 환경에서는 `DART_API_KEY`가 설정되어 있지 않아 live fetch는 실행될 수 없고, 이 상태에서는 신규 DART 수집을 통한 coverage 개선이 불가능하다.
 - 로컬 union 기반 오프라인 대안으로도 strict 준비 조인 불안정성이 해소되지 않아, 현재는 데이터 확보 단계가 여전히 병목이다.
 - 따라서 현재 공식 진단은 계속해서 비-PIT 기계적 진단으로 유지되며, strict PIT 근거 승격은 API key 확보 후 재실행이 필요하다.
@@ -103,11 +108,18 @@
   있습니다. 원시 제출과 재무 사실을 정규화하고, 응답 매니페스트의 SHA-256 사이드카를
   확인하며, `(corp_code, rcept_no)`로만 조인하고, 철회/모호한 조인을 거부하고,
   공식 날짜 전용 `rcept_dt`를 제출일보다 엄격히 뒤인 첫 KRX 세션으로 매핑합니다.
-  다만 실시간 API/벌크 수집과 현재 품질 팩터 기본 경로 연결은 아직 없습니다.
+  실시간 API/벌크 수집은 아직 없지만, 2026-08-06부터 로컬 DART 파일은 공용
+  `ACCOUNT_COLUMN_MAPPING`(`data/account_mapping.py`)과 `pivot_financial_facts_to_wide`를
+  거쳐 품질 팩터 기본 경로에 연결되었습니다.
 - strict 준비 경로는 이제 local DART filing metadata와 financial facts를 sidecar
   manifest와 함께 받아들입니다. API 키가 없어도 검증된 로컬 DART 파일로
   filing-date provenance를 세울 수 있지만, 역사 범위가 더 넓어야 검증된 PIT
   근거로 승격할 수 있습니다.
+- 공용 DART 계정 매핑(`src/k200_mq/data/account_mapping.py`)과 long→wide pivot
+  (`dart_pit.pivot_financial_facts_to_wide`)이 추가되어, 로컬 DART facts가 품질
+  팩터 6입력(revenue, cogs, net_income, operating_cf, total_assets, total_equity)으로
+  직접 흐릅니다. 정규화 로더(API 경로)와 동일 매핑을 공유하며, `main.py` 품질
+  게이트는 `DART_API_KEY` 또는 로컬 원천 준비 상태를 검사합니다.
 - 2026-08-04 기준, local DART facts의 `period_end` 보정은 로더 정규화 단계에서
   수행되도록 이동되었습니다. 준비 단계 이후 DataFrame 변형으로 lineage fingerprint가
   깨지던 문제가 제거되어, session-bounded pilot quick check에서는
@@ -277,8 +289,9 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
   미지정 정정 정책도 거부합니다.
 
 다음 단계는 OpenDART API/벌크 다운로드를 이 원시 로컬 파일과 매니페스트에 연결하는
-것입니다. 수집 어댑터와 역사 파일이 준비될 때까지 현재 품질 동작과 모든 비-PIT
-진단은 변하지 않습니다.
+것입니다. 원시 로컬 파일 → 품질 팩터 소비 경로는 공용 계정 매핑과 long→wide pivot으로
+이미 연결되어 있습니다(2026-08-06). 수집 어댑터와 역사 파일이 준비될 때까지 현재
+품질 동작과 모든 비-PIT 진단은 변하지 않습니다.
 
 ## 보류 또는 미지원 설정
 
