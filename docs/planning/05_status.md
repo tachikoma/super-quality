@@ -10,6 +10,7 @@
 - Day 4 배치 스펙(`data/raw/dart_batch_spec_day4_missing_both.json`)이 워크스페이스에서 누락되어 있었으나, 결손 ticker/corp_code 목록 재산출 후 동일 조건(7,667 requests)으로 복구했다.
 - 2026-08-06 재개 시도에서 7,667건(187 filing + 7,480 financial) 요청이 전부 OpenDART `status=020`(요청 제한 초과)으로 반환되어, fetch 후 aggregate 전에 중단되었다. 근본 제약은 API 일일 쿼터(일반적으로 2만 건 수준)이며 자정 리셋 후 청크 재수집이 필요하다.
 - fetch 스크립트와 day4 runner는 멱등 청크 재개를 지원한다: `--skip-verified`(이미 verified된 파일 재수집 방지), `--delay-seconds`(초당 제한 회피), `FETCH_ONLY`(청크 수집 중 aggregate/WF 재실행 방지).
+- 연간 전용 축소 배치 스펙(`data/raw/dart_batch_spec_day4_missing_annual.json`, 2,057건)이 추가되었다. 품질 팩터 입력은 신호일 기준 최신 facts를 ffill로 쓰고 TTM 필터가 inert여서, 통제된 fixture에서 연간(11011)만으로 PIT 준비 파이프라인(`pit_valid=True`)이 통과함을 확인했다. 재개 실행은 이 축소 스펙을 우선 사용해 020 재발 위험을 3.7배 낮춘다.
 - 현재 환경에서는 `DART_API_KEY`가 설정되어 있지 않아 live fetch는 실행될 수 없고, 이 상태에서는 신규 DART 수집을 통한 coverage 개선이 불가능하다.
 - 로컬 union 기반 오프라인 대안으로도 strict 준비 조인 불안정성이 해소되지 않아, 현재는 데이터 확보 단계가 여전히 병목이다.
 - 따라서 현재 공식 진단은 계속해서 비-PIT 기계적 진단으로 유지되며, strict PIT 근거 승격은 API key 확보 후 재실행이 필요하다.
@@ -23,7 +24,7 @@
 | 검증된 PIT 근거 | 아직 없음. |
 | 현재 공식 진단 | v4 no-DART 모멘텀 전용 기계적 WF: 연결 수익률 +4.0408%, 최대 낙폭 -32.0408%, OOS 지점 1,231개. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | bundle-directory 유니버스의 documented transition exception 정리와 더 넓은 역사 범위의 DART 제출일 데이터. |
+| 다음 게이트 | 198 구성원 전이 예외는 manifest로 해소됨(2026-08-06). 남은 병목은 더 넓은 역사 범위의 DART 제출일 데이터 확보. |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
@@ -244,8 +245,11 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 
 현재 다음 우선순위는 다음과 같습니다.
 
-1. bundle-directory 유니버스의 198 구성원 역사 날짜를 documented transition exception
-  또는 원천 보정으로 정리해 strict preflight를 통과시킵니다.
+1. ~~bundle-directory 유니버스의 198 구성원 역사 날짜를 documented transition exception
+  또는 원천 보정으로 정리해 strict preflight를 통과시킵니다.~~
+  **해소됨 (2026-08-06)**: `bundle.manifest.json`의 `transition_exceptions_by_as_of`가
+  120개 월말 날짜(2015-01-30 ~ 2024-12-31) 모두에 `allowed_sizes: [198]`로 이미 고정되어 있고,
+  `pit_universe.py`가 이를 로드해 검증에 반영한다.
 2. 원시 DART 제출/공시 메타데이터와 재무 사실을 API 또는 벌크 수집으로 확보하거나,
    검증된 로컬 파일로 확보하고, 제출일을 안전한 거래 세션 가용일로 매핑하여
    회계기간 날짜로 대체하지 않습니다.

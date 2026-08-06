@@ -258,14 +258,29 @@
 - 근본 제약
   - OpenDART 무료 티어 일일 쿼터(일반적으로 2만 건 수준)를 초과하면 020 반환. 일일 리셋 후 재시도 필요.
   - 실행 전제: `export DART_API_KEY="..."` 세팅.
+- 연간 전용 축소 스펙 (2026-08-06, 추가)
+  - 배경: 7,667건 전체가 하루 쿼터 내 실행되기 어려워, 품질 팩터가 실제로 필요한 요청만 남기기로 함.
+  - 검증: 통제된 fixture로 연간(11011)만으로 `prepare_financial_facts` → PIT 검증(`pit_valid=True`)까지 무결성 통과를 확인.
+    - 품질 팩터 입력은 `revenue/cogs/net_income/operating_cf/total_assets/total_equity` 6개 컬럼이고,
+      `_convert_financial_to_daily`(main.py:1062-1068)가 신호일 기준 최신 facts를 ffill하므로 기간 코드 구분 없이 동작.
+    - 품질 팩터 TTM 필터는 inert(`min_ttm_quarters` 미사용, factors/quality.py:136)라 분기 데이터가 필수가 아님.
+  - 생성 명령:
+    - `uv run python scripts/generate_dart_fetch_batch_spec.py --mode both --corp-codes-file data/raw/k200_day4_missing_corp_codes.txt --filing-bgn-de 20150101 --filing-end-de 20241231 --financial-start-year 2015 --financial-end-year 2024 --reprt-codes 11011 --output-file data/raw/dart_batch_spec_day4_missing_annual.json`
+  - 결과: `data/raw/dart_batch_spec_day4_missing_annual.json` — filing 187 + financial 1,870 = **2,057건** (기존 7,667 대비 3.73배 감소).
+  - 판정: 연간만으로 품질 팩터 입력이 확보되므로, 재개 실행은 **축소 스펙을 우선 사용**한다.
 - 재개 런북 (쿼터 리셋 + 키 세팅 후)
-  1. 작은 청크로 성공 확인:
-     - `FETCH_ONLY=1 FETCH_START_INDEX=1 FETCH_MAX_REQUESTS=200 ./scripts/run_day4_dart_backfill.sh`
+  1. 작은 청크로 성공 확인 (축소 스펙 2,057건 사용):
+     - `SPEC_FILE=data/raw/dart_batch_spec_day4_missing_annual.json FETCH_ONLY=1 FETCH_START_INDEX=1 FETCH_MAX_REQUESTS=200 ./scripts/run_day4_dart_backfill.sh`
   2. 성공하면 범위를 확대하며 반복 (예: 200건 단위):
-     - `FETCH_ONLY=1 FETCH_START_INDEX=201 FETCH_MAX_REQUESTS=200 ./scripts/run_day4_dart_backfill.sh`
-     - ... `FETCH_START_INDEX=7401`까지 (7,667건 누적)
+     - `SPEC_FILE=data/raw/dart_batch_spec_day4_missing_annual.json FETCH_ONLY=1 FETCH_START_INDEX=201 FETCH_MAX_REQUESTS=200 ./scripts/run_day4_dart_backfill.sh`
+     - ... `FETCH_START_INDEX=1901`까지 (2,057건 누적)
   3. 전체 청크 verified 누적 확인 후 원샷 완주:
-     - `./scripts/run_day4_dart_backfill.sh`  (FETCH_ONLY 해제 → aggregate + strict rerun)
+     - `SPEC_FILE=data/raw/dart_batch_spec_day4_missing_annual.json ./scripts/run_day4_dart_backfill.sh`  (FETCH_ONLY 해제 → aggregate + strict rerun)
   4. Day 3 지표 재측정 및 scorecard 재판정
 - 보안 권고
   - 이전 실행 중 프로세스 목록에 API 키가 노출될 수 있었으므로 키 재발급(회전)을 권장.
+- strict 유니버스 전이 예외 최종화 (2026-08-06, 추가)
+  - `data/universe/kospi200_bundle_strict/bundle.manifest.json`의 `transition_exceptions_by_as_of`를 재확인:
+    - 120개 월말 날짜(2015-01-30 ~ 2024-12-31) 모두 `allowed_sizes: [198]`로 이미 고정.
+    - 실제 CSV도 모든 날짜가 198 구성원으로 일치(`pit_universe.py`가 bundle manifest의 예외를 로드해 검증에 반영).
+  - 결론: 198-member strict 게이트 병목은 **이미 manifest 전이 예외로 해소된 상태**이며, Day 4 재개 시 별도 조치 불필요.
