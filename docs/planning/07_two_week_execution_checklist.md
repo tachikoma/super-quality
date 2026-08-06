@@ -5,6 +5,7 @@
 ## 2026-08-06 현재 체크포인트
 
 - Day 4 자동화 경로는 준비되었고, `scripts/run_day4_dart_backfill.sh`로 fetch/aggregate/recheck를 연속 실행할 수 있다.
+- Day 4 배치 스펙(`data/raw/dart_batch_spec_day4_missing_both.json`)이 현재 워크스페이스에서 누락되어 있었으나, 누락 종목/법인코드 목록을 재산출한 뒤 동일 조건(7,667 requests)으로 재생성했다.
 - 다만 현재 환경에서 `DART_API_KEY`가 미설정이므로, 실제 backfill은 아직 시작되지 않았다.
 - 오프라인 union 실험은 strict preflight에서 여전히 조인/커버리지 문제를 드러내, 데이터 확보가 우선 병목임이 확인되었다.
 - 다음 실행은 API key 수신 후 바로 진행하는 것이 적절하며, 그 전까지는 성과 판정보다 데이터 게이트 정리를 우선한다.
@@ -221,3 +222,19 @@
     - `./scripts/run_day4_dart_backfill.sh`
   - 선택 파라미터(환경변수 override):
     - `SPEC_FILE`, `BATCH_OUT_DIR`, `AGG_OUT_DIR`, `RUN_OUT_DIR`
+
+## Day 4 재개 점검 기록 (2026-08-06)
+
+- 점검 결과
+  - `scripts/run_day4_dart_backfill.sh` 최초 실행 시 `Missing batch spec`로 중단됨(`exit_code=1`).
+  - 원인: `data/raw/dart_batch_spec_day4_missing_both.json` 파일 부재.
+- 복구 조치
+  - strict 유니버스(198) 대비 현재 DART facts-join 커버(7)를 재계산해 결손 목록 재생성:
+    - `data/raw/k200_day4_missing_tickers.txt` (191)
+    - `data/raw/k200_day4_missing_corp_codes.txt` (187)
+    - 미매핑 4개: `000155`, `005385`, `005387`, `005935`
+  - 동일 파라미터로 배치 스펙 재생성:
+    - `data/raw/dart_batch_spec_day4_missing_both.json` (7,667 requests)
+- 재검증
+  - 스크립트 재실행 시 `DART_API_KEY is not set` 가드로 중단됨(`exit_code=2`).
+  - 해석: 자동화 경로 자체는 정상 복구되었고, 현재 유일한 선행조건은 API key 설정.
