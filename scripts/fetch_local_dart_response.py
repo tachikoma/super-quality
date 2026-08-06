@@ -12,6 +12,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -221,9 +222,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    api_key = args.api_key.strip()
+    api_key = args.api_key.strip() or os.getenv("DART_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("an OpenDART API key is required for fetch operations")
+        raise RuntimeError("an OpenDART API key is required for fetch operations (--api-key or DART_API_KEY)")
 
     if args.batch_file:
         batch_path = Path(args.batch_file)

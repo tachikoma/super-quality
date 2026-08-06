@@ -32,10 +32,43 @@ mkdir -p "$BATCH_OUT_DIR" "$AGG_OUT_DIR"
 
 echo "[STEP 1/3] Fetch local DART responses"
 uv run python scripts/fetch_local_dart_response.py \
-  --api-key "$DART_API_KEY" \
   --batch-file "$SPEC_FILE" \
   --output-dir "$BATCH_OUT_DIR" \
   --continue-on-error
+
+echo "[CHECK] Validate fetched API status before aggregation"
+STATUS_CHECK="$(BATCH_OUT_DIR="$BATCH_OUT_DIR" uv run python - <<'PY'
+import glob
+import json
+import os
+from pathlib import Path
+
+batch_out_dir = os.environ['BATCH_OUT_DIR']
+manifest_files = glob.glob(f'{batch_out_dir}/*.manifest.json')
+quota = 0
+verified = 0
+for path in manifest_files:
+    payload = json.loads(Path(path).read_text(encoding='utf-8'))
+    status = str(payload.get('api_status', ''))
+    if status == '020':
+        quota += 1
+    if status in {'000', '0'}:
+        verified += 1
+
+print(f'verified={verified};quota={quota};total_manifests={len(manifest_files)}')
+PY
+ )"
+echo "[CHECK] $STATUS_CHECK"
+
+if [[ "$STATUS_CHECK" == *"verified=0"* ]]; then
+  if [[ "$STATUS_CHECK" == *"quota="* && "$STATUS_CHECK" != *"quota=0"* ]]; then
+    echo "[ERROR] No verified OpenDART responses were fetched (API quota exceeded: status=020)."
+    echo "        Retry with chunked batch after quota reset using --start-index/--max-requests."
+  else
+    echo "[ERROR] No verified OpenDART responses were fetched. Aborting before aggregation."
+  fi
+  exit 3
+fi
 
 echo "[STEP 2/3] Build merged local DART aggregates"
 uv run python scripts/build_local_dart_aggregates.py \
