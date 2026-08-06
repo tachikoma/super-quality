@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -159,6 +160,28 @@ def _load_batch_spec(path: Path) -> list[dict[str, Any]]:
     return specs
 
 
+def _is_verified_spec(
+    *,
+    spec: dict[str, Any],
+    output_dir: Path,
+) -> bool:
+    output_name = str(spec.get("output_name") or "")
+    manifest_name = str(spec.get("manifest_name") or "")
+    if not output_name:
+        return False
+    if not manifest_name:
+        manifest_name = f"{Path(output_name).stem}.manifest.json"
+    raw_file = output_dir / output_name
+    manifest_file = output_dir / manifest_name
+    if not raw_file.is_file() or not manifest_file.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return str(manifest.get("api_status", "")) in {"000", "0"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Fetch one OpenDART response into a local raw file plus manifest.",
@@ -215,6 +238,17 @@ def main() -> None:
         help="Batch mode: continue processing remaining specs when a request fails",
     )
     parser.add_argument(
+        "--skip-verified",
+        action="store_true",
+        help="Batch mode: skip specs whose output file already exists and is verified (api_status 000/0)",
+    )
+    parser.add_argument(
+        "--delay-seconds",
+        type=float,
+        default=0.0,
+        help="Batch mode: sleep this many seconds between requests to respect rate limits",
+    )
+    parser.add_argument(
         "--retrieved-at-utc",
         default="",
         help="UTC retrieval timestamp (ISO-8601). Default: now in UTC",
@@ -243,10 +277,14 @@ def main() -> None:
             selected_specs = selected_specs[:args.max_requests]
         outputs: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
+        skipped: list[int] = []
         for index, spec in enumerate(selected_specs, start=args.start_index):
             if not isinstance(spec.get("kind"), str) or spec["kind"] not in OPEN_DART_ENDPOINTS:
                 raise RuntimeError(f"invalid batch request kind at item {index}")
             item_kind = str(spec["kind"])
+            if args.skip_verified and _is_verified_spec(spec=spec, output_dir=output_dir):
+                skipped.append(index)
+                continue
             item_params = _normalize_request_params(
                 _parse_request_param(list(spec.get("request_params", [])))
             )
@@ -276,12 +314,16 @@ def main() -> None:
                 })
                 if not args.continue_on_error:
                     raise
+            if args.delay_seconds > 0:
+                time.sleep(args.delay_seconds)
         batch_summary = output_dir / "batch_summary.json"
         batch_summary.write_text(json.dumps(outputs, ensure_ascii=False, indent=2), encoding="utf-8")
         if failures:
             failure_report = output_dir / "batch_failures.json"
             failure_report.write_text(json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"batch failures: {len(failures)} -> {failure_report}")
+        if skipped:
+            print(f"batch skipped verified: {len(skipped)}")
         print(f"fetched {len(outputs)} DART responses -> {output_dir}")
         print(f"batch summary written -> {batch_summary}")
         return

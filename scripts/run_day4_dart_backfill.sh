@@ -12,6 +12,8 @@ AGG_OUT_DIR="${AGG_OUT_DIR:-data/raw/dart_aggregated_day4_missing}"
 RUN_OUT_DIR="${RUN_OUT_DIR:-/tmp/k200mq_day4_$(date +%Y%m%d)_strict_recheck}"
 FETCH_START_INDEX="${FETCH_START_INDEX:-1}"
 FETCH_MAX_REQUESTS="${FETCH_MAX_REQUESTS:-0}"
+FETCH_DELAY_SECONDS="${FETCH_DELAY_SECONDS:-0}"
+FETCH_ONLY="${FETCH_ONLY:-0}"
 
 if [[ ! -f "$SPEC_FILE" ]]; then
   echo "[ERROR] Missing batch spec: $SPEC_FILE"
@@ -31,6 +33,8 @@ echo "[INFO] AGG_OUT_DIR=$AGG_OUT_DIR"
 echo "[INFO] RUN_OUT_DIR=$RUN_OUT_DIR"
 echo "[INFO] FETCH_START_INDEX=$FETCH_START_INDEX"
 echo "[INFO] FETCH_MAX_REQUESTS=$FETCH_MAX_REQUESTS"
+echo "[INFO] FETCH_DELAY_SECONDS=$FETCH_DELAY_SECONDS"
+echo "[INFO] FETCH_ONLY=$FETCH_ONLY"
 
 mkdir -p "$BATCH_OUT_DIR" "$AGG_OUT_DIR"
 
@@ -40,7 +44,9 @@ uv run python scripts/fetch_local_dart_response.py \
   --output-dir "$BATCH_OUT_DIR" \
   --start-index "$FETCH_START_INDEX" \
   --max-requests "$FETCH_MAX_REQUESTS" \
-  --continue-on-error
+  --continue-on-error \
+  --skip-verified \
+  --delay-seconds "$FETCH_DELAY_SECONDS"
 
 echo "[CHECK] Validate fetched API status before aggregation"
 STATUS_CHECK="$(BATCH_OUT_DIR="$BATCH_OUT_DIR" uv run python - <<'PY'
@@ -74,6 +80,13 @@ if [[ "$STATUS_CHECK" == *"verified=0"* ]]; then
     echo "[ERROR] No verified OpenDART responses were fetched. Aborting before aggregation."
   fi
   exit 3
+fi
+
+if [[ "$FETCH_ONLY" == "1" ]]; then
+  echo "[INFO] FETCH_ONLY=1: skipping aggregation and strict rerun"
+  echo "[DONE] Day 4 chunk fetch finished"
+  echo "[DONE] Run without FETCH_ONLY once all chunks are fetched"
+  exit 0
 fi
 
 echo "[STEP 2/3] Build merged local DART aggregates"

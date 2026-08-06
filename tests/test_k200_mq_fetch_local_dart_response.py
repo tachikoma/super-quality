@@ -169,3 +169,102 @@ def test_batch_mode_supports_chunking_and_continue_on_error(tmp_path: Path, monk
     assert len(failures) == 1
     assert failures[0]["index"] == 2
     assert "synthetic network failure" in failures[0]["error"]
+
+
+def test_batch_mode_skip_verified_preserves_good_files(tmp_path: Path, monkeypatch) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+
+    good_payload = json.dumps({"status": "000", "page_no": 1, "total_page": 1}, ensure_ascii=False).encode("utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True)
+    (out_dir / "filing_good.json").write_bytes(good_payload)
+    (out_dir / "filing_good.manifest.json").write_text(json.dumps({
+        "api_status": "000",
+        "verified": True,
+        "request_params": {},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    calls: list[str] = []
+
+    def _fake_fetch(url: str) -> bytes:
+        calls.append(url)
+        if "corp_code=002" in url:
+            return good_payload
+        return json.dumps({"status": "020", "message": "quota"}, ensure_ascii=False).encode("utf-8")
+
+    monkeypatch.setattr(script, "_fetch_response_bytes", _fake_fetch)
+
+    batch_spec = tmp_path / "batch.json"
+    batch_spec.write_text(json.dumps([
+        {
+            "kind": "filing",
+            "request_params": ["corp_code=001", "bgn_de=20240101"],
+            "output_name": "filing_good.json",
+            "manifest_name": "filing_good.manifest.json",
+        },
+        {
+            "kind": "filing",
+            "request_params": ["corp_code=002", "bgn_de=20240101"],
+            "output_name": "filing_new.json",
+            "manifest_name": "filing_new.manifest.json",
+        },
+    ], ensure_ascii=False), encoding="utf-8")
+
+    argv_backup = sys.argv[:]
+    try:
+        sys.argv = [
+            "fetch_local_dart_response.py",
+            "--api-key", "secret",
+            "--batch-file", str(batch_spec),
+            "--output-dir", str(out_dir),
+            "--skip-verified",
+        ]
+        script.main()
+    finally:
+        sys.argv = argv_backup
+
+    assert len(calls) == 1, "verified spec must not be re-fetched"
+    assert "corp_code=002" in calls[0]
+    assert (out_dir / "filing_good.json").is_file()
+    assert (out_dir / "filing_new.json").is_file()
+    summary = json.loads((out_dir / "batch_summary.json").read_text(encoding="utf-8"))
+    assert len(summary) == 1
+    assert summary[0]["output_file"].endswith("filing_new.json")
+
+
+def test_batch_mode_delay_seconds_pauses_between_requests(tmp_path: Path, monkeypatch) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+
+    payload = json.dumps({"status": "000", "page_no": 1, "total_page": 1}, ensure_ascii=False).encode("utf-8")
+    monkeypatch.setattr(script, "_fetch_response_bytes", lambda url: payload)
+    sleeps: list[float] = []
+    monkeypatch.setattr(script, "time", type("Time", (), {"sleep": lambda sec: sleeps.append(sec)}))
+
+    batch_spec = tmp_path / "batch.json"
+    batch_spec.write_text(json.dumps([
+        {
+            "kind": "filing",
+            "request_params": ["corp_code=001", "bgn_de=20240101"],
+            "output_name": f"filing_{i}.json",
+            "manifest_name": f"filing_{i}.manifest.json",
+        }
+        for i in range(3)
+    ], ensure_ascii=False), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    argv_backup = sys.argv[:]
+    try:
+        sys.argv = [
+            "fetch_local_dart_response.py",
+            "--api-key", "secret",
+            "--batch-file", str(batch_spec),
+            "--output-dir", str(out_dir),
+            "--delay-seconds", "0.25",
+        ]
+        script.main()
+    finally:
+        sys.argv = argv_backup
+
+    assert sleeps == [0.25, 0.25, 0.25]
+    summary = json.loads((out_dir / "batch_summary.json").read_text(encoding="utf-8"))
+    assert len(summary) == 3
