@@ -17,7 +17,7 @@ import pandas as pd
 # one of these (exact) or contains one of them (containment fallback).
 ACCOUNT_COLUMN_MAPPING: dict[str, tuple[str, ...]] = {
     "revenue": ("ifrs-full_Revenue", "ifrs_Revenue", "매출액"),
-    "cogs": ("ifrs-full_CostOfSales", "ifrs_CostOfSales", "매출원가"),
+    "cogs": ("ifrs-full_CostOfSales", "ifrs_CostOfSales", "매출원가", "매출 원가"),
     "net_income": ("ifrs-full_ProfitLoss", "ifrs_ProfitLoss", "당기순이익"),
     "operating_cf": (
         "ifrs-full_CashFlowsFromOperatingActivities",

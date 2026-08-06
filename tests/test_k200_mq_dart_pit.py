@@ -589,3 +589,16 @@ def test_pivot_matches_account_id_when_name_is_noncanonical() -> None:
 
     assert wide.loc[0, "revenue"] == 500.0
     assert not hasattr(data_api, "prepare_financial_facts")
+
+
+def test_pivot_matches_korean_cogs_with_embedded_space() -> None:
+    facts = pd.DataFrame([{
+        "rcept_no": "R1", "corp_code": "001", "stock_code": "005930",
+        "filing_date": pd.Timestamp("2024-01-03").date(),
+        "account_id": "-표준계정코드 미사용-", "account_name": "매출 원가",
+        "numeric_value": 400.0,
+    }])
+
+    wide = pivot_financial_facts_to_wide(facts)
+
+    assert wide.loc[0, "cogs"] == 400.0

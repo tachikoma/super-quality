@@ -293,3 +293,19 @@
   - 게이트: `main.py` 품질 활성 조건을 `DART_API_KEY` 단독에서 `(DART_API_KEY or 로컬 원천 준비) and daily_financial 비어있지 않음`으로 수정.
 - 검증: `tests/test_k200_mq_local_dart_quality.py` 통합 테스트로 ROE 8.3% / D/E 0.67 / OpMargin 60% / CashConv 0.8 확인, 관련 스위트 전체 통과(408 passed + 기존 무관 실패 1건), ruff clean.
 - 함의: 연간(11011) 축소 스펙 판정이 품질 팩터 실제 소비 경로에서 검증됨. API 키 확보 후 축소 스펙(2,057건)으로 재개하면 로컬 DART 품질 입력이 strict 실행에 반영된다.
+
+## 실파일 스모크 + 매핑 커버리지 (2026-08-06, 추가)
+
+- 스모크 실행 (keydedup pilot DART + bundle 유니버스, `run` 2020-2024):
+  - 결과: manifest에서 `data_mode=pit_filing_date`, `pit_valid=true`, `filing_date_used=true`,
+    `quality_factor_row_count=10,990` / `quality_factor_ticker_count=7` — 로컬 DART → 품질 팩터
+    경로가 실데이터에서 활성화됨을 확인. (진단이며, 커버 7종목뿐이라 검증된 성과 근거 아님)
+- 매핑 커버리지 (실제 facts 57개 보고서):
+  - revenue/net_income/operating_cf/total_assets/total_equity **100%**, cogs **96.5%**.
+  - cogs 미매칭 2건은 금융사 00104856(수수료/이자 계정)으로 COGS 자체가 없어 정상.
+  - 실제 갭 1건 수정: `매출 원가`(공백 포함)를 cogs 후보에 추가(commit 예정).
+  - equity 오염 확인: 57/57 보고서가 exact `자본총계`/`ifrs_Equity` 행을 가져
+    `부채 및 자본총계`(부채+자본) containment가 선행되지 않음. equity ≤ assets 전건 확인.
+- 회귀: 관련 스위트 49 passed, 전체 409 passed + 기존 무관 레거시 실패 1건, ruff clean.
+- 함의: 191개 신규 종목 수집 전에 매핑이 대부분의 실제 계정명을 처리함을 확인. cogs처럼
+  공백 변형 계정명이 더 발견되면 후보를 확장한다.

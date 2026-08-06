@@ -16,6 +16,14 @@
   `dart_pit.pivot_financial_facts_to_wide`가 long format facts를 wide로 피벗하며,
   `main.py` 품질 게이트가 `DART_API_KEY` 또는 로컬 원천 준비 상태를 검사한다.
   통합 테스트로 ROE 8.3% / D/E 0.67 / OpMargin 60% / CashConv 0.8을 확인했다.
+- 실제 파일 end-to-end 스모크 완료(2026-08-06). keydedup pilot DART + bundle 유니버스로
+  `run`(2020-2024)을 실행했고, manifest에서 `data_mode=pit_filing_date`, `pit_valid=true`,
+  `quality_factor_row_count=10,990`(7개 티커)을 확인해 로컬 DART → 품질 팩터 경로가
+  실데이터에서 활성화됨을 검증했다. 이는 진단이며, 커버 7종목뿐이라 검증된 성과 근거가 아니다.
+- 매핑 커버리지 진단(2026-08-06): 실제 facts 57개 보고서 기준 6개 품질 컬럼 매칭률은
+  revenue/net_income/operating_cf/total_assets/total_equity 100%, cogs 96.5%(미매칭 2건은
+  금융사 00104856으로 COGS 자체가 없음). 실제 갭 1건(`매출 원가` 공백 변형)을 매핑에 반영했다.
+  equity 정확성도 확인: 57/57 보고서가 exact equity 행을 가지며 equity ≤ assets.
 - 현재 환경에서는 `DART_API_KEY`가 설정되어 있지 않아 live fetch는 실행될 수 없고, 이 상태에서는 신규 DART 수집을 통한 coverage 개선이 불가능하다.
 - 로컬 union 기반 오프라인 대안으로도 strict 준비 조인 불안정성이 해소되지 않아, 현재는 데이터 확보 단계가 여전히 병목이다.
 - 따라서 현재 공식 진단은 계속해서 비-PIT 기계적 진단으로 유지되며, strict PIT 근거 승격은 API key 확보 후 재실행이 필요하다.
