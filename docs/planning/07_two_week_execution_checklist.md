@@ -2,6 +2,13 @@
 
 목적: 2주 안에 Continue/Hold/Pivot 판단에 필요한 최소 근거를 확보한다.
 
+## 2026-08-06 현재 체크포인트
+
+- Day 4 자동화 경로는 준비되었고, `scripts/run_day4_dart_backfill.sh`로 fetch/aggregate/recheck를 연속 실행할 수 있다.
+- 다만 현재 환경에서 `DART_API_KEY`가 미설정이므로, 실제 backfill은 아직 시작되지 않았다.
+- 오프라인 union 실험은 strict preflight에서 여전히 조인/커버리지 문제를 드러내, 데이터 확보가 우선 병목임이 확인되었다.
+- 다음 실행은 API key 수신 후 바로 진행하는 것이 적절하며, 그 전까지는 성과 판정보다 데이터 게이트 정리를 우선한다.
+
 ## 운영 원칙
 
 - 원칙 1: strict preflight 실패는 원인/증거/수정 커밋까지 같은 날 닫는다.
