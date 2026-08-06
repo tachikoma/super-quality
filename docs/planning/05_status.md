@@ -8,7 +8,9 @@
 
 - Day 4 backfill 자동화 스크립트가 추가되어 fetch → aggregate → strict rerun 흐름을 한 번에 실행할 수 있게 되었다.
 - Day 4 배치 스펙(`data/raw/dart_batch_spec_day4_missing_both.json`)이 워크스페이스에서 누락되어 있었으나, 결손 ticker/corp_code 목록 재산출 후 동일 조건(7,667 requests)으로 복구했다.
-- 현재 환경에서는 `DART_API_KEY`가 설정되어 있지 않아 live fetch는 아직 실행되지 않았고, 이 상태에서는 신규 DART 수집을 통한 coverage 개선이 불가능하다.
+- 2026-08-06 재개 시도에서 7,667건(187 filing + 7,480 financial) 요청이 전부 OpenDART `status=020`(요청 제한 초과)으로 반환되어, fetch 후 aggregate 전에 중단되었다. 근본 제약은 API 일일 쿼터(일반적으로 2만 건 수준)이며 자정 리셋 후 청크 재수집이 필요하다.
+- fetch 스크립트와 day4 runner는 멱등 청크 재개를 지원한다: `--skip-verified`(이미 verified된 파일 재수집 방지), `--delay-seconds`(초당 제한 회피), `FETCH_ONLY`(청크 수집 중 aggregate/WF 재실행 방지).
+- 현재 환경에서는 `DART_API_KEY`가 설정되어 있지 않아 live fetch는 실행될 수 없고, 이 상태에서는 신규 DART 수집을 통한 coverage 개선이 불가능하다.
 - 로컬 union 기반 오프라인 대안으로도 strict 준비 조인 불안정성이 해소되지 않아, 현재는 데이터 확보 단계가 여전히 병목이다.
 - 따라서 현재 공식 진단은 계속해서 비-PIT 기계적 진단으로 유지되며, strict PIT 근거 승격은 API key 확보 후 재실행이 필요하다.
 

@@ -238,3 +238,34 @@
 - 재검증
   - 스크립트 재실행 시 `DART_API_KEY is not set` 가드로 중단됨(`exit_code=2`).
   - 해석: 자동화 경로 자체는 정상 복구되었고, 현재 유일한 선행조건은 API key 설정.
+
+## Day 4 쿼터 실패 및 재개 준비 기록 (2026-08-06, 추가)
+
+- 실패 원인 (확정)
+  - `DART_API_KEY` 설정 후 one-shot fetch 시도에서 7,667건(187 filing + 7,480 financial) 요청이
+    전부 OpenDART `status=020`(사용한도 초과)으로 반환됨.
+  - raw 응답·manifest 모두 `api_status=020`, `verified=False`이며 `batch_summary.json`은 7,667건 기록.
+  - aggregate는 "no valid filing raw files were found"로 정상 중단(`exit_code` 비0). fetch/aggregate 스크립트 버그가 아님.
+- 재발 방지 및 재개 보강 (커밋)
+  - `scripts/fetch_local_dart_response.py`:
+    - fetch 후 `verified=0`이면 aggregate 전 중단 게이트를 runner에 추가(2026-08-06).
+    - `--skip-verified`: 이미 verified(`api_status` 000/0)인 output/manifest가 있으면 재수집 건너뜀.
+    - `--delay-seconds`: 요청 간 대기로 초당 제한 회피(기본 0).
+  - `scripts/run_day4_dart_backfill.sh`:
+    - `FETCH_START_INDEX` / `FETCH_MAX_REQUESTS`(청크 범위), `FETCH_DELAY_SECONDS` 지원.
+    - `FETCH_ONLY=1`이면 fetch + 상태 게이트만 수행하고 aggregate/strict rerun 생략.
+    - fetch 호출에 `--skip-verified --delay-seconds` 상시 적용.
+- 근본 제약
+  - OpenDART 무료 티어 일일 쿼터(일반적으로 2만 건 수준)를 초과하면 020 반환. 일일 리셋 후 재시도 필요.
+  - 실행 전제: `export DART_API_KEY="..."` 세팅.
+- 재개 런북 (쿼터 리셋 + 키 세팅 후)
+  1. 작은 청크로 성공 확인:
+     - `FETCH_ONLY=1 FETCH_START_INDEX=1 FETCH_MAX_REQUESTS=200 ./scripts/run_day4_dart_backfill.sh`
+  2. 성공하면 범위를 확대하며 반복 (예: 200건 단위):
+     - `FETCH_ONLY=1 FETCH_START_INDEX=201 FETCH_MAX_REQUESTS=200 ./scripts/run_day4_dart_backfill.sh`
+     - ... `FETCH_START_INDEX=7401`까지 (7,667건 누적)
+  3. 전체 청크 verified 누적 확인 후 원샷 완주:
+     - `./scripts/run_day4_dart_backfill.sh`  (FETCH_ONLY 해제 → aggregate + strict rerun)
+  4. Day 3 지표 재측정 및 scorecard 재판정
+- 보안 권고
+  - 이전 실행 중 프로세스 목록에 API 키가 노출될 수 있었으므로 키 재발급(회전)을 권장.
