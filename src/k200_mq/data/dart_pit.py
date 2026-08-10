@@ -69,6 +69,7 @@ FINANCIAL_FACT_COLUMNS = (
     "account_id",
     "account_name",
     "account_detail",
+    "ord",
     "period_end",
     "raw_value",
     "numeric_value",
@@ -678,6 +679,7 @@ _FACT_ALIASES: dict[str, tuple[str, ...]] = {
     "account_id": ("account_id", "account code", "계정ID"),
     "account_name": ("account_name", "account_nm", "account name", "계정명"),
     "account_detail": ("account_detail", "account detail", "계정상세"),
+    "ord": ("ord", "order", "순번"),
     "period_end": ("period_end", "period end", "thstrm_end_de", "기간말"),
     "raw_value": (
         "raw_value", "value_raw", "thstrm_amount", "amount", "value", "금액",
@@ -1226,6 +1228,10 @@ def load_financial_facts(
                 _text(input_row[resolved["account_detail"]])
                 if "account_detail" in resolved else None
             ),
+            "ord": (
+                _text(input_row[resolved["ord"]])
+                if "ord" in resolved else None
+            ),
             "period_end": parsed_period_end,
             "raw_value": _text(raw_value),
             "numeric_value": numeric,
@@ -1295,14 +1301,14 @@ def _join_errors(facts: pd.DataFrame, filings: pd.DataFrame) -> list[str]:
             errors.append("filing metadata has ambiguous duplicate (corp_code, rcept_no) joins")
     fact_identity = [
         "corp_code", "rcept_no", "bsns_year", "reprt_code", "fs_div", "sj_div",
-        "account_id", "account_detail", "period_end",
+        "account_id", "account_name", "account_detail", "ord", "period_end",
     ]
     if all(column in facts.columns for column in fact_identity):
         duplicate_facts = facts.duplicated(fact_identity, keep=False)
         if duplicate_facts.any():
             errors.append(
                 "financial facts have ambiguous duplicate identities within a filing "
-                "(account_detail and rcept_no are part of the key)"
+                "(account_detail, account_name, and rcept_no are part of the key)"
             )
     if all(key in facts.columns for key in ("corp_code", "rcept_no")) and all(
         key in filings.columns for key in ("corp_code", "rcept_no")
@@ -1544,8 +1550,10 @@ def _map_one_session(
             filing_date = _parse_date(filing_date)
         if filing_date is None:
             return None
-        eligible = sessions[sessions > pd.Timestamp(filing_date)]
-        return pd.Timestamp(eligible[0]).normalize() if len(eligible) else None
+        position = sessions.searchsorted(pd.Timestamp(filing_date), side="right")
+        if position >= len(sessions):
+            return None
+        return pd.Timestamp(sessions[position]).normalize()
     if policy != EXPLICIT_TIMESTAMP_POLICY or timestamp_field is None:
         return None
     if not timezone_name or not _valid_timezone(timezone_name) or cutoff is None:
@@ -1561,10 +1569,12 @@ def _map_one_session(
     local_date = pd.Timestamp(local.date())
     local_clock = local.timetz().replace(tzinfo=None)
     if local_date in sessions and local_clock <= cutoff:
-        eligible = sessions[sessions >= local_date]
+        position = sessions.searchsorted(local_date, side="left")
     else:
-        eligible = sessions[sessions > local_date]
-    return pd.Timestamp(eligible[0]).normalize() if len(eligible) else None
+        position = sessions.searchsorted(local_date, side="right")
+    if position >= len(sessions):
+        return None
+    return pd.Timestamp(sessions[position]).normalize()
 
 
 def _availability_lineage_errors(
@@ -1635,22 +1645,23 @@ def _drop_future_unmappable_rows(
     if not len(sessions):
         return frame, list(availability), 0
     session_max = pd.Timestamp(sessions.max()).date()
-    keep_indices: list[int] = []
-    dropped = 0
-    for index, value in enumerate(availability):
-        if value is not None:
-            keep_indices.append(index)
-            continue
-        filing_date = _parse_date(frame.iloc[index].get("rcept_date"))
-        if filing_date is not None and filing_date > session_max:
-            dropped += 1
-            continue
-        keep_indices.append(index)
-    if dropped == 0:
+    unmapped = [value is None for value in availability]
+    if not any(unmapped):
         return frame, list(availability), 0
+    unmapped_positions = [index for index, value in enumerate(unmapped) if value]
+    future_positions: list[int] = []
+    rcept_dates = frame["rcept_date"].tolist()
+    for index in unmapped_positions:
+        filing_date = _parse_date(rcept_dates[index])
+        if filing_date is not None and filing_date > session_max:
+            future_positions.append(index)
+    if not future_positions:
+        return frame, list(availability), 0
+    future_set = set(future_positions)
+    keep_indices = [index for index in range(len(availability)) if index not in future_set]
     trimmed = frame.iloc[keep_indices].copy(deep=True).reset_index(drop=True)
     trimmed_availability = [availability[index] for index in keep_indices]
-    return trimmed, trimmed_availability, dropped
+    return trimmed, trimmed_availability, len(future_positions)
 
 
 def map_filing_availability(
@@ -1776,7 +1787,7 @@ def map_filing_availability(
 def _amendment_group_columns(frame: pd.DataFrame) -> list[str]:
     return [column for column in (
         "corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div", "account_id",
-        "account_detail", "period_end",
+        "account_name", "account_detail", "ord", "period_end",
     ) if column in frame.columns]
 
 
@@ -1785,7 +1796,7 @@ def _resolve_amendments(frame: pd.DataFrame, policy: str) -> pd.DataFrame:
         raise DARTPITError("an explicit amendment policy is required")
     required_group = (
         "corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div", "account_id",
-        "account_detail", "period_end",
+        "account_name", "account_detail", "ord", "period_end",
     )
     if not all(column in frame.columns for column in required_group):
         # A filing-only availability mapping has no financial fact identity on
