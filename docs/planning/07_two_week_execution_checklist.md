@@ -333,3 +333,31 @@
   7종목 PIT 품질 → 엔진 전체 경로가 기계적 WF에서 동작함을 확인한 것이 본 실행의 가치.
 - 산출물: `outputs_k200mq_mechanical_full/true_walkforward/{summary.csv,oos_returns.csv,selection_and_folds.json}`
 - 함의: strict PIT 근거 승격은 여전히 광범위 DART filing 메타데이터 확보(API 키·쿼터) 후에만 가능.
+
+## Day 8 실행 기록 (2026-08-10, strict PIT WF)
+
+- 성능 선행 작업 (커밋 `238a4de`)
+  - `dart_pit.py` `_map_one_session`을 행별 부울 마스크에서 `searchsorted`(O(log N))로 교체.
+  - `_drop_future_unmappable_rows`를 per-row `iloc` 파싱 제거 + unmapped 행만 파싱하도록 벡터화.
+  - `ord`(순번) 컬럼을 financial fact identity에 추가, `account_name`+`ord`를
+    `_join_errors`/`_amendment_group_columns`/`_resolve_amendments` required_group에 반영.
+  - 준비 파이프라인: 8분+ → ~82초 (실행 확인: load 12s + join 19s + map 40.3s).
+  - 검증: ruff 통과, dart 테스트 50개, 전체 409 passed + 기존 무관 레거시 실패 1건.
+- strict 실행
+  - 명령:
+    - `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0 --local-pit-universe-path data/universe/kospi200_bundle_strict --local-pit-universe-source-kind snapshots --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json --local-dart-filing-path data/raw/dart_aggregated_day4_extended/dart_filings_merged.csv --local-dart-filing-manifest data/raw/dart_aggregated_day4_extended/dart_filings_merged.manifest.json --local-dart-financial-path data/raw/dart_aggregated_day4_extended/dart_facts_merged.csv --local-dart-financial-manifest data/raw/dart_aggregated_day4_extended/dart_facts_merged.manifest.json --output outputs_k200mq_day8_strict_extended`
+  - 결과: 완료, 5/5 폴드 `valid=True`, OOS 1,231점 (2020-2024).
+  - strict preflight 실패: 0건. financial provenance `pit_filing_date` + `pit_valid=true`
+    (이전 strict 실행의 `non_pit_fiscal_period`에서 승격), 유니버스 전 as-of `provenance=pit`.
+  - 분류: `mechanical_expanding_walk_forward_non_pit` 유지 (검증된 성과 주장 아님).
+- OOS 성과 (stitched, 2020-2024)
+  - 총수익률 +57.79%, CAGR 9.79%, Sharpe 0.737, MDD -23.40%, Calmar 0.418.
+  - 폴드별: 2020 +21.7% / 2021 +0.5% / 2022 -7.8% / 2023 +22.2% / 2024 +15.8%.
+- 커버리지 잔여 갭
+  - 첫 리밸런스(2015-05-29): usable 147/198, missing 51 티커.
+  - quality: `partial_allowed_fill_missing_with_zero`, covered 169 ticker / factor 393,522행.
+  - 갭을 닫고 `validated_expanding_walk_forward_pit` 승격을 목표로 PIT 민감도·생존자 편향 비교·
+    ADV 영향·스트레스 테스트가 다음 우선순위.
+- 산출물: `outputs_k200mq_day8_strict_extended/true_walkforward/{summary.csv,oos_returns.csv,selection_and_folds.json}`
+- scorecard: `docs/planning/08_go_no_go_scorecard_2026-08-10.{md,csv}` (임시 판정: Continue 조건부)
+

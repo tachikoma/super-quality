@@ -1,0 +1,11 @@
+section,metric,threshold,current_value,pass,evidence_path,notes
+validation,strict_preflight_failures,0,0,true,"outputs_k200mq_day8_strict_extended/true_walkforward/summary.csv","5/5 folds valid; financial provenance pit_filing_date + pit_valid=true (first strict promotion)"
+validation,universe_exception_resolution,completed,completed,true,"data/universe/kospi200_bundle_strict/bundle.manifest.json","120 month-end dates 2015-01-30..2024-12-31 all 198 members"
+validation,dart_filing_date_coverage,above_threshold,usable_147_of_198,partial,"outputs_k200mq_day8_strict_extended/true_walkforward/selection_and_folds.json","first rebalance 2015-05-29 usable 147/198 (missing 51); quality partial_allowed_fill_missing_with_zero 169 tickers"
+performance,oos_cagr,>=0.05,0.0979,true,"outputs_k200mq_day8_strict_extended/true_walkforward/oos_returns.csv","stitched 2020-2024 CAGR 9.79%"
+performance,oos_mdd,>=-0.25,-0.2340,true,"outputs_k200mq_day8_strict_extended/true_walkforward/oos_returns.csv","stitched max drawdown -23.40%"
+performance,oos_sharpe,>=0.7,0.737,true,"outputs_k200mq_day8_strict_extended/true_walkforward/oos_returns.csv","stitched annualized Sharpe 0.737"
+performance,oos_calmar,>=0.3,0.418,true,"outputs_k200mq_day8_strict_extended/true_walkforward/oos_returns.csv","CAGR / |MDD| = 0.418"
+stability,small_perturbation_robustness,no_collapse,not_run,pending,,
+stability,subperiod_concentration,no_extreme_concentration,4_of_5_positive,pending,"outputs_k200mq_day8_strict_extended/true_walkforward/summary.csv","only 2022 negative (-7.8%); 2020/2023/2024 strong"
+decision,interim_decision,Continue|Hold|Pivot,Continue_conditional,,"docs/planning/08_go_no_go_scorecard_2026-08-10.md","strict preflight 0 failures + all performance cutoffs pass; classification stays mechanical non-PIT until coverage gaps closed (missing 51 tickers)"

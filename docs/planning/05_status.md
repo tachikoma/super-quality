@@ -2,9 +2,30 @@
 
 이 문서는 현재 상태를 기록하는 정식 문서입니다.
 
-최종 갱신: 2026-08-06
+최종 갱신: 2026-08-10
 
-## 2026-08-06 현재 체크포인트
+## 2026-08-10 현재 체크포인트
+
+- **Day 8 strict PIT WF 실행 완료(2026-08-10)**:
+  `uv run python -m k200_mq.main true-walkforward --strict-pit --exclude-kospi-top-n 0
+  --local-pit-universe-path data/universe/kospi200_bundle_strict
+  --local-pit-universe-source-kind snapshots
+  --local-pit-universe-manifest data/universe/kospi200_bundle_strict/bundle.manifest.json
+  --local-dart-filing-path data/raw/dart_aggregated_day4_extended/dart_filings_merged.csv
+  --local-dart-filing-manifest data/raw/dart_aggregated_day4_extended/dart_filings_merged.manifest.json
+  --local-dart-financial-path data/raw/dart_aggregated_day4_extended/dart_facts_merged.csv
+  --local-dart-financial-manifest data/raw/dart_aggregated_day4_extended/dart_facts_merged.manifest.json
+  --output outputs_k200mq_day8_strict_extended`
+- 결과: 5/5 폴드 `valid=True`, OOS 1,231점(2020-2024). strict preflight 실패 0건.
+- **재무 provenance 첫 승격**: financial mode가 `pit_filing_date` + `pit_valid=true`
+  (`filing_date_used=true`, `next_session` 정책)로 이전 strict 실행들의 `non_pit_fiscal_period`에서
+  벗어났다. 유니버스도 전 as-of 날짜 `provenance=pit`.
+- 성능 최적화 커밋 `238a4de`: `dart_pit.py` 세션 매핑을 searchsorted로, 미래 접수 행 드롭을
+  벡터화해 prepare 파이프라인을 8분+ → ~82초로 단축했다. (실행 전 검증: ruff 통과, dart 테스트 50개,
+  전체 409 passed + 기존 무관 레거시 실패 1건)
+- DART extended aggregate: prepare 후 259,255행 매핑 / future receipt 44,438행 드롭.
+
+## 2026-08-06 이전 체크포인트 (보관)
 
 - Day 4 backfill 자동화 스크립트가 추가되어 fetch → aggregate → strict rerun 흐름을 한 번에 실행할 수 있게 되었다.
 - Day 4 배치 스펙(`data/raw/dart_batch_spec_day4_missing_both.json`)이 워크스페이스에서 누락되어 있었으나, 결손 ticker/corp_code 목록 재산출 후 동일 조건(7,667 requests)으로 복구했다.
@@ -36,10 +57,10 @@
 |------|-----------|
 | 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, 테스트가 구현됨. |
 | 기계적 비-PIT 진단 | `robustness` 독립 하위 기간 테스트와 expanding-window `true-walkforward`를 사용할 수 있음. |
-| 검증된 PIT 근거 | 아직 없음. |
-| 현재 공식 진단 | 7종목 DART 품질 + bundle 유니버스 기계적 WF(2020-2024): stitched +79.7%, CAGR 12.4%, MDD -20.9%, OOS 1,231점 (`mechanical_expanding_walk_forward_non_pit`). v4 no-DART 모멘텀 전용 기계적 WF(+4.0408%, -32.0408%)는 여전히 모멘텀 전용 참조. |
+| 검증된 PIT 근거 | 아직 없음. strict preflight는 통과했으나 분류는 여전히 `mechanical_expanding_walk_forward_non_pit`. |
+| 현재 공식 진단 | strict PIT WF(2020-2024, extended DART, 5/5 valid): stitched +57.79%, CAGR 9.79%, Sharpe 0.737, MDD -23.40%, OOS 1,231점. 첫 리밸런스 usable 147/198. 분류는 `mechanical_expanding_walk_forward_non_pit`. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | 198 구성원 전이 예외는 manifest로 해소됨(2026-08-06). 남은 병목은 더 넓은 역사 범위의 DART 제출일 데이터 확보. |
+| 다음 게이트 | 커버리지 잔여 갭(첫 리밸런스 missing 51 티커, quality partial-fill 모드)을 닫고 `validated_expanding_walk_forward_pit` 승격을 목표로 PIT 민감도/생존자 편향 비교/ADV/스트레스 테스트를 진행. |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
@@ -222,13 +243,17 @@ DART_API_KEY="" uv run python -m k200_mq.main true-walkforward \
 
 ## 검증된 PIT 근거
 
-**검증된 PIT 근거는 아직 없습니다.** 저장소에는 provenance validator와 strict-fail
-보호 장치가 있지만, 이를 만족하는 충분한 역사 입력이 확보되어 WF 실행에 연결되지
-않았습니다.
+**검증된 PIT 성과 근거는 아직 없습니다.** Day 8 strict 실행은 strict preflight(유니버스 PIT +
+financial `pit_filing_date`)를 통과했고 성과 컷오프 4종(CAGR/MDD/Sharpe/Calmar)도 5년 OOS에서
+충족했지만, 분류는 여전히 `mechanical_expanding_walk_forward_non_pit`으로 유지된다.
 
 현재 `true-walkforward` 경로는 `validated_expanding_walk_forward_pit`로 표시할 수
-없습니다. strict PIT WF, PIT 민감도, 생존자 편향 비교, ADV 영향, 계획된 스트레스
-테스트 및 성과 결론은 모두 보류 상태입니다.
+없습니다. 승격에 남은 갭:
+- 첫 리밸런스(2015-05-29)에서 usable 147/198 — missing 51 티커 (`018260`, `028260`,
+  `031210`, `207940` 등).
+- quality 팩터는 `partial_allowed_fill_missing_with_zero` 모드(covered 169 ticker).
+- strict PIT WF 통과 후의 PIT 민감도, 생존자 편향 비교, ADV 영향, 계획된 스트레스
+  테스트는 아직 실행되지 않았다.
 
 strict 모드 `true-walkforward`는 더 이상 옵션 자체를 사전 거부하지 않습니다.
 대신 실행 전 prepared 입력의 유니버스/재무 provenance를 strict preflight로
@@ -272,14 +297,19 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
   **해소됨 (2026-08-06)**: `bundle.manifest.json`의 `transition_exceptions_by_as_of`가
   120개 월말 날짜(2015-01-30 ~ 2024-12-31) 모두에 `allowed_sizes: [198]`로 이미 고정되어 있고,
   `pit_universe.py`가 이를 로드해 검증에 반영한다.
-2. 원시 DART 제출/공시 메타데이터와 재무 사실을 API 또는 벌크 수집으로 확보하거나,
-   검증된 로컬 파일로 확보하고, 제출일을 안전한 거래 세션 가용일로 매핑하여
-   회계기간 날짜로 대체하지 않습니다.
-3. 두 입력의 PIT provenance가 실제 자료에서 확인된 뒤 strict PIT WF를 다시 실행합니다.
+2. ~~원시 DART 제출/공시 메타데이터와 재무 사실을 확보하고, 제출일을 안전한 거래 세션
+   가용일로 매핑하여 회계기간 날짜로 대체하지 않습니다.~~
+   **부분 해소 (2026-08-10)**: `data/raw/dart_aggregated_day4_extended/` aggregate로
+   financial provenance가 `pit_filing_date` + `pit_valid=true` 승격됨. 잔여 커버리지 갭
+   (첫 리밸런스 missing 51 티커)은 추가 수집 또는 PIT 커버리지 판정 정리 필요.
+3. ~~두 입력의 PIT provenance가 실제 자료에서 확인된 뒤 strict PIT WF를 다시 실행합니다.~~
+   **해소 (2026-08-10)**: Day 8 strict WF 실행, 5/5 valid, `outputs_k200mq_day8_strict_extended/`.
 4. strict PIT WF가 통과한 뒤에만 PIT 민감도, 생존자 편향 비교, ADV 영향 및 유동성
-  제약, 계획된 스트레스 테스트를 실행합니다.
+   제약, 계획된 스트레스 테스트를 실행합니다.
 
-이 단계가 완료될 때까지 출력 수치는 기계적 진단으로만 취급합니다.
+이 단계가 완료될 때까지 출력 수치는 기계적 진단으로만 취급합니다. (Day 8 실행은 strict
+preflight를 통과했으나 `validated_expanding_walk_forward_pit` 승격은 커버리지 갭 종결 후
+재실행이 필요합니다.)
 
 ### OpenDART 로컬 계약과 다음 단계
 
