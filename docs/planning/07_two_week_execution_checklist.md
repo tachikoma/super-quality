@@ -361,3 +361,32 @@
 - 산출물: `outputs_k200mq_day8_strict_extended/true_walkforward/{summary.csv,oos_returns.csv,selection_and_folds.json}`
 - scorecard: `docs/planning/08_go_no_go_scorecard_2026-08-10.{md,csv}` (임시 판정: Continue 조건부)
 
+## Day 8 커버리지 갭 루트코즈 (2026-08-11, 추가)
+
+- 분석 문서: `docs/planning/09_coverage_gap_analysis.md`
+- 결론: 첫 리밸런스(2015-05-29) missing 51 티커는 3유형.
+  - **D (7)**: 2015-05-29 이전 사업보고서(2014.12) 제출했으나 facts 미수집 — 실제 수집 갭.
+  - **B (9)**: 2015-05-29 시점 사업보고서 없음 + facts 미수집 — 유니버스 proxy + 수집 갭 혼재.
+  - **C (35)**: 신규상장/후기 편입으로 2015-05-29 시점 데이터 부재가 정상 — 유니버스 proxy.
+- 근본 원인: DART 배치 스펙이 `--financial-start-year 2015`로 생성되어 FY2014 보고서
+  (2015년 3월 제출) facts가 전체에서 누락됨. 2015-05-29 이전 제출 사업보고서 203건
+  (141 corp) 중 facts 첨부 0건.
+- 특이 케이스: 064400/085620/089860은 2015~2020회계연도 facts가 corp별 불균등 수집으로
+  유실(각각 2023~2024/2021~2024만 보유). 별도 보강 필요.
+- 준비된 보강 스펙:
+  - `data/raw/dart_batch_spec_fy2014_backfill.json` (141 corp × FY2014 = 141건)
+  - `data/raw/dart_batch_spec_corp_specific_backfill.json` (3 corp × 2014~2020 = 21건)
+  - 대상 corp: `data/raw/k200_fy2014_backfill_corps.txt` (141),
+    `data/raw/k200_corp_specific_missing_corps.txt` (3)
+- 재개 런북 (DART_API_KEY 설정 후):
+  1. FY2014 보강 fetch:
+     `SPEC_FILE=data/raw/dart_batch_spec_fy2014_backfill.json BATCH_OUT_DIR=data/raw/dart_batch_fy2014 AGG_OUT_DIR=data/raw/dart_aggregated_day4_extended_fy2014 RUN_OUT_DIR=/tmp/k200mq_fy2014_recheck FETCH_ONLY=1 ./scripts/run_day4_dart_backfill.sh`
+     (쿼터 예의: `FETCH_START_INDEX`/`FETCH_MAX_REQUESTS`/`FETCH_DELAY_SECONDS` 청크)
+  2. corp별 누락 보강 fetch:
+     `SPEC_FILE=data/raw/dart_batch_spec_corp_specific_backfill.json BATCH_OUT_DIR=data/raw/dart_batch_corp_specific AGG_OUT_DIR=data/raw/dart_aggregated_day4_extended_corp_specific RUN_OUT_DIR=/tmp/k200mq_corp_specific_recheck ./scripts/run_day4_dart_backfill.sh`
+  3. 두 배치를 기존 `dart_aggregated_day4_extended/`에 union 반영 후 strict 재실행
+     (로더의 `(corp_code, rcept_no)` 조인 무결성이 유지되는 방식으로 병합 필요).
+  4. Day 3 coverage 지표 재측정 + scorecard 재판정.
+- 제약: 유니버스 proxy 특성(B/C 44개)은 수집으로 해결 불가 — 역사적 KOSPI 200 구성원
+  데이터로 유니버스를 PIT화해야 함.
+
