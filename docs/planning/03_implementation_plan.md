@@ -105,8 +105,11 @@
 - [x] WF 선택/폴드, 요약, OOS, config/hash, git, preparation 맥락 산출물 저장.
 - [x] 유니버스/재무 provenance 계약과 엄격한 검증 보호 장치를 즉시 중단(fail closed)
   방식으로 구현.
-- [ ] 실제 역사 유니버스와 제출일(filing-date) 검증기를 사용한 strict PIT WF 실행.
-  현재 `true-walkforward` 출력은 기계적 비-PIT 진단입니다.
+- [x] 실제 역사 유니버스와 제출일(filing-date) 검증기를 사용한 strict PIT WF 실행.
+  (2026-08-10, `outputs_k200mq_day8_strict_extended/`: 5/5 folds valid, financial
+  provenance `pit_filing_date`, strict preflight 실패 0건.) 단 분류는
+  `mechanical_expanding_walk_forward_non_pit` 유지 — 커버리지 갭(첫 리밸런스 missing
+  51 티커) 종결 후 `validated_expanding_walk_forward_pit` 승격 및 재실행 필요.
 
 ### 벤치마크, 비용 및 의미 안전성
 

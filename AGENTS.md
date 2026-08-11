@@ -140,3 +140,27 @@ ruff check
 - **Next priority**: acquire and wire historical KOSPI 200 constituent files with
   effective dates and raw DART filing/publication metadata. Only after that PIT
   data gate should strict PIT WF, PIT sensitivity, and stress tests run.
+
+## TASK LOG - 2026-08-10
+
+- **DART pipeline performance**: `dart_pit.py` `_map_one_session` rewritten to
+  use `searchsorted` (was row-wise boolean mask), `_drop_future_unmappable_rows`
+  vectorized (was per-row `iloc` parse). Prepare pipeline: 8+ min → ~82s
+  (load 12s + join 19s + map 40.3s). Added `ord` to financial fact identity and
+  `account_name`+`ord` to join/amendment grouping. Commit `238a4de`.
+- **First strict PIT WF pass**: `true-walkforward --strict-pit` with bundle
+  universe + `data/raw/dart_aggregated_day4_extended/` completed 5/5 folds valid,
+  OOS 1,231 points (2020-2024), zero strict preflight failures. Financial
+  provenance promoted to `pit_filing_date` + `pit_valid=true` (first time past
+  `non_pit_fiscal_period`); universe PIT for all as-of dates.
+- **Day 8 OOS (stitched)**: +57.79% total, CAGR 9.79%, Sharpe 0.737, MDD
+  -23.40%, Calmar 0.418. Folds: 2020 +21.7% / 2021 +0.5% / 2022 -7.8% /
+  2023 +22.2% / 2024 +15.8%.
+- **Classification stays `mechanical_expanding_walk_forward_non_pit`**: strict
+  preflight pass is not a validated PIT performance claim. Remaining gap: first
+  rebalance usable 147/198 (51 missing tickers); quality runs in
+  `partial_allowed_fill_missing_with_zero`. Scorecard 2026-08-10: **Continue
+  (conditional)**.
+- **Next priority**: close the coverage gap (51 missing tickers at first
+  rebalance), then run PIT sensitivity, survivorship-bias comparison, ADV
+  impact, and stress tests toward `validated_expanding_walk_forward_pit`.
