@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from io import BytesIO
 import json
 from pathlib import Path
 import sys
+import zipfile
+
+import pytest
 
 
 def _load_script_module(path: Path):
@@ -53,6 +57,211 @@ def test_build_url_includes_api_key_and_preserves_request_params() -> None:
     assert "crtfc_key=secret-key" in url
     assert "corp_code=001" in url
     assert "bsns_year=2023" in url
+
+
+def test_financial_error_status_preserves_financial_facts_source_type() -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+
+    manifest = script._build_manifest(
+        endpoint=script.OPEN_DART_ENDPOINTS["financial"],
+        request_params={"corp_code": "00126186", "bsns_year": "2014"},
+        response_bytes=json.dumps({"status": "013", "message": "not available"}).encode("utf-8"),
+        retrieved_at_utc="2024-04-01T00:00:00+00:00",
+        kind="financial",
+    )
+
+    assert manifest["source_type"] == "opendartfinancialfacts"
+    assert manifest["api_status"] == "013"
+    assert manifest["verified"] is False
+
+
+def _write_manifest_for_spec(
+    script,
+    output_dir: Path,
+    *,
+    kind: str,
+    request_params: list[str],
+    raw: bytes,
+) -> dict[str, object]:
+    output_file = output_dir / f"{kind}.raw"
+    manifest_file = output_dir / f"{kind}.manifest.json"
+    output_file.write_bytes(raw)
+    params = script._normalize_request_params(script._parse_request_param(request_params))
+    manifest = script._build_manifest(
+        endpoint=script.OPEN_DART_ENDPOINTS[kind],
+        request_params=params,
+        response_bytes=raw,
+        retrieved_at_utc="2024-04-01T00:00:00+00:00",
+        kind=kind,
+    )
+    manifest["raw_payload_path"] = str(output_file)
+    manifest["raw_file_sha256"] = manifest["response_sha256"]
+    manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+    return {
+        "kind": kind,
+        "request_params": request_params,
+        "output_name": output_file.name,
+        "manifest_name": manifest_file.name,
+    }
+
+
+def test_is_verified_spec_rejects_mutated_raw_hash_and_request_params(tmp_path: Path) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    raw = json.dumps({"status": "000"}).encode("utf-8")
+    spec = _write_manifest_for_spec(
+        script,
+        tmp_path,
+        kind="financial",
+        request_params=["corp_code=00126186", "bsns_year=2023"],
+        raw=raw,
+    )
+    assert script._is_verified_spec(spec=spec, output_dir=tmp_path) is True
+
+    manifest_path = tmp_path / "financial.manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["raw_file_sha256"] = "bad-hash"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert script._is_verified_spec(spec=spec, output_dir=tmp_path) is False
+
+    manifest["raw_file_sha256"] = hashlib.sha256(raw).hexdigest()
+    manifest["request_params"] = {"corp_code": "00999999", "bsns_year": "2023"}
+    manifest["request_params_sha256"] = script._request_params_sha256(manifest["request_params"])
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert script._is_verified_spec(spec=spec, output_dir=tmp_path) is False
+
+
+@pytest.mark.parametrize("mutation", ["source_url", "source_type"])
+def test_is_verified_spec_rejects_mismatched_source_metadata(tmp_path: Path, mutation: str) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    raw = json.dumps({"status": "000"}).encode("utf-8")
+    spec = _write_manifest_for_spec(
+        script,
+        tmp_path,
+        kind="filing",
+        request_params=["corp_code=00126186", "bgn_de=20240101"],
+        raw=raw,
+    )
+    manifest_path = tmp_path / "filing.manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[mutation] = "https://example.invalid/changed" if mutation == "source_url" else "opendartfinancialfacts"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert script._is_verified_spec(spec=spec, output_dir=tmp_path) is False
+
+
+def test_is_verified_spec_accepts_valid_xbrl_success(tmp_path: Path) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    raw_buffer = BytesIO()
+    with zipfile.ZipFile(raw_buffer, "w") as archive:
+        archive.writestr("statement.xml", "<statement />")
+    raw = raw_buffer.getvalue()
+    spec = _write_manifest_for_spec(
+        script,
+        tmp_path,
+        kind="financial_xbrl",
+        request_params=["rcept_no=20240329000123", "reprt_code=11011"],
+        raw=raw,
+    )
+
+    assert script._is_verified_spec(spec=spec, output_dir=tmp_path) is True
+
+
+def test_financial_xbrl_endpoint_and_manifest_metadata(tmp_path: Path, monkeypatch) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+
+    assert script.OPEN_DART_ENDPOINTS["financial_xbrl"] == (
+        "https://opendart.fss.or.kr/api/fnlttXbrl.xml"
+    )
+    raw_buffer = BytesIO()
+    with zipfile.ZipFile(raw_buffer, "w") as archive:
+        archive.writestr("statement.xml", "<statement />")
+    raw = raw_buffer.getvalue()
+    requested_urls: list[str] = []
+    monkeypatch.setattr(
+        script,
+        "_fetch_response_bytes",
+        lambda url: requested_urls.append(url) or raw,
+    )
+
+    output = tmp_path / "xbrl.zip"
+    manifest_file = tmp_path / "xbrl.manifest.json"
+    result = script._fetch_one(
+        kind="financial_xbrl",
+        api_key="secret-key",
+        output_file=output,
+        manifest_file=manifest_file,
+        request_params={
+            "rcept_no": "20240329000123",
+            "reprt_code": "11011",
+            "crtfc_key": "secret-key",
+        },
+        source_url=script.OPEN_DART_ENDPOINTS["financial_xbrl"],
+        retrieved_at_utc="2024-04-01T00:00:00+00:00",
+    )
+
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    assert requested_urls == [
+        "https://opendart.fss.or.kr/api/fnlttXbrl.xml?rcept_no=20240329000123&reprt_code=11011&crtfc_key=secret-key"
+    ]
+    assert manifest["source_type"] == "opendartfinancialxbrl"
+    assert manifest["request_params"] == {
+        "reprt_code": "11011",
+        "rcept_no": "20240329000123",
+    }
+    assert "secret-key" not in manifest_file.read_text(encoding="utf-8")
+    assert manifest["raw_payload_path"] == str(output)
+    assert manifest["raw_file_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert manifest["retrieved_at_utc"] == "2024-04-01T00:00:00+00:00"
+    assert manifest["response_format"] == "zip"
+    assert manifest["response_status"] == "success"
+    assert manifest["api_status"] == "000"
+    assert manifest["verified"] is True
+    assert result["kind"] == "financial_xbrl"
+
+
+@pytest.mark.parametrize(
+    ("raw", "response_format"),
+    [
+        (b"<?xml version='1.0'?><result><status>000</status></result>", "xml"),
+        (b"zip-payload", "zip"),
+    ],
+)
+def test_financial_xbrl_success_formats_are_verified(raw: bytes, response_format: str) -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    if response_format == "zip":
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("statement.xml", "<statement />")
+        raw = buffer.getvalue()
+
+    manifest = script._build_manifest(
+        endpoint=script.OPEN_DART_ENDPOINTS["financial_xbrl"],
+        request_params={"rcept_no": "20240329000123", "reprt_code": "11011"},
+        response_bytes=raw,
+        retrieved_at_utc="2024-04-01T00:00:00+00:00",
+        kind="financial_xbrl",
+    )
+
+    assert manifest["response_format"] == response_format
+    assert manifest["response_status"] == "success"
+    assert manifest["api_status"] == "000"
+    assert manifest["verified"] is True
+
+
+def test_financial_xbrl_json_error_is_not_verified() -> None:
+    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    manifest = script._build_manifest(
+        endpoint=script.OPEN_DART_ENDPOINTS["financial_xbrl"],
+        request_params={"rcept_no": "20240329000123", "reprt_code": "11011"},
+        response_bytes=json.dumps({"status": "020", "message": "quota"}).encode("utf-8"),
+        retrieved_at_utc="2024-04-01T00:00:00+00:00",
+        kind="financial_xbrl",
+    )
+
+    assert manifest["response_format"] == "json"
+    assert manifest["response_status"] == "error"
+    assert manifest["api_status"] == "020"
+    assert manifest["verified"] is False
 
 
 def test_batch_mode_writes_multiple_responses_and_summary(tmp_path: Path, monkeypatch) -> None:
@@ -177,12 +386,15 @@ def test_batch_mode_skip_verified_preserves_good_files(tmp_path: Path, monkeypat
     good_payload = json.dumps({"status": "000", "page_no": 1, "total_page": 1}, ensure_ascii=False).encode("utf-8")
     out_dir = tmp_path / "out"
     out_dir.mkdir(parents=True)
-    (out_dir / "filing_good.json").write_bytes(good_payload)
-    (out_dir / "filing_good.manifest.json").write_text(json.dumps({
-        "api_status": "000",
-        "verified": True,
-        "request_params": {},
-    }, ensure_ascii=False), encoding="utf-8")
+    _write_manifest_for_spec(
+        script,
+        out_dir,
+        kind="filing",
+        request_params=["corp_code=001", "bgn_de=20240101"],
+        raw=good_payload,
+    )
+    (out_dir / "filing.raw").rename(out_dir / "filing_good.json")
+    (out_dir / "filing.manifest.json").rename(out_dir / "filing_good.manifest.json")
 
     calls: list[str] = []
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -18,11 +19,14 @@ import time
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
+import zipfile
 
 
 OPEN_DART_ENDPOINTS = {
     "filing": "https://opendart.fss.or.kr/api/list.json",
     "financial": "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json",
+    "financial_xbrl": "https://opendart.fss.or.kr/api/fnlttXbrl.xml",
 }
 
 
@@ -42,6 +46,51 @@ def _normalize_request_params(params: dict[str, str]) -> dict[str, str]:
 def _request_params_sha256(params: dict[str, str]) -> str:
     payload = json.dumps(params, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _is_xbrl_request(*, kind: str, endpoint: str) -> bool:
+    return kind == "financial_xbrl" or endpoint == OPEN_DART_ENDPOINTS["financial_xbrl"]
+
+
+def _source_type_for_request(*, kind: str, endpoint: str) -> str:
+    if _is_xbrl_request(kind=kind, endpoint=endpoint):
+        return "opendartfinancialxbrl"
+    if kind == "filing":
+        return "opendartfilinglist"
+    if kind == "financial":
+        return "opendartfinancialfacts"
+    return "opendartfilinglist" if endpoint.endswith("list.json") else "opendartfinancialfacts"
+
+
+def _is_success_status(value: Any) -> bool:
+    return value in {"000", "0", 0}
+
+
+def _classify_xbrl_response(response_bytes: bytes) -> tuple[str, str, str]:
+    """Return response format, API status, and response status for an XBRL response."""
+    try:
+        payload = json.loads(response_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict):
+        api_status = payload.get("status", payload.get("api_status", "unknown"))
+        response_status = "success" if _is_success_status(api_status) else "error"
+        return "json", str(api_status), response_status
+
+    try:
+        if zipfile.is_zipfile(BytesIO(response_bytes)):
+            return "zip", "000", "success"
+    except (OSError, zipfile.BadZipFile):
+        pass
+
+    try:
+        root = ET.fromstring(response_bytes)
+    except (ET.ParseError, UnicodeDecodeError):
+        return "unknown", "unknown", "unknown"
+    status_node = root.find(".//status")
+    api_status = status_node.text.strip() if status_node is not None and status_node.text else "000"
+    response_status = "success" if _is_success_status(api_status) else "error"
+    return "xml", api_status, response_status
 
 
 def _parse_request_param(values: list[str]) -> dict[str, str]:
@@ -94,25 +143,45 @@ def _build_manifest(
     request_params: dict[str, str],
     response_bytes: bytes,
     retrieved_at_utc: str,
+    kind: str = "",
 ) -> dict[str, Any]:
-    try:
-        payload = json.loads(response_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        payload = {}
+    xbrl_response = _is_xbrl_request(kind=kind, endpoint=endpoint)
+    sanitized_params = _normalize_request_params(request_params)
+    api_status: Any = "000"
+    response_status = "success"
+    if xbrl_response:
+        response_format, api_status, response_status = _classify_xbrl_response(response_bytes)
+        payload: Any = {}
+        if response_format == "json":
+            try:
+                payload = json.loads(response_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                payload = {}
+    else:
+        try:
+            payload = json.loads(response_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        response_format = "json"
     payload_dict = payload if isinstance(payload, dict) else {}
-    api_status = payload_dict.get("status", payload_dict.get("api_status", "000"))
-    return {
+    if not xbrl_response:
+        api_status = payload_dict.get("status", payload_dict.get("api_status", "000"))
+    manifest = {
         "source_url": endpoint,
-        "source_type": "opendartfilinglist" if endpoint.endswith("list.json") else "opendartfinancialfacts",
-        "request_params": request_params,
-        "request_params_sha256": _request_params_sha256(request_params),
+        "source_type": _source_type_for_request(kind=kind, endpoint=endpoint),
+        "request_params": sanitized_params,
+        "request_params_sha256": _request_params_sha256(sanitized_params),
         "api_status": api_status,
         "pagination": {"complete": _pagination_complete(payload_dict)},
         "retrieved_at_utc": retrieved_at_utc,
         "response_sha256": _sha256_bytes(response_bytes),
-        "verified": api_status in {"000", 0, "0"},
+        "verified": _is_success_status(api_status),
         "note": "sanitized local DART acquisition manifest",
     }
+    if xbrl_response:
+        manifest["response_format"] = response_format
+        manifest["response_status"] = response_status
+    return manifest
 
 
 def _fetch_one(
@@ -125,16 +194,24 @@ def _fetch_one(
     source_url: str,
     retrieved_at_utc: str,
 ) -> dict[str, Any]:
-    url = _build_url(source_url, request_params, api_key)
+    sanitized_params = _normalize_request_params(request_params)
+    if kind == "financial_xbrl":
+        missing = [name for name in ("rcept_no", "reprt_code") if not sanitized_params.get(name)]
+        if missing:
+            raise RuntimeError(
+                "financial_xbrl requires request params: " + ", ".join(missing)
+            )
+    url = _build_url(source_url, sanitized_params, api_key)
     response_bytes = _fetch_response_bytes(url)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     manifest_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_bytes(response_bytes)
     manifest = _build_manifest(
         endpoint=source_url,
-        request_params=request_params,
+        request_params=sanitized_params,
         response_bytes=response_bytes,
         retrieved_at_utc=retrieved_at_utc,
+        kind=kind,
     )
     manifest["raw_payload_path"] = str(output_file)
     manifest["raw_file_sha256"] = manifest["response_sha256"]
@@ -165,28 +242,99 @@ def _is_verified_spec(
     spec: dict[str, Any],
     output_dir: Path,
 ) -> bool:
-    output_name = str(spec.get("output_name") or "")
-    manifest_name = str(spec.get("manifest_name") or "")
-    if not output_name:
+    try:
+        kind = spec.get("kind")
+        if not isinstance(kind, str) or kind not in OPEN_DART_ENDPOINTS:
+            return False
+        output_name = spec.get("output_name")
+        if not isinstance(output_name, str) or not output_name:
+            return False
+        manifest_name = spec.get("manifest_name")
+        if manifest_name is None or manifest_name == "":
+            manifest_name = f"{Path(output_name).stem}.manifest.json"
+        if not isinstance(manifest_name, str):
+            return False
+        raw_file = output_dir / output_name
+        manifest_file = output_dir / manifest_name
+        if not raw_file.is_file() or not manifest_file.is_file():
+            return False
+        raw_bytes = raw_file.read_bytes()
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            return False
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return False
-    if not manifest_name:
-        manifest_name = f"{Path(output_name).stem}.manifest.json"
-    raw_file = output_dir / output_name
-    manifest_file = output_dir / manifest_name
-    if not raw_file.is_file() or not manifest_file.is_file():
+
+    expected_source_url = OPEN_DART_ENDPOINTS[kind]
+    if "source_url" in spec:
+        explicit_source_url = spec.get("source_url")
+        if not isinstance(explicit_source_url, str) or not explicit_source_url.strip():
+            return False
+        expected_source_url = explicit_source_url.strip()
+    if manifest.get("source_url") != expected_source_url:
+        return False
+    if manifest.get("source_type") != _source_type_for_request(
+        kind=kind,
+        endpoint=expected_source_url,
+    ):
+        return False
+    if manifest.get("api_status") not in {"000", "0", 0}:
+        return False
+    if manifest.get("verified") is not True:
+        return False
+    if kind == "financial_xbrl" and manifest.get("response_status") != "success":
+        return False
+
+    if kind == "financial_xbrl":
+        _, raw_api_status, raw_response_status = _classify_xbrl_response(raw_bytes)
+        if not _is_success_status(raw_api_status) or raw_response_status != "success":
+            return False
+    else:
+        try:
+            raw_payload = json.loads(raw_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        if not isinstance(raw_payload, dict):
+            return False
+        raw_api_status = raw_payload.get("status", raw_payload.get("api_status"))
+        if not _is_success_status(raw_api_status):
+            return False
+
+    raw_sha256 = _sha256_bytes(raw_bytes)
+    if manifest.get("raw_file_sha256") != raw_sha256:
+        return False
+    if manifest.get("response_sha256") != raw_sha256:
+        return False
+
+    request_params = spec.get("request_params")
+    if not isinstance(request_params, list) or not all(
+        isinstance(value, str) for value in request_params
+    ):
         return False
     try:
-        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        expected_params = _normalize_request_params(_parse_request_param(request_params))
+    except (TypeError, ValueError):
         return False
-    return str(manifest.get("api_status", "")) in {"000", "0"}
+    manifest_params = manifest.get("request_params")
+    if not isinstance(manifest_params, dict) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in manifest_params.items()
+    ):
+        return False
+    if manifest_params != expected_params:
+        return False
+    if kind == "financial_xbrl" and not all(
+        expected_params.get(name) for name in ("rcept_no", "reprt_code")
+    ):
+        return False
+    return manifest.get("request_params_sha256") == _request_params_sha256(expected_params)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Fetch one OpenDART response into a local raw file plus manifest.",
     )
-    parser.add_argument("--kind", choices=("filing", "financial"), default="")
+    parser.add_argument("--kind", choices=("filing", "financial", "financial_xbrl"), default="")
     parser.add_argument("--api-key", default="", help="OpenDART API key")
     parser.add_argument("--output-file", default="", help="Raw response output file")
     parser.add_argument(

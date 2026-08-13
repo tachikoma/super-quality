@@ -21,6 +21,23 @@ def _normal_label(value: str) -> str:
     return "".join(char for char in value.strip().casefold() if char.isalnum())
 
 
+def _normalize_corp_code(value: str, *, source: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise RuntimeError(
+            f"{source} is empty; provide an OpenDART corp_code containing 1-8 decimal digits"
+        )
+    if not stripped.isascii() or not stripped.isdigit():
+        raise RuntimeError(
+            f"{source}={value!r} is invalid; OpenDART corp_code must contain only decimal digits"
+        )
+    if len(stripped) > 8:
+        raise RuntimeError(
+            f"{source}={value!r} is invalid; OpenDART corp_code must be at most 8 digits"
+        )
+    return stripped.zfill(8)
+
+
 def _load_tickers(path_text: str) -> list[str]:
     if not path_text.strip():
         return []
@@ -71,7 +88,10 @@ def _map_tickers_to_corp_codes(tickers: list[str], map_file_text: str) -> list[s
             if label in {_normal_label(name) for name in corp_keys} and value.strip():
                 corp_value = value.strip()
         if ticker_value and corp_value:
-            resolved[ticker_value] = corp_value
+            resolved[ticker_value] = _normalize_corp_code(
+                corp_value,
+                source=f"corp-map-file ticker {ticker_value!r}",
+            )
 
     missing = [ticker for ticker in tickers if ticker not in resolved]
     if missing:
@@ -82,14 +102,25 @@ def _map_tickers_to_corp_codes(tickers: list[str], map_file_text: str) -> list[s
 
 
 def _load_corp_codes(codes_text: str, codes_file: str) -> list[str]:
-    values: list[str] = []
+    normalized: set[str] = set()
     if codes_text.strip():
-        values.extend(part.strip() for part in codes_text.split(","))
+        for value in codes_text.split(","):
+            if value.strip():
+                normalized.add(_normalize_corp_code(value, source="--corp-codes"))
     if codes_file.strip():
         path = Path(codes_file)
-        values.extend(line.strip() for line in path.read_text(encoding="utf-8").splitlines())
-    normalized = sorted({value for value in values if value})
-    return normalized
+        for line_number, value in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            if value.strip():
+                normalized.add(
+                    _normalize_corp_code(
+                        value,
+                        source=f"--corp-codes-file {path} line {line_number}",
+                    )
+                )
+    return sorted(normalized)
 
 
 def _load_reprt_codes(text: str) -> list[str]:
@@ -130,6 +161,11 @@ def _financial_specs(
     reprt_codes: list[str],
     fs_div: str,
 ) -> list[dict[str, object]]:
+    if start_year < 2015:
+        raise RuntimeError(
+            "financial-start-year must be >= 2015: FY2014 is unavailable through "
+            "the OpenDART fnlttSinglAcntAll endpoint and requires original filing/XBRL extraction"
+        )
     specs: list[dict[str, object]] = []
     for corp_code in corp_codes:
         for year in range(start_year, end_year + 1):
