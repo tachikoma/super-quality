@@ -17,8 +17,13 @@ import pandas as pd
 from k200_mq.data.dart_pit import load_filing_metadata
 from k200_mq.data.dart_xbrl import XBRL_ENDPOINT
 
+try:
+    from scripts.xbrl_inventory_contract import INVENTORY_MANIFEST_VERSION
+except ModuleNotFoundError:
+    from xbrl_inventory_contract import INVENTORY_MANIFEST_VERSION
 
-INVENTORY_VERSION = "k200mq-fy2014-xbrl-inventory-v2"
+
+INVENTORY_VERSION = INVENTORY_MANIFEST_VERSION
 ANNUAL_REPORT_NAME = "사업보고서 (2014.12)"
 FY2014_ANNUAL_REPORT_RE = re.compile(
     r"^(?:\[(?:기재정정|첨부추가|첨부정정)\])?사업보고서 \(2014\.12\)$"
