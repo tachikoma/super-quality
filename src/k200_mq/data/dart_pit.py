@@ -33,6 +33,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pandas as pd
 
 from k200_mq.data.account_mapping import ACCOUNT_COLUMN_MAPPING, find_account_value
+from k200_mq.data.dart_xbrl import (
+    DERIVED_XBRL_SOURCE_TYPE,
+    XBRL_ENDPOINT,
+    XBRLError,
+    verify_derived_xbrl_manifest,
+)
 from k200_mq.data.provenance import (
     FINANCIAL_PROVENANCE_CONTRACT_ATTR,
     NEXT_SESSION_POLICY,
@@ -93,6 +99,7 @@ OFFICIAL_FILING_TIMEZONE = "Asia/Seoul"
 OPEN_DART_ENDPOINTS = {
     "filing_list": "https://opendart.fss.or.kr/api/list.json",
     "financial_facts": "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json",
+    "financial_xbrl": XBRL_ENDPOINT,
     # Retained as a descriptive reference only.  It is deliberately not an
     # accepted filing-list or financial-facts acquisition endpoint.
     "document": "https://opendart.fss.or.kr/api/document.xml",
@@ -100,6 +107,7 @@ OPEN_DART_ENDPOINTS = {
 _DART_FINANCIAL_ENDPOINT_PATHS = frozenset({
     "/api/fnlttSinglAcnt.json",
     "/api/fnlttSinglAcntAll.json",
+    "/api/fnlttXbrl.xml",
 })
 _DART_SOURCE_TYPE_ALIASES = {
     "filing_metadata": frozenset({
@@ -118,6 +126,7 @@ _DART_SOURCE_TYPE_ALIASES = {
         "opendartfinancial",
         "financialfacts",
         "financialfactsjson",
+        "k200mqderivedfinancialxbrl",
     }),
 }
 # DART-prefixed aliases are the package-level API.  The short names remain
@@ -485,6 +494,8 @@ def _manifest_endpoint_kind(manifest: Mapping[str, Any]) -> str | None:
     path = urlparse(source_url).path
     if path == urlparse(OPEN_DART_ENDPOINTS["filing_list"]).path:
         return "filing_metadata"
+    if path == "/api/fnlttXbrl.xml":
+        return "financial_xbrl"
     if path in _DART_FINANCIAL_ENDPOINT_PATHS or (
         path.startswith("/api/fnlttSinglAcnt") and path.endswith(".json")
     ):
@@ -494,10 +505,16 @@ def _manifest_endpoint_kind(manifest: Mapping[str, Any]) -> str | None:
 
 def _manifest_matches_kind(manifest: Mapping[str, Any], expected_kind: str) -> bool:
     endpoint_kind = _manifest_endpoint_kind(manifest)
+    if expected_kind == "financial_facts" and endpoint_kind == "financial_xbrl":
+        return _is_derived_xbrl_manifest(manifest) and manifest.get("manifest_version") == "k200mq-derived-xbrl-v1"
     if endpoint_kind != expected_kind:
         return False
     source_type = _manifest_source_type(manifest)
     return source_type is None or source_type in _DART_SOURCE_TYPE_ALIASES[expected_kind]
+
+
+def _is_derived_xbrl_manifest(manifest: Mapping[str, Any]) -> bool:
+    return _manifest_source_type(manifest) == _normal_label(DERIVED_XBRL_SOURCE_TYPE)
 
 
 def _manifest_declares_endpoint(manifest: Mapping[str, Any]) -> bool:
@@ -641,6 +658,13 @@ def _verified_manifest(
         raise DARTPITError(
             f"DART manifest endpoint/source type is not valid for {expected_kind}"
         )
+    if _is_derived_xbrl_manifest(data):
+        if not isinstance(manifest, (str, Path)) or source.path is None:
+            raise DARTPITError("derived XBRL financial facts require a manifest file path")
+        try:
+            verify_derived_xbrl_manifest(data, artifact_path=source.path)
+        except XBRLError as exc:
+            raise DARTPITError(f"derived XBRL provenance chain is invalid: {exc}") from exc
     # A raw-byte match proves only that the sidecar belongs to this file.  PIT
     # eligibility additionally requires the complete importer contract below.
     # Incomplete manifests remain useful as non-PIT candidates, but never issue
@@ -948,6 +972,12 @@ def _join_evidence_valid(frame: pd.DataFrame, evidence: Any) -> bool:
 def _lineage_source_valid(lineage: Any) -> bool:
     if not isinstance(lineage, _DARTLineage):
         return False
+    endpoint_kind = _manifest_endpoint_kind({"source_url": lineage.source_url})
+    endpoint_matches = endpoint_kind == lineage.kind or (
+        lineage.kind == "financial_facts"
+        and endpoint_kind == "financial_xbrl"
+        and lineage.manifest_path is not None
+    )
     if (
         lineage.issuer is not _DART_ISSUER
         or not lineage.manifest_verified
@@ -955,7 +985,7 @@ def _lineage_source_valid(lineage: Any) -> bool:
         or not lineage.raw_source_path
         or not Path(lineage.raw_source_path).is_file()
         or not lineage.source_url
-        or _manifest_endpoint_kind({"source_url": lineage.source_url}) != lineage.kind
+        or not endpoint_matches
     ):
         return False
     try:
@@ -970,8 +1000,10 @@ def _lineage_source_valid(lineage: Any) -> bool:
                 or _manifest_digest(manifest) != lineage.manifest_digest
             ):
                 return False
+            if _is_derived_xbrl_manifest(manifest):
+                verify_derived_xbrl_manifest(manifest, artifact_path=lineage.raw_source_path)
         return True
-    except OSError:
+    except (OSError, XBRLError, DARTPITError):
         return False
 
 

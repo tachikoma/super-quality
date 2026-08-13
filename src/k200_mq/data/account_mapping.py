@@ -21,7 +21,9 @@ ACCOUNT_COLUMN_MAPPING: dict[str, tuple[str, ...]] = {
     "net_income": ("ifrs-full_ProfitLoss", "ifrs_ProfitLoss", "당기순이익"),
     "operating_cf": (
         "ifrs-full_CashFlowsFromOperatingActivities",
+        "ifrs-full_CashFlowsFromUsedInOperatingActivities",
         "ifrs_CashFlowsFromOperatingActivities",
+        "ifrs_CashFlowsFromUsedInOperatingActivities",
         "영업활동현금흐름",
         "영업현금흐름",
     ),
