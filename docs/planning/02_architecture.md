@@ -26,7 +26,7 @@ src/
 │   │   ├── __init__.py
 │   │   ├── base.py               # 공통 팩터 인터페이스
 │   │   ├── momentum.py           # skipped-return v4
-│   │   ├── quality.py            # ROE, DE, OpMargin, CashConv
+│   │   ├── quality.py            # ROE, DE, Gross-Margin Proxy, CashConv
 │   │   └── regime.py             # KPI200 regime 필터
 │   ├── strategies/
 │   │   ├── __init__.py
@@ -74,7 +74,7 @@ docs/planning/
     │
     ├── 3. 팩터 (리밸런싱 일자별 횡단면):
     │    ├── momentum.py → skipped-return v4 → z-score 순위
-    │    ├── quality.py  → ROE, DE, OpMargin, CashConv → z-score 순위
+    │    ├── quality.py  → ROE, DE, Gross-Margin Proxy, CashConv → z-score 순위
     │    │         └─ 입력: 정규화 로더 또는 로컬 DART pivot(account_mapping)
     │    └── regime.py   → KPI200 > MA(REGIME_MA_PERIOD) AND
     │                       20일 수익률 > REGIME_MIN_RETURN
@@ -128,7 +128,10 @@ provenance 계약은 여러 스냅샷의 날짜별 원천, 원시 바이트 SHA-
 
 - **ROE**: 순이익 / 자본총계 (현재 정규화 재무 입력; PIT TTM 필터 없음)
 - **Debt/Equity**: 총부채 / 자본총계
-- **Operating Margin**: 영업이익 / 매출액 (현재 정규화 재무 입력; PIT TTM 필터 없음)
+- **Gross-Margin Proxy**: `max(revenue - cogs, 0) / revenue`; 매출액과 매출원가에서
+  파생한 floored gross-profit / gross-margin proxy입니다. true operating income이나
+  operating margin이 아니며, canonical 출력/가중치 명칭은 `gross_margin_proxy`입니다
+  (PIT TTM 필터 없음). 기존 `OPMARGIN` 설정 별칭만 호환성을 위해 deprecated로 유지합니다.
 - **Cash Conversion**: 영업현금흐름 / 당기순이익 (현재 정규화 재무 입력; PIT TTM
   필터 없음)
 - **TTM quarter filter**: `QUALITY_MIN_TTM_QUARTERS`는 비활성·미지원/보류
@@ -138,6 +141,9 @@ provenance 계약은 여러 스냅샷의 날짜별 원천, 원시 바이트 SHA-
   total_assets, total_equity)으로 매핑하고, `dart_pit.pivot_financial_facts_to_wide`가
   long facts를 wide로 피벗해 로컬 DART 입력이 품질 팩터로 직접 흐릅니다.
   정규화 로더(API 경로)도 동일 매핑을 공유합니다.
+- 위 six-fact 중 하나라도 누락된 원천 row는 quality-scored 대상이 아닙니다. 최종
+  factor merge에서 품질 결측을 허용하는 경우 quality는 neutral-fill(0)되며, 이
+  neutral-fill은 원천 품질 커버리지의 증거가 아닙니다.
 
 ### 레짐(Regime) 팩터 (`factors/regime.py`)
 
@@ -241,7 +247,7 @@ override에만 노출됩니다. `true-walkforward`는 이 플래그들을 노출
 `ENABLE_STOP_LOSS`/`SL_STOP_LOSS`의 config/environment 값 또는 기본값을 사용합니다.
 
 품질 종합 점수는 네 구성요소 z-score의 가중 평균이며 기본 가중치는 ROE 0.35 / DE
-0.25 / operating margin 0.20 / cash conversion 0.20입니다. 가중치는
+0.25 / gross-margin proxy 0.20 / cash conversion 0.20입니다. 가중치는
 `QualityFactor`에서 음이 아닌 값과 양의 합을 검증한 뒤 합이 1이 되도록
 정규화합니다. 누락된 구성요소는 종합 점수에서 중립(0)으로 처리합니다.
 

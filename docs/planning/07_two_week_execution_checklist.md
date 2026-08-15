@@ -285,13 +285,20 @@
     - 실제 CSV도 모든 날짜가 198 구성원으로 일치(`pit_universe.py`가 bundle manifest의 예외를 로드해 검증에 반영).
   - 결론: 198-member strict 게이트 병목은 **이미 manifest 전이 예외로 해소된 상태**이며, Day 4 재개 시 별도 조치 불필요.
 
+## 품질 의미론 및 결측 공개
+
+- `max(revenue - cogs, 0) / revenue`는 floored gross-profit / gross-margin
+  proxy이며 true operating income/margin이 아니다. six-fact 중 하나라도 빠진
+  원천 row는 quality-scored 대상이 아니고, 최종 factor merge에서 허용되는 품질
+  결측만 neutral-fill(0)된다.
+
 ## 품질 배선 수정 (2026-08-06, 추가)
 
 - 확인: 로컬 DART facts가 품질 팩터로 흐르지 않던 배선 결함 2건을 oracle 검토로 확정하고 수정했다.
   - 공용 매핑: `src/k200_mq/data/account_mapping.py`의 `ACCOUNT_COLUMN_MAPPING`이 계정명/계정코드를 wide 6컬럼(revenue, cogs, net_income, operating_cf, total_assets, total_equity)으로 매핑(정규화 로더 API 경로와 공유).
   - pivot: `dart_pit.pivot_financial_facts_to_wide`가 long format facts를 wide로 피벗해 `_load_local_dart_financial_inputs`에 연결.
   - 게이트: `main.py` 품질 활성 조건을 `DART_API_KEY` 단독에서 `(DART_API_KEY or 로컬 원천 준비) and daily_financial 비어있지 않음`으로 수정.
-- 검증: `tests/test_k200_mq_local_dart_quality.py` 통합 테스트로 ROE 8.3% / D/E 0.67 / OpMargin 60% / CashConv 0.8 확인, 관련 스위트 전체 통과(408 passed + 기존 무관 실패 1건), ruff clean.
+- 검증: `tests/test_k200_mq_local_dart_quality.py` 통합 테스트로 ROE 8.3% / D/E 0.67 / gross-margin proxy 60% / CashConv 0.8 확인, 관련 스위트 전체 통과(408 passed + 기존 무관 실패 1건), ruff clean.
 - 함의: 연간(11011) 축소 스펙 판정이 품질 팩터 실제 소비 경로에서 검증됨. API 키 확보 후 축소 스펙(2,057건)으로 재개하면 로컬 DART 품질 입력이 strict 실행에 반영된다.
 
 ## 실파일 스모크 + 매핑 커버리지 (2026-08-06, 추가)
@@ -354,17 +361,24 @@
   - 총수익률 +57.79%, CAGR 9.79%, Sharpe 0.737, MDD -23.40%, Calmar 0.418.
   - 폴드별: 2020 +21.7% / 2021 +0.5% / 2022 -7.8% / 2023 +22.2% / 2024 +15.8%.
 - 커버리지 잔여 갭
-  - 첫 리밸런스(2015-05-29): usable 147/198, missing 51 티커.
+  - 첫-ready 리밸런스(2015-05-29): `momentum_z` usable 147/198, missing 51
+    티커(`quality_required=false`).
   - quality: `partial_allowed_fill_missing_with_zero`, covered 169 ticker / factor 393,522행.
   - 갭을 닫고 `validated_expanding_walk_forward_pit` 승격을 목표로 PIT 민감도·생존자 편향 비교·
     ADV 영향·스트레스 테스트가 다음 우선순위.
 - 산출물: `outputs_k200mq_day8_strict_extended/true_walkforward/{summary.csv,oos_returns.csv,selection_and_folds.json}`
 - scorecard: `docs/planning/08_go_no_go_scorecard_2026-08-10.{md,csv}` (임시 판정: Continue 조건부)
 
-## Day 8 커버리지 갭 루트코즈 (2026-08-11, 추가)
+## Day 8 커버리지 갭 루트코즈 (2026-08-11, 추가; superseded erratum)
 
 - 분석 문서: `docs/planning/09_coverage_gap_analysis.md`
-- 결론: 첫 리밸런스(2015-05-29) missing 51 티커는 3유형.
+- **Erratum (2026-08-13)**: 아래 2026-08-11 기록의 51-ticker financial-gap
+  해석은 superseded/폐기한다. Day 8 `first_ready_rebalance`의 147/198 및
+  missing 51은 `momentum_z` readiness와 가격 warmup 결과이며, financial/quality
+  coverage가 아니다. `quality_required=false` (`src/k200_mq/main.py:1150-1176`).
+- 아래 D/B/C 분류와 보강 계획은 당시 재무-gap 가설을 보존하는 감사 이력일 뿐, Day 8
+  momentum readiness의 원인 또는 해결책으로 사용하지 않는다.
+- **기존 기록의 결론(폐기)**: 첫 리밸런스(2015-05-29) missing 51 티커는 3유형.
   - **D (7)**: 2015-05-29 이전 사업보고서(2014.12) 제출했으나 facts 미수집 — 실제 수집 갭.
   - **B (9)**: 2015-05-29 시점 사업보고서 없음 + facts 미수집 — 유니버스 proxy + 수집 갭 혼재.
   - **C (35)**: 신규상장/후기 편입으로 2015-05-29 시점 데이터 부재가 정상 — 유니버스 proxy.
@@ -390,3 +404,13 @@
 - 제약: 유니버스 proxy 특성(B/C 44개)은 수집으로 해결 불가 — 역사적 KOSPI 200 구성원
   데이터로 유니버스를 PIT화해야 함.
 
+## Phase 3 FY2014 XBRL 현황 (2026-08-13)
+
+- FY2014 원본 접수 141건 선정.
+- 검증된 XBRL ZIP 119건.
+- strict six-fact accepted 92건.
+- 요청한 XBRL 문서를 이용할 수 없음을 나타내는 OpenDART 공식 상태 `014` 22건
+  (단순한 로컬 파일 누락이 아님).
+- parser fail-closed 27건.
+- FY2014 XBRL 보강은 재무 PIT facts를 개선하지만, `momentum_z` 가격 warmup을
+  충족시키거나 first-ready 147/198을 변경하는 해결책은 아니다.

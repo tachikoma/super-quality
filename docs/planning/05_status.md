@@ -24,6 +24,14 @@
   벡터화해 prepare 파이프라인을 8분+ → ~82초로 단축했다. (실행 전 검증: ruff 통과, dart 테스트 50개,
   전체 409 passed + 기존 무관 레거시 실패 1건)
 - DART extended aggregate: prepare 후 259,255행 매핑 / future receipt 44,438행 드롭.
+- **준비성 해석 정정**: Day 8 `first_ready_rebalance`의 usable 147/198 및
+  missing 51은 해당 신호일의 `momentum_z` 준비성이다. `quality_required=false`이므로
+  이 수치는 재무/품질 커버리지 결손을 뜻하지 않는다(`src/k200_mq/main.py:1150-1176`).
+- **Phase 3 FY2014 XBRL 현황**: FY2014 원본 접수 141건 선정, 검증된 XBRL ZIP
+  119건, strict six-fact accepted 92건, 요청한 XBRL 문서를 이용할 수 없음을
+  나타내는 OpenDART 공식 상태 `014` 22건(단순한 로컬 파일 누락이 아님),
+  parser fail-closed 27건. FY2014 XBRL은 재무 PIT facts를 개선하지만 momentum
+  warmup을 해결하지는 않는다.
 
 ## 2026-08-06 이전 체크포인트 (보관)
 
@@ -36,7 +44,7 @@
   (`src/k200_mq/data/account_mapping.py`)이 계정명/계정코드를 wide 6컬럼으로 매핑하고,
   `dart_pit.pivot_financial_facts_to_wide`가 long format facts를 wide로 피벗하며,
   `main.py` 품질 게이트가 `DART_API_KEY` 또는 로컬 원천 준비 상태를 검사한다.
-  통합 테스트로 ROE 8.3% / D/E 0.67 / OpMargin 60% / CashConv 0.8을 확인했다.
+  통합 테스트로 ROE 8.3% / D/E 0.67 / gross-margin proxy 60% / CashConv 0.8을 확인했다.
 - 실제 파일 end-to-end 스모크 완료(2026-08-06). keydedup pilot DART + bundle 유니버스로
   `run`(2020-2024)을 실행했고, manifest에서 `data_mode=pit_filing_date`, `pit_valid=true`,
   `quality_factor_row_count=10,990`(7개 티커)을 확인해 로컬 DART → 품질 팩터 경로가
@@ -58,11 +66,37 @@
 | 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, 테스트가 구현됨. |
 | 기계적 비-PIT 진단 | `robustness` 독립 하위 기간 테스트와 expanding-window `true-walkforward`를 사용할 수 있음. |
 | 검증된 PIT 근거 | 아직 없음. strict preflight는 통과했으나 분류는 여전히 `mechanical_expanding_walk_forward_non_pit`. |
-| 현재 공식 진단 | strict PIT WF(2020-2024, extended DART, 5/5 valid): stitched +57.79%, CAGR 9.79%, Sharpe 0.737, MDD -23.40%, OOS 1,231점. 첫 리밸런스 usable 147/198. 분류는 `mechanical_expanding_walk_forward_non_pit`. |
+| 현재 공식 진단 | strict PIT WF(2020-2024, extended DART, 5/5 valid): stitched +57.79%, CAGR 9.79%, Sharpe 0.737, MDD -23.40%, OOS 1,231점. 첫-ready 리밸런스 `momentum_z` usable 147/198, missing 51(`quality_required=false`). 분류는 `mechanical_expanding_walk_forward_non_pit`. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | 커버리지 잔여 갭(첫 리밸런스 missing 51 티커, quality partial-fill 모드)을 닫고 `validated_expanding_walk_forward_pit` 승격을 목표로 PIT 민감도/생존자 편향 비교/ADV/스트레스 테스트를 진행. |
+| 다음 게이트 | FY2014 재무 PIT facts 검증과 momentum warmup/readiness를 각각 점검한 뒤, PIT 민감도/생존자 편향 비교/ADV/스트레스 테스트를 진행해 `validated_expanding_walk_forward_pit` 승격을 검토한다. |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
+
+### Day 8 readiness erratum (2026-08-13)
+
+기존의 “첫 리밸런스 usable 147/198, missing 51”을 재무/품질 커버리지 갭으로
+해석한 기록은 superseded이다. 정확히는 first-ready 리밸런스의 `momentum_z`
+readiness이며 `quality_required=false`이다(`src/k200_mq/main.py:1150-1176`).
+FY2014 XBRL은 재무 PIT facts를 개선하지만 momentum warmup을 해결하지 않는다.
+
+Phase 3 FY2014 XBRL: 원본 접수 141건 선정, 검증된 XBRL ZIP 119건, strict six-fact
+accepted 92건, 요청한 XBRL 문서를 이용할 수 없음을 나타내는 OpenDART 공식 상태
+`014` 22건(단순한 로컬 파일 누락이 아님), parser fail-closed 27건.
+
+### 리밸런스별 재무 커버리지 진단 (구현)
+
+`src/k200_mq/main.py`에 no-lookahead 재무 커버리지 진단을 구현했다. 각 리밸런스의
+정확한 PIT 유니버스 as-of를 기준으로, 해당 리밸런스에 매핑된 측정 신호일 이전 또는
+동일한 최신 상태의 완전한 6개 원천 사실(revenue, cogs, net_income, operating_cf,
+total_assets, total_equity)을 점검한다. 원천 가용성과 PIT 게이트 통과 커버리지는
+분리해 기록하며, 중립값으로 채운 quality 입력/팩터에서 커버리지를 추론하지 않는다.
+이 기록은 구현 문서화이며, 신규 실행 숫자를 추가하거나 새 수치 결과를 주장하지 않는다.
+
+품질 의미론은 `max(revenue - cogs, 0) / revenue`인 floored gross-profit /
+gross-margin proxy이다. 이는 true operating income 또는 operating margin이 아니다.
+완전한 six-fact row가 없는 종목/보고서는 quality-scored 대상이 아니며, 최종 factor
+merge에서 품질 결측을 허용하는 경우에만 quality가 neutral-fill(0)된다. neutral-fill은
+원천 품질 커버리지를 의미하지 않는다.
 
 ## 구현된 인프라
 
@@ -249,9 +283,11 @@ financial `pit_filing_date`)를 통과했고 성과 컷오프 4종(CAGR/MDD/Shar
 
 현재 `true-walkforward` 경로는 `validated_expanding_walk_forward_pit`로 표시할 수
 없습니다. 승격에 남은 갭:
-- 첫 리밸런스(2015-05-29)에서 usable 147/198 — missing 51 티커 (`018260`, `028260`,
-  `031210`, `207940` 등).
-- quality 팩터는 `partial_allowed_fill_missing_with_zero` 모드(covered 169 ticker).
+- 첫-ready 리밸런스(2015-05-29)의 usable 147/198 — missing 51은 `momentum_z`
+  readiness 및 가격 warmup 결과이며, 재무/품질 coverage gap으로 해석하지 않는다.
+  `quality_required=false`이다.
+- quality 팩터의 `partial_allowed_fill_missing_with_zero` 모드(covered 169 ticker)는
+  위 51개 momentum readiness 수치와 별개의 상태다.
 - strict PIT WF 통과 후의 PIT 민감도, 생존자 편향 비교, ADV 영향, 계획된 스트레스
   테스트는 아직 실행되지 않았다.
 
@@ -300,16 +336,18 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 2. ~~원시 DART 제출/공시 메타데이터와 재무 사실을 확보하고, 제출일을 안전한 거래 세션
    가용일로 매핑하여 회계기간 날짜로 대체하지 않습니다.~~
    **부분 해소 (2026-08-10)**: `data/raw/dart_aggregated_day4_extended/` aggregate로
-   financial provenance가 `pit_filing_date` + `pit_valid=true` 승격됨. 잔여 커버리지 갭
-   (첫 리밸런스 missing 51 티커)은 추가 수집 또는 PIT 커버리지 판정 정리 필요.
+   financial provenance가 `pit_filing_date` + `pit_valid=true` 승격됨. 첫-ready
+   momentum missing 51은 재무/품질 coverage가 아니며, FY2014 XBRL 보강은 재무 PIT facts를
+   개선하지만 momentum warmup을 해소하지는 않는다.
 3. ~~두 입력의 PIT provenance가 실제 자료에서 확인된 뒤 strict PIT WF를 다시 실행합니다.~~
    **해소 (2026-08-10)**: Day 8 strict WF 실행, 5/5 valid, `outputs_k200mq_day8_strict_extended/`.
 4. strict PIT WF가 통과한 뒤에만 PIT 민감도, 생존자 편향 비교, ADV 영향 및 유동성
    제약, 계획된 스트레스 테스트를 실행합니다.
 
 이 단계가 완료될 때까지 출력 수치는 기계적 진단으로만 취급합니다. (Day 8 실행은 strict
-preflight를 통과했으나 `validated_expanding_walk_forward_pit` 승격은 커버리지 갭 종결 후
-재실행이 필요합니다.)
+preflight를 통과했으나 `validated_expanding_walk_forward_pit` 승격은 재무/유니버스 PIT 범위와
+별도 검증 게이트를 충족한 뒤 재실행이 필요합니다. 147/198의 momentum readiness 수치는
+재무/품질 coverage의 대리 지표가 아닙니다.)
 
 ### OpenDART 로컬 계약과 다음 단계
 

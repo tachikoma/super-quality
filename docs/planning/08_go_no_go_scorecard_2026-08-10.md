@@ -17,11 +17,20 @@
 |---|---|---|---|---|
 | strict preflight 실패 건수 | 0 | 0 | 통과 | `outputs_k200mq_day8_strict_extended/true_walkforward/summary.csv` (5/5 valid) |
 | 유니버스 예외 정리 | 완료 | 완료 (120개 월말 198 구성원) | 통과 | `data/universe/kospi200_bundle_strict/bundle.manifest.json` `transition_exceptions_by_as_of` |
-| DART filing-date 커버리지 | 임계치 이상 | financial `pit_filing_date` + `pit_valid=true`; 첫 리밸런스 usable 147/198 (missing 51) | 부분 통과 | `selection_and_folds.json` `prepared_inputs.coverage` |
+| DART filing-date 커버리지 | 임계치 이상 | financial `pit_filing_date` + `pit_valid=true`; 별도 readiness 진단은 first-ready `momentum_z` usable 147/198 (missing 51, `quality_required=false`) | 부분 통과 | `selection_and_folds.json` `prepared_inputs.coverage`; `src/k200_mq/main.py:1150-1176` |
 
 재무 provenance 상세: `mode=pit_filing_date`, `availability_policy=next_session`, `filing_date_used=true`, `source_schema_contract=true`, `pit_valid=true`. 유니버스는 전 as-of 날짜 `provenance=pit`.
 
-커버리지 잔여 갭: 첫 리밸런스(2015-05-29)에서 `usable_ticker_count=147/198`, missing 51 (`018260`, `028260`, `031210`, `207940`, ...). Quality는 `partial_allowed_fill_missing_with_zero` 모드, covered 169 ticker / factor 393,522행.
+**준비성 해석 정정 (2026-08-13)**: 첫-ready 리밸런스(2015-05-29)의
+`usable_ticker_count=147/198`, missing 51은 `momentum_z` 가격 warmup/readiness이며
+financial/quality coverage가 아니다. `quality_required=false`이다. Quality의
+`partial_allowed_fill_missing_with_zero` 모드(covered 169 ticker / factor 393,522행)는
+별도 상태다. 이전에 이 51개를 DART financial gap으로 해석한 내용은 superseded/erratum이다.
+
+FY2014 XBRL Phase 3 현황: 원본 접수 141건 선정, 검증된 XBRL ZIP 119건, strict six-fact
+accepted 92건, 요청한 XBRL 문서를 이용할 수 없음을 나타내는 OpenDART 공식 상태
+`014` 22건(단순한 로컬 파일 누락이 아님), parser fail-closed 27건. FY2014 XBRL은
+financial PIT facts를 개선하지만 momentum warmup은 해결하지 않는다.
 
 ## 2) 성과 게이트 (비용 반영 OOS, 2020-2024 stitched)
 
@@ -59,7 +68,11 @@ Stitched OOS: 총수익률 +57.79% (5년), CAGR 9.79%, Sharpe 0.737, MDD -23.40%
 판정 사유 (3줄 요약):
 1. Day 1~4의 strict blocker(세션 매핑 실패, 조인 무결성, financial provenance)가 모두 해소되어 strict preflight 실패 0건, financial provenance가 처음으로 `pit_filing_date` + `pit_valid=true`로 승격됐다.
 2. 성과 컷오프 4종(CAGR/MDD/Sharpe/Calmar)이 5년 OOS에서 모두 통과했고, 2022 음수 외 4/5 폴드 양수로 서브기간 편중도 과도하지 않다.
-3. 단, 분류는 여전히 `mechanical_expanding_walk_forward_non_pit`으로 유지된다 — 유니버스 missing 51 티커 / quality partial-fill 모드로 커버리지 갭이 남아, `validated_expanding_walk_forward_pit` 성과 주장으로의 승격은 PIT 커버리지 완결 후 재실행이 필요하다.
+3. 단, 분류는 여전히 `mechanical_expanding_walk_forward_non_pit`으로 유지된다 —
+   first-ready momentum readiness 147/198은 financial/quality coverage 지표가 아니며,
+   별도의 PIT 범위·quality partial-fill·안정성 게이트가 남아 있어
+   `validated_expanding_walk_forward_pit` 성과 주장으로의 승격은 해당 검증 완결 후
+   재실행이 필요하다.
 
 관련 산출물:
 - `outputs_k200mq_day8_strict_extended/true_walkforward/{summary.csv,oos_returns.csv,selection_and_folds.json}`

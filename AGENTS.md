@@ -157,10 +157,31 @@ ruff check
   -23.40%, Calmar 0.418. Folds: 2020 +21.7% / 2021 +0.5% / 2022 -7.8% /
   2023 +22.2% / 2024 +15.8%.
 - **Classification stays `mechanical_expanding_walk_forward_non_pit`**: strict
-  preflight pass is not a validated PIT performance claim. Remaining gap: first
-  rebalance usable 147/198 (51 missing tickers); quality runs in
+  preflight pass is not a validated PIT performance claim. The first-ready
+  rebalance has `momentum_z` readiness of 147/198 (51 missing tickers), not
+  financial or quality coverage (`quality_required=false`; see
+  `src/k200_mq/main.py:1150-1176`). The earlier financial-gap interpretation is
+  superseded by this erratum. Quality separately runs in
   `partial_allowed_fill_missing_with_zero`. Scorecard 2026-08-10: **Continue
   (conditional)**.
-- **Next priority**: close the coverage gap (51 missing tickers at first
-  rebalance), then run PIT sensitivity, survivorship-bias comparison, ADV
-  impact, and stress tests toward `validated_expanding_walk_forward_pit`.
+
+## TASK LOG — 2026-08-13
+
+- **Day 8 readiness erratum**: `first_ready_rebalance` usable 147/198 and
+  missing 51 are `momentum_z` readiness counts, not financial/quality coverage;
+  `quality_required=false`. FY2014 XBRL improves financial PIT facts but cannot
+  resolve the momentum price-history warmup.
+- **리밸런스별 재무 커버리지 진단 구현**: `src/k200_mq/main.py`가 각 리밸런스의
+  정확한 PIT 유니버스 as-of와 측정 신호일 이전 또는 동일한 최신 상태를 사용해
+  완전한 6개 원천 사실(revenue, cogs, net_income, operating_cf, total_assets,
+  total_equity)을 점검한다. 원천 가용성과 PIT 게이트 통과 커버리지를 분리하며,
+  중립값으로 채운 quality 입력으로 커버리지를 추론하지 않는다. 이번 기록에는
+  신규 실행 수치를 추가하지 않는다.
+- **Phase 3 FY2014 XBRL status**: 141 original receipts selected, 119 verified
+  XBRL ZIP files, 92 strict six-fact accepted, 22 with OpenDART official status
+  `014` indicating the requested XBRL document is unavailable (not merely a
+  missing local file), and 27 parser fail-closed.
+- **Next priority**: complete the separate FY2014 financial PIT validation and
+  momentum warmup/readiness review, then run PIT sensitivity, survivorship-bias
+  comparison, ADV impact, and stress tests. The classification remains
+  `mechanical_expanding_walk_forward_non_pit`.

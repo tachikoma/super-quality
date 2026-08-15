@@ -1,12 +1,24 @@
-# 커버리지 갭 분석 — 첫 리밸런스 missing 51 티커 (2026-08-11)
+# 커버리지 갭 분석 — 첫 리밸런스 missing 51 티커 (2026-08-11; superseded erratum)
 
-배경: Day 8 strict PIT WF(`outputs_k200mq_day8_strict_extended/`)의 첫 리밸런스
-(2015-05-29)에서 usable 147/198, missing 51 티커로 확인됨. 이 문서는 51개 갭의
-근본 원인을 유형별로 규명한다.
+배경: Day 8 strict PIT WF(`outputs_k200mq_day8_strict_extended/`)의 first-ready
+리밸런스(2015-05-29)에서 `momentum_z` usable 147/198, missing 51 티커로 확인됨.
+`quality_required=false`이므로 이 수치는 financial/quality coverage가 아니라
+momentum readiness 및 가격 warmup이다. 아래 2026-08-11의 financial-gap 분석은
+superseded/erratum으로 보존하는 감사 이력이다.
 
-## 요약
+FY2014 XBRL은 재무 PIT facts를 개선하지만 momentum warmup을 해결하지 않는다.
+Phase 3 현황: 원본 접수 141건 선정, 검증된 XBRL ZIP 119건, strict six-fact accepted
+92건, 요청한 XBRL 문서를 이용할 수 없음을 나타내는 OpenDART 공식 상태 `014`
+22건(단순한 로컬 파일 누락이 아님), parser fail-closed 27건.
 
-51개 missing 티커는 3가지 유형으로 분류된다:
+## 요약 (superseded financial-gap interpretation)
+
+> **Erratum (2026-08-13):** 아래 분류와 수치는 당시 51개를 재무/품질 갭으로
+> 해석한 기록이며, Day 8 first-ready 147/198의 의미를 설명하지 않는다. 정확한
+> 의미는 `momentum_z` readiness이다(`src/k200_mq/main.py:1150-1176`).
+
+기존 기록에서는 51개 missing 티커를 3가지 유형으로 분류했다(이 분류는 superseded된
+financial-gap 해석의 감사 이력이다):
 
 | 유형 | 개수 | 설명 | 성격 |
 |---|---|---|---|

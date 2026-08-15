@@ -27,8 +27,13 @@ KOSPI 200 종목 중 리밸런싱 일자에 모멘텀 팩터와 품질 팩터를
 | **Momentum (skipped-return, v4)** | `close[t-skip_days] / close[t-long_window] - 1` (기본 `close[t-42] / close[t-252] - 1`) | 50% |
 | **Quality — ROE** | 당기순이익 / 자본총계 (현재 normalized 재무 입력; TTM 필터 없음) | 35% |
 | **Quality — Debt/Equity** | 총부채 / 자본총계 (낮을수록 좋음) | 25% |
-| **Quality — Operating Margin** | 영업이익 / 매출액 (현재 normalized 재무 입력; TTM 필터 없음) | 20% |
+| **Quality — Gross-Margin Proxy** | `max(revenue - cogs, 0) / revenue`; 매출액과 매출원가에서 파생한 floored gross-profit / gross-margin proxy이며 true operating income/margin이 아님 (현재 normalized 재무 입력; TTM 필터 없음) | 20% |
 | **Quality — Cash Conversion** | 영업현금흐름 / 당기순이익 (현재 normalized 재무 입력; TTM 필터 없음) | 20% |
+
+품질 입력은 `revenue`, `cogs`, `net_income`, `operating_cf`, `total_assets`,
+`total_equity`의 six-fact row를 기준으로 합니다. 이 중 하나라도 없는 row는
+quality-scored 대상이 아닙니다. 최종 factor merge에서 품질 결측을 허용하는 경우에는
+quality가 neutral-fill(0)되며, 이는 원천 품질 데이터가 있었다는 뜻이 아닙니다.
 
 ### 리짓 필터
 
@@ -446,7 +451,7 @@ src/k200_mq/
 │   └── provenance.py        # Filing timestamp/PIT validity contracts
 ├── factors/
 │   ├── momentum.py          # skipped-return 모멘텀 팩터 (v4)
-│   ├── quality.py           # 품질 팩터 (ROE, DE, OPM, CC)
+│   ├── quality.py           # 품질 팩터 (ROE, DE, Gross-Margin Proxy, CC)
 │   └── regime.py            # 리짓 필터 (KPI200 > MA(period) + 20일 수익률 조건)
 ├── strategies/
 │   └── momentum_quality.py  # 크로스섹셔널 스코어링

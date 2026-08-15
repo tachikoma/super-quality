@@ -63,8 +63,14 @@
 
 - [x] 버전이 명시된 v4 skipped-return 모멘텀 팩터 구현:
   기본 설정에서 `close[t-42] / close[t-252] - 1`.
-- [x] 정규화 입력 품질 구성요소(ROE, debt/equity, operating margin,
-  cash conversion)와 횡단면 점수화 구현.
+- [x] 정규화 입력 품질 구성요소(ROE, debt/equity, floored gross-margin proxy,
+  cash conversion)와 횡단면 점수화 구현. Gross-margin proxy는
+  `max(revenue - cogs, 0) / revenue`로 계산하며 true operating income/margin이
+  아니다.
+- [x] 품질 입력의 six-fact 계약(revenue, cogs, net_income, operating_cf,
+  total_assets, total_equity)을 문서화. 하나라도 빠진 원천 row는 quality-scored
+  대상에서 제외하고, 최종 factor merge에서 허용되는 품질 결측은 neutral-fill(0)로
+  처리한다.
 - [x] KPI200 이동평균 및 20거래일 수익률 조건을 사용하는 regime 팩터 구현.
 - [x] 팩터 준비/병합 및 readiness/warmup 처리 구현.
 - [x] 팩터 단위 테스트 및 회귀 테스트 추가.
