@@ -17,6 +17,8 @@ from k200_mq.factors.momentum import MomentumFactor
 from k200_mq.factors.regime import RegimeFactor
 from k200_mq.main import (
     _build_run_manifest,
+    _convert_financial_to_daily,
+    _measure_financial_coverage,
     _save_results,
     _validate_first_rebalance_factor_readiness,
 )
@@ -524,6 +526,31 @@ def test_rebalance_readiness_skips_unready_schedule_and_reports_first_ready_date
     }]
 
 
+def test_rebalance_schedule_on_non_measured_day_uses_preceding_signal_date() -> None:
+    measured_dates = pd.bdate_range("2024-01-02", "2024-01-08")
+    scheduled_date = pd.Timestamp("2024-01-06")
+    signal_date = pd.Timestamp("2024-01-05")
+    universe = pd.DataFrame({"as_of": [scheduled_date], "ticker": ["A"]})
+    factors = pd.DataFrame({
+        "ticker": ["A"],
+        "date": [signal_date],
+        "momentum_z": [0.5],
+    })
+
+    readiness = _validate_first_rebalance_factor_readiness(
+        universe,
+        factors,
+        measured_dates,
+        _config(TOP_N=1),
+    )
+
+    assert readiness["first_scheduled_rebalance"] == {
+        "scheduled_date": "2024-01-06",
+        "signal_date": "2024-01-05",
+    }
+    assert readiness["measured_trading_readiness_date"] == "2024-01-05"
+
+
 def test_first_rebalance_readiness_fails_without_momentum_rows() -> None:
     signal_date = pd.Timestamp("2024-01-31")
     universe = pd.DataFrame({"as_of": [signal_date], "ticker": ["A"]})
@@ -574,6 +601,206 @@ def test_rebalance_readiness_fails_when_all_schedules_are_insufficient() -> None
             pd.bdate_range("2024-01-02", "2024-02-29"),
             _config(TOP_N=2),
         )
+
+
+def test_financial_coverage_uses_exact_scheduled_universe_snapshot() -> None:
+    measured = pd.bdate_range("2024-01-02", "2024-02-29")
+    scheduled = pd.Timestamp("2024-01-31")
+    universe = pd.DataFrame({
+        "as_of": [scheduled, scheduled, pd.Timestamp("2024-02-29")],
+        "ticker": ["A", "B", "A"],
+    })
+    daily = pd.DataFrame({
+        "ticker": ["A", "B", "C"],
+        "date": [scheduled, scheduled, scheduled],
+        "financial_six_fact_available": [True, False, True],
+    })
+
+    result = _measure_financial_coverage(
+        universe, daily, measured, {"mode": "pit_filing_date", "pit_valid": True},
+    )
+
+    record = result["records"][0]
+    assert record["available_tickers"] == ["A"]
+    assert record["missing_tickers"] == ["B"]
+    assert record["universe_ticker_count"] == 2
+
+
+def test_financial_coverage_is_bounded_by_signal_date() -> None:
+    measured = pd.bdate_range("2024-01-02", "2024-02-29")
+    universe = pd.DataFrame({
+        "as_of": [pd.Timestamp("2024-01-31")],
+        "ticker": ["A"],
+    })
+    daily = pd.DataFrame({
+        "ticker": ["A", "A"],
+        "date": [pd.Timestamp("2024-02-01"), pd.Timestamp("2024-02-29")],
+        "financial_six_fact_available": [True, True],
+    })
+
+    before = _measure_financial_coverage(universe, daily, measured)
+    assert before["records"][0]["six_fact_available_ticker_count"] == 0
+
+    at_signal = _measure_financial_coverage(
+        universe,
+        daily.assign(date=pd.to_datetime(["2024-01-31", "2024-02-29"])),
+        measured,
+    )
+    assert at_signal["records"][0]["six_fact_available_ticker_count"] == 1
+
+
+def test_financial_coverage_uses_latest_historical_source_report_state() -> None:
+    scheduled = pd.Timestamp("2024-01-31")
+    universe = pd.DataFrame({"as_of": [scheduled], "ticker": ["A"]})
+    daily = pd.DataFrame({
+        "ticker": ["A", "A"],
+        "date": [pd.Timestamp("2024-01-30"), scheduled],
+        "financial_six_fact_available": [True, False],
+    })
+
+    result = _measure_financial_coverage(
+        universe, daily, pd.DatetimeIndex([scheduled]),
+    )
+    record = result["records"][0]
+    assert record["six_fact_available_ticker_count"] == 0
+    assert record["six_fact_source_coverage_ratio"] == 0.0
+    assert record["available_tickers"] == []
+    assert record["missing_tickers"] == ["A"]
+
+
+def test_converter_tracks_complete_six_facts_and_literal_zero() -> None:
+    dates = pd.bdate_range("2024-03-01", "2024-04-02")
+    financial = pd.DataFrame({
+        "ticker": ["ZERO", "MISSING", "NONFINITE"],
+        "year": [2024, 2024, 2024],
+        "quarter": [1, 1, 1],
+        "net_income": [0.0, 0.0, 0.0],
+        "total_equity": [0.0, 0.0, 0.0],
+        "total_assets": [0.0, 0.0, 0.0],
+        "revenue": [0.0, None, 0.0],
+        "cogs": [0.0, 0.0, float("inf")],
+        "operating_cf": [0.0, 0.0, 0.0],
+    })
+
+    daily = _convert_financial_to_daily(financial, dates)
+    available = daily.groupby("ticker")["financial_six_fact_available"].last()
+    assert bool(available["ZERO"]) is True
+    assert bool(available["MISSING"]) is False
+    assert bool(available["NONFINITE"]) is False
+    assert "gross_profit_proxy" in daily.columns
+    assert "operating_income" not in daily.columns
+
+    proxy_financial = pd.DataFrame({
+        "ticker": ["POSITIVE", "FLOORED"],
+        "year": [2024, 2024],
+        "quarter": [1, 1],
+        "net_income": [1.0, 1.0],
+        "total_equity": [1.0, 1.0],
+        "total_assets": [1.0, 1.0],
+        "revenue": [100.0, 100.0],
+        "cogs": [40.0, 120.0],
+        "operating_cf": [1.0, 1.0],
+    })
+    proxy_daily = _convert_financial_to_daily(proxy_financial, dates)
+    proxy_values = proxy_daily.groupby("ticker")["gross_profit_proxy"].last()
+    assert proxy_values["POSITIVE"] == pytest.approx(max(100.0 - 40.0, 0.0))
+    assert proxy_values["FLOORED"] == pytest.approx(max(100.0 - 120.0, 0.0))
+    zero_before_record = daily.query("ticker == 'ZERO' and date < '2024-03-28'")
+    assert not zero_before_record["financial_six_fact_available"].any()
+
+
+def test_converter_resets_availability_after_later_incomplete_source_report() -> None:
+    dates = pd.bdate_range("2024-03-28", "2024-07-01")
+    financial = pd.DataFrame({
+        "ticker": ["A", "A"],
+        "year": [2024, 2024],
+        "quarter": [1, 2],
+        "net_income": [1.0, 2.0],
+        "total_equity": [1.0, 2.0],
+        "total_assets": [1.0, 2.0],
+        "revenue": [1.0, 2.0],
+        "cogs": [1.0, 2.0],
+        "operating_cf": [1.0, None],
+    })
+
+    daily = _convert_financial_to_daily(financial, dates)
+    available = daily.set_index("date")["financial_six_fact_available"]
+
+    assert bool(available.loc["2024-03-28"]) is True
+    assert bool(available.loc["2024-06-27"]) is True
+    assert bool(available.loc["2024-06-28"]) is False
+    assert bool(available.loc["2024-07-01"]) is False
+
+
+def test_converter_restores_availability_after_later_complete_source_report() -> None:
+    dates = pd.bdate_range("2024-03-28", "2024-07-01")
+    financial = pd.DataFrame({
+        "ticker": ["A", "A"],
+        "year": [2024, 2024],
+        "quarter": [1, 2],
+        "net_income": [1.0, 2.0],
+        "total_equity": [1.0, 2.0],
+        "total_assets": [1.0, 2.0],
+        "revenue": [1.0, 2.0],
+        "cogs": [1.0, 2.0],
+        "operating_cf": [None, 2.0],
+    })
+
+    daily = _convert_financial_to_daily(financial, dates)
+    available = daily.set_index("date")["financial_six_fact_available"]
+
+    assert bool(available.loc["2024-03-28"]) is False
+    assert bool(available.loc["2024-06-27"]) is False
+    assert bool(available.loc["2024-06-28"]) is True
+    assert bool(available.loc["2024-07-01"]) is True
+
+
+def test_financial_coverage_non_pit_has_zero_pit_valid_count() -> None:
+    scheduled = pd.Timestamp("2024-01-31")
+    universe = pd.DataFrame({"as_of": [scheduled], "ticker": ["A"]})
+    daily = pd.DataFrame({
+        "ticker": ["A"],
+        "date": [scheduled],
+        "financial_six_fact_available": [True],
+    })
+
+    result = _measure_financial_coverage(
+        universe, daily, pd.DatetimeIndex([scheduled]),
+        {"mode": "non_pit_fiscal_period", "pit_valid": False},
+    )
+    record = result["records"][0]
+    assert record["six_fact_available_ticker_count"] == 1
+    assert record["pit_valid_ticker_count"] == 0
+    assert record["six_fact_source_coverage_ratio"] == 1.0
+    assert record["pit_valid_financial_coverage_ratio"] == 0.0
+    assert record["financial_coverage_ratio"] == 0.0
+    assert record["financial_pit_valid"] is False
+    assert result["mode"] == "bounded_no_lookahead_six_fact_non_pit"
+
+
+def test_financial_coverage_manifest_schema_reconciles_tickers() -> None:
+    coverage = {
+        "mode": "bounded_no_lookahead_six_fact",
+        "records": [{
+            "scheduled_date": "2024-01-31",
+            "signal_date": "2024-01-31",
+            "universe_ticker_count": 2,
+            "six_fact_available_ticker_count": 1,
+            "pit_valid_ticker_count": 0,
+            "six_fact_source_coverage_ratio": 0.5,
+            "pit_valid_financial_coverage_ratio": 0.0,
+            "financial_coverage_ratio": 0.0,
+            "available_tickers": ["A"],
+            "missing_tickers": ["B"],
+            "financial_pit_valid": False,
+            "data_mode": "non_pit_fiscal_period",
+        }],
+    }
+    manifest = _build_run_manifest(_config(), {"financial_coverage": coverage})
+    record = manifest["financial_coverage"]["records"][0]
+    assert len(record["available_tickers"]) + len(record["missing_tickers"]) == (
+        record["universe_ticker_count"]
+    )
 
 
 def test_lookback_is_half_open_and_excludes_measurement_start(monkeypatch) -> None:

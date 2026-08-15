@@ -145,7 +145,9 @@ def test_parse_batch_accepts_selected_receipt_and_is_deterministic(tmp_path: Pat
     _write_raw(raw_dir)
     first = batch.process_xbrl_inventory(inventory, inventory_manifest, raw_dir, output_dir)
     first_report = json.loads((output_dir / "parse_report.json").read_text(encoding="utf-8"))
-    assert first["valid"] is True
+    assert first["processing_complete"] is True
+    assert first["all_receipts_accepted"] is True
+    assert "valid" not in first
     assert first["accepted_count"] == 1
     assert first["outcome_counts"] == {"accepted": 1, "missing_raw": 0, "invalid_acquisition": 0, "parse_error": 0}
     assert first_report[0]["outcome"] == "accepted"
@@ -166,7 +168,8 @@ def test_builder_output_uses_shared_manifest_contract_end_to_end(tmp_path: Path)
     assert manifest["manifest_version"] == contract.INVENTORY_MANIFEST_VERSION
     assert manifest["selection_rules_version"] == contract.INVENTORY_MANIFEST_VERSION
     summary = batch.process_xbrl_inventory(inventory, inventory_manifest, raw_dir, output_dir)
-    assert summary["valid"] is True
+    assert summary["processing_complete"] is True
+    assert summary["all_receipts_accepted"] is True
     assert summary["accepted_count"] == 1
 
 
@@ -180,12 +183,25 @@ def test_parse_batch_reports_every_selected_receipt(tmp_path: Path, mode: str, e
         _write_raw(raw_dir, status="020")
     summary = batch.process_xbrl_inventory(inventory, inventory_manifest, raw_dir, output_dir)
     report = json.loads((output_dir / "parse_report.json").read_text(encoding="utf-8"))
-    assert summary["valid"] is False
+    assert summary["processing_complete"] is True
+    assert summary["all_receipts_accepted"] is False
     assert summary["accepted_count"] == 0
     assert summary["outcome_counts"][expected] == 1
     assert report[0]["outcome"] == expected
     assert report[0]["error_class"]
     assert report[0]["error_message"]
+
+
+def test_parse_batch_rejects_missing_or_duplicate_report_row() -> None:
+    batch = _batch_module()
+    selected = [{"corp_code": "00100001", "rcept_no": "20150331000001"}]
+    with pytest.raises(batch.XBRLBatchError, match="exactly one row"):
+        batch.validate_report_rows(selected, [])
+    with pytest.raises(batch.XBRLBatchError, match="exactly one row"):
+        batch.validate_report_rows(selected, [
+            {"corp_code": "00100001", "rcept_no": "20150331000001", "outcome": "accepted"},
+            {"corp_code": "00100001", "rcept_no": "20150331000001", "outcome": "accepted"},
+        ])
 
 
 def test_parse_batch_rejects_inventory_or_batch_hash_mutation(tmp_path: Path) -> None:

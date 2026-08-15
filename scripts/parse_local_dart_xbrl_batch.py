@@ -186,6 +186,28 @@ def _failure_row(
     }
 
 
+def validate_report_rows(
+    selected: list[dict[str, Any]],
+    report_rows: list[dict[str, Any]],
+) -> None:
+    """Require exactly one outcome row for every selected receipt."""
+    expected = [
+        (str(row["corp_code"]), str(row["rcept_no"]))
+        for row in selected
+    ]
+    actual = [
+        (str(row.get("corp_code")), str(row.get("rcept_no")))
+        for row in report_rows
+    ]
+    if len(actual) != len(expected) or len(set(actual)) != len(actual) or sorted(actual) != sorted(expected):
+        raise XBRLBatchError(
+            "processing report rows must contain exactly one row per selected receipt"
+        )
+    allowed_outcomes = {"accepted", "missing_raw", "invalid_acquisition", "parse_error"}
+    if any(row.get("outcome") not in allowed_outcomes for row in report_rows):
+        raise XBRLBatchError("processing report contains an unknown outcome")
+
+
 def process_xbrl_inventory(
     inventory_path: str | Path,
     inventory_manifest_path: str | Path,
@@ -275,6 +297,7 @@ def process_xbrl_inventory(
             ))
             outcome_counts["parse_error"] += 1
 
+    validate_report_rows(selected, report_rows)
     report_rows.sort(key=lambda row: (row["rcept_date"], row["corp_code"], row["rcept_no"]))
     report_path = output / "parse_report.json"
     summary_path = output / "parse_summary.json"
@@ -284,7 +307,8 @@ def process_xbrl_inventory(
     accepted_count = outcome_counts["accepted"]
     summary = {
         "manifest_version": PARSE_BATCH_VERSION,
-        "valid": accepted_count == expected_count,
+        "processing_complete": True,
+        "all_receipts_accepted": accepted_count == expected_count,
         "inventory_path": str(inventory_file),
         "inventory_sha256": _sha256_file(inventory_file),
         "inventory_manifest_path": str(inventory_manifest_file),
@@ -320,8 +344,6 @@ def main() -> None:
         args.output_dir,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    if not summary["valid"]:
-        raise SystemExit(1)
 
 
 if __name__ == "__main__":

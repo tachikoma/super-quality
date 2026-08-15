@@ -48,7 +48,11 @@ from k200_mq.factors.momentum import (
     MOMENTUM_FORMULA_DEFAULT,
     MOMENTUM_FORMULA_VERSION,
 )
-from k200_mq.factors.quality import QUALITY_FORMULA, QUALITY_FORMULA_VERSION
+from k200_mq.factors.quality import (
+    GROSS_PROFIT_PROXY_NUMERATOR_FLOOR,
+    QUALITY_FORMULA,
+    QUALITY_FORMULA_VERSION,
+)
 from k200_mq.factors.regime import REGIME_FORMULA, REGIME_FORMULA_VERSION
 
 logger = logging.getLogger(__name__)
@@ -190,7 +194,13 @@ def _quality_weight_metadata(config: Any) -> dict[str, Any]:
     raw_weights = {
         "roe": float(getattr(config, "QUALITY_WEIGHT_ROE", 0.35)),
         "de": float(getattr(config, "QUALITY_WEIGHT_DE", 0.25)),
-        "opmargin": float(getattr(config, "QUALITY_WEIGHT_OPMARGIN", 0.20)),
+        "gross_margin_proxy": float(
+            getattr(
+                config,
+                "QUALITY_WEIGHT_GROSS_MARGIN",
+                getattr(config, "QUALITY_WEIGHT_OPMARGIN", 0.20),
+            )
+        ),
         "cashconv": float(getattr(config, "QUALITY_WEIGHT_CASHCONV", 0.20)),
     }
     total = sum(raw_weights.values())
@@ -999,7 +1009,10 @@ def _convert_financial_to_daily(
     -------
     pd.DataFrame
         ``ticker``, ``date``, ``net_income``, ``total_equity``,
-        ``total_debt``, ``revenue``, ``operating_income``, ``operating_cf``.
+        ``total_debt``, ``revenue``, ``gross_profit_proxy``, ``operating_cf``,
+        and ``financial_six_fact_available``.  The latter is true only when
+        all six raw facts were present and finite; neutral-filled values do
+        not change that availability decision.
     """
     if financial_data.empty:
         return pd.DataFrame()
@@ -1039,20 +1052,58 @@ def _convert_financial_to_daily(
             except (ValueError, KeyError):
                 continue
 
-        revenue = float(row.get("revenue", 0) or 0)
-        cogs = float(row.get("cogs", 0) or 0)
-        total_assets = float(row.get("total_assets", 0) or 0)
-        total_equity = float(row.get("total_equity", 0) or 0)
+        def _finite_source_value(column: str) -> float | None:
+            """Return a finite raw fact, preserving legitimate zero values."""
+            if column not in row.index:
+                return None
+            value = row[column]
+            if value is None:
+                return None
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                return None
+            return numeric if math.isfinite(numeric) else None
+
+        def _source_value_or_zero(column: str) -> float:
+            value = _finite_source_value(column)
+            return value if value is not None else 0.0
+
+        revenue = _source_value_or_zero("revenue")
+        cogs = _source_value_or_zero("cogs")
+        total_assets = _source_value_or_zero("total_assets")
+        total_equity = _source_value_or_zero("total_equity")
+
+        raw_net_income = _finite_source_value("net_income")
+        raw_total_equity = _finite_source_value("total_equity")
+        raw_total_assets = _finite_source_value("total_assets")
+        raw_revenue = _finite_source_value("revenue")
+        raw_cogs = _finite_source_value("cogs")
+        raw_operating_cf = _finite_source_value("operating_cf")
+        six_fact_available = all(value is not None for value in (
+            raw_net_income,
+            raw_total_equity,
+            raw_total_assets,
+            raw_revenue,
+            raw_cogs,
+            raw_operating_cf,
+        ))
 
         records.append({
             "ticker": str(ticker_value),
             "date": dt,
-            "net_income": float(row.get("net_income", 0) or 0),
+            "net_income": _source_value_or_zero("net_income"),
             "total_equity": total_equity,
             "total_debt": max(total_assets - total_equity, 0.0),
             "revenue": revenue,
-            "operating_income": max(revenue - cogs, 0.0),
-            "operating_cf": float(row.get("operating_cf", 0) or 0),
+            # This is deliberately a nonnegative gross-profit proxy, not
+            # operating income: only revenue and COGS are available.
+            "gross_profit_proxy": max(
+                revenue - cogs,
+                GROSS_PROFIT_PROXY_NUMERATOR_FLOOR,
+            ),
+            "operating_cf": _source_value_or_zero("operating_cf"),
+            "financial_six_fact_available": six_fact_available,
         })
 
     if not records:
@@ -1065,6 +1116,14 @@ def _convert_financial_to_daily(
         grp = grp.drop_duplicates(subset=["date"], keep="last").set_index("date")
         grp = grp[~grp.index.duplicated(keep="last")]
         grp_daily = grp.reindex(all_dates, method="ffill")
+        # Availability describes the latest source-report state.  Forward-fill
+        # carries the prior report until a later source row is reached, while
+        # that later row's false state deliberately resets availability.
+        grp_daily["financial_six_fact_available"] = (
+            grp_daily["financial_six_fact_available"].astype("boolean")
+            .fillna(False)
+            .astype(bool)
+        )
         grp_daily["ticker"] = tkr
         grp_daily["date"] = grp_daily.index
         daily_parts.append(grp_daily.reset_index(drop=True))
@@ -1075,9 +1134,10 @@ def _convert_financial_to_daily(
     result = pd.concat(daily_parts, ignore_index=True)
     financial_cols = [
         "net_income", "total_equity", "total_debt",
-        "revenue", "operating_income", "operating_cf",
+        "revenue", "gross_profit_proxy", "operating_cf",
     ]
     result[financial_cols] = result[financial_cols].fillna(0.0)
+    # This flag is deliberately separate from the neutral-filled factor inputs.
     result.attrs["financial_provenance"] = financial_provenance
     return result
 
@@ -1229,6 +1289,132 @@ def _validate_first_rebalance_factor_readiness(
         "skipped_not_ready_rebalances": skipped,
         "scheduled_rebalance_count": len(evaluations),
         "quality_required": False,
+    }
+
+
+def _measure_financial_coverage(
+    universe_history: pd.DataFrame,
+    daily_financial: pd.DataFrame,
+    measured_dates: pd.DatetimeIndex,
+    financial_provenance: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Measure bounded six-fact financial availability at each rebalance.
+
+    This diagnostic intentionally uses the exact universe snapshot for each
+    scheduled date and the same scheduled-date-to-signal-date mapping as the
+    momentum readiness check.  It does not inspect neutral-filled quality
+    columns, and a financial row after the signal date cannot contribute.
+    """
+    provenance = financial_provenance or {}
+    data_mode = str(provenance.get("mode", "unknown"))
+    financial_pit_valid = provenance.get("pit_valid") is True
+    measured = pd.DatetimeIndex(pd.to_datetime(measured_dates, errors="coerce"))
+    measured = measured.dropna().normalize().unique().sort_values()
+
+    if universe_history.empty or "as_of" not in universe_history.columns:
+        scheduled_dates: list[pd.Timestamp] = []
+    else:
+        as_of_dates = pd.to_datetime(universe_history["as_of"], errors="coerce")
+        scheduled_dates = sorted({
+            pd.Timestamp(value).normalize()
+            for value in as_of_dates.dropna()
+            if len(measured)
+            and measured.min() <= pd.Timestamp(value).normalize() <= measured.max()
+        })
+
+    normalized_financial = pd.DataFrame()
+    if not daily_financial.empty and {"ticker", "date", "financial_six_fact_available"}.issubset(
+        daily_financial.columns
+    ):
+        normalized_financial = daily_financial[[
+            "ticker", "date", "financial_six_fact_available",
+        ]].copy()
+        normalized_financial["ticker"] = normalized_financial["ticker"].astype(str)
+        normalized_financial["date"] = pd.to_datetime(
+            normalized_financial["date"], errors="coerce",
+        ).dt.normalize()
+        normalized_financial = normalized_financial.dropna(subset=["date"])
+        normalized_financial["financial_six_fact_available"] = (
+            normalized_financial["financial_six_fact_available"]
+            .astype("boolean")
+            .fillna(False)
+            .astype(bool)
+        )
+
+    records: list[dict[str, Any]] = []
+    for scheduled_date in scheduled_dates:
+        prior_measured = measured[measured <= scheduled_date]
+        signal_date = pd.Timestamp(prior_measured[-1]).normalize() if len(prior_measured) else None
+        if "ticker" in universe_history:
+            as_of_dates = pd.to_datetime(universe_history["as_of"], errors="coerce")
+            scheduled_rows = universe_history.loc[
+                as_of_dates.dt.normalize() == scheduled_date,
+            ]
+            universe = set(scheduled_rows["ticker"].dropna().astype(str))
+        else:
+            universe = set()
+
+        available_tickers: set[str] = set()
+        if signal_date is not None and not normalized_financial.empty:
+            signal_rows = normalized_financial[
+                (normalized_financial["date"] <= signal_date)
+                & normalized_financial["ticker"].isin(universe)
+            ]
+            if not signal_rows.empty:
+                # The latest row is the authoritative source-report state for
+                # each ticker.  Looking for any historical true row would
+                # incorrectly keep availability after a later incomplete
+                # report.
+                signal_rows = (
+                    signal_rows.sort_values(["ticker", "date"], kind="stable")
+                    .drop_duplicates(subset=["ticker"], keep="last")
+                )
+                available_tickers = set(
+                    signal_rows.loc[
+                        signal_rows["financial_six_fact_available"], "ticker",
+                    ].astype(str)
+                )
+
+        available = sorted(available_tickers)
+        missing = sorted(universe - available_tickers)
+        universe_count = len(universe)
+        records.append({
+            "scheduled_date": scheduled_date.date().isoformat(),
+            "signal_date": signal_date.date().isoformat() if signal_date is not None else None,
+            "universe_ticker_count": universe_count,
+            "six_fact_available_ticker_count": len(available),
+            "pit_valid_ticker_count": len(available) if financial_pit_valid else 0,
+            "six_fact_source_coverage_ratio": (
+                len(available) / universe_count if universe_count else 0.0
+            ),
+            # Keep the legacy field, but make it an explicitly PIT-gated
+            # value rather than a raw source-availability claim.
+            "pit_valid_financial_coverage_ratio": (
+                len(available) / universe_count
+                if financial_pit_valid and universe_count
+                else 0.0
+            ),
+            "financial_coverage_ratio": (
+                len(available) / universe_count
+                if financial_pit_valid and universe_count
+                else 0.0
+            ),
+            "available_tickers": available,
+            "missing_tickers": missing,
+            "financial_pit_valid": financial_pit_valid,
+            "data_mode": data_mode,
+        })
+
+    return {
+        "mode": (
+            "bounded_no_lookahead_six_fact_pit_gated"
+            if financial_pit_valid
+            else "bounded_no_lookahead_six_fact_non_pit"
+        ),
+        "data_mode": data_mode,
+        "financial_pit_valid": financial_pit_valid,
+        "scheduled_rebalance_count": len(records),
+        "records": records,
     }
 
 
@@ -1536,6 +1722,7 @@ def _build_run_manifest(
         # Keep this distinction explicit because the first schedule may have
         # no factor rows during momentum warmup.
         "rebalance_readiness": context.get("rebalance_readiness", {}),
+        "financial_coverage": context.get("financial_coverage", {}),
         "regime_map": context.get(
             "regime_map", {"covered_date_count": 0, "measured_date_count": 0},
         ),
@@ -1995,7 +2182,7 @@ def prepare_k200mq_inputs(
             quality_factor = QualityFactor(
                 weight_roe=config.QUALITY_WEIGHT_ROE,
                 weight_de=config.QUALITY_WEIGHT_DE,
-                weight_opmargin=config.QUALITY_WEIGHT_OPMARGIN,
+                weight_gross_margin_proxy=config.QUALITY_WEIGHT_GROSS_MARGIN,
                 weight_cashconv=config.QUALITY_WEIGHT_CASHCONV,
             )
             quality_weight_metadata["configured_raw_weights"] = dict(
@@ -2173,6 +2360,12 @@ def prepare_k200mq_inputs(
         pd.DatetimeIndex(backtest_dates),
         config,
     )
+    financial_coverage = _measure_financial_coverage(
+        universe_history,
+        daily_financial,
+        pd.DatetimeIndex(backtest_dates),
+        financial_provenance,
+    )
     manifest_context["factors"] = {
         "row_count": int(len(factor_data)),
         "ticker_count": int(factor_data["ticker"].nunique()),
@@ -2180,6 +2373,7 @@ def prepare_k200mq_inputs(
     }
     manifest_context["rebalance_readiness"] = rebalance_readiness
     manifest_context["quality"] = quality_coverage
+    manifest_context["financial_coverage"] = financial_coverage
     manifest_context["financial_provenance"] = financial_provenance
 
     logger.info("입력 준비 완료: 측정 구간 %s ~ %s", start_date, end_date)
@@ -2214,6 +2408,7 @@ def prepare_k200mq_inputs(
         coverage={
             "quality": quality_coverage,
             "rebalance_readiness": rebalance_readiness,
+            "financial_coverage": financial_coverage,
             "sector_map": sector_map_context,
         },
         measured_start=start_date,

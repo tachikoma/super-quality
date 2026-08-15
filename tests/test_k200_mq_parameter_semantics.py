@@ -8,7 +8,7 @@ import pytest
 from k200_mq.backtest.portfolio_engine import PortfolioRebalanceEngine
 from k200_mq.config import K200MQConfig
 from k200_mq.factors.momentum import MomentumFactor
-from k200_mq.factors.quality import QualityFactor
+from k200_mq.factors.quality import QUALITY_FORMULA_VERSION, QualityFactor
 from k200_mq.factors.regime import RegimeFactor
 from k200_mq.strategies.momentum_quality import MomentumQualityStrategy
 from k200_mq.main import _build_config, _build_parser, _build_run_manifest
@@ -53,16 +53,18 @@ def _quality_data() -> pd.DataFrame:
         "total_equity": [100.0] * 4,
         "total_debt": [10.0, 20.0, 30.0, 40.0],
         "revenue": [100.0] * 4,
-        "operating_income": [10.0, 12.0, 14.0, 16.0],
+        "gross_profit_proxy": [10.0, 12.0, 14.0, 16.0],
         "operating_cf": [10.0, 20.0, 30.0, 40.0],
     })
 
 
 def test_quality_weights_are_normalized_and_change_composite() -> None:
     data = _quality_data()
-    roe_only = QualityFactor(weight_roe=2.0, weight_de=0.0, weight_opmargin=0.0,
+    roe_only = QualityFactor(weight_roe=2.0, weight_de=0.0,
+                             weight_gross_margin_proxy=0.0,
                              weight_cashconv=0.0)
-    de_only = QualityFactor(weight_roe=0.0, weight_de=3.0, weight_opmargin=0.0,
+    de_only = QualityFactor(weight_roe=0.0, weight_de=3.0,
+                            weight_gross_margin_proxy=0.0,
                             weight_cashconv=0.0)
 
     roe_result = roe_only.compute(data)
@@ -77,12 +79,17 @@ def test_quality_weights_reject_negative_or_zero_sum() -> None:
     with pytest.raises(ValueError, match="nonnegative"):
         QualityFactor(weight_roe=-1.0)
     with pytest.raises(ValueError, match="positive sum"):
-        QualityFactor(weight_roe=0.0, weight_de=0.0, weight_opmargin=0.0, weight_cashconv=0.0)
+        QualityFactor(
+            weight_roe=0.0,
+            weight_de=0.0,
+            weight_gross_margin_proxy=0.0,
+            weight_cashconv=0.0,
+        )
     with pytest.raises(ValueError, match="positive sum"):
         K200MQConfig(
             QUALITY_WEIGHT_ROE=0.0,
             QUALITY_WEIGHT_DE=0.0,
-            QUALITY_WEIGHT_OPMARGIN=0.0,
+            QUALITY_WEIGHT_GROSS_MARGIN=0.0,
             QUALITY_WEIGHT_CASHCONV=0.0,
         )
 
@@ -100,10 +107,74 @@ def test_quality_missing_component_remains_neutral() -> None:
     expected_without_cash = (
         0.35 * row["roe_z"]
         + 0.25 * row["de_z"]
-        + 0.20 * row["opmargin_z"]
+        + 0.20 * row["gross_margin_proxy_z"]
     )
     assert pd.isna(row["cashconv_z"])
     assert row["quality_composite_z"] == pytest.approx(expected_without_cash)
+
+
+def test_quality_uses_gross_profit_proxy_semantics_and_v3_contract() -> None:
+    data = _quality_data()
+    factor = QualityFactor()
+
+    result = factor.compute(data)
+
+    assert factor.formula_version == QUALITY_FORMULA_VERSION
+    assert factor.formula_version.endswith("-v3")
+    manifest = _build_run_manifest(K200MQConfig())
+    assert manifest["factors"]["definitions"]["quality"]["version"].endswith("-v3")
+    assert "gross_margin_proxy_z" in manifest["factors"]["definitions"]["quality"]["formula"]
+    assert "gross_margin_proxy_z" in result.columns
+    assert "opmargin_z" not in result.columns
+    assert factor.raw_weights["gross_margin_proxy"] == pytest.approx(0.20)
+
+    # The semantic correction preserves the historical proxy arithmetic for
+    # complete rows: max(revenue - cogs, 0) / revenue.
+    expected_proxy = max(100.0 - 90.0, 0.0) / 100.0
+    proxy_input = data.assign(gross_profit_proxy=[10.0] * len(data))
+    proxy_result = factor.compute(proxy_input)
+    assert proxy_result.loc[proxy_result["ticker"] == "A", "gross_margin_proxy_z"].iloc[0] == (
+        0.0
+    )
+    assert expected_proxy == pytest.approx(0.10)
+
+
+def test_incomplete_six_fact_rows_are_excluded_from_quality_peers() -> None:
+    complete = _quality_data().assign(
+        gross_profit_proxy=[20.0, 40.0, 60.0, 80.0],
+        financial_six_fact_available=True,
+    )
+    incomplete = complete.iloc[[0]].copy()
+    incomplete.loc[:, "ticker"] = "INCOMPLETE"
+    incomplete.loc[:, [
+        "net_income", "total_equity", "total_debt", "revenue",
+        "gross_profit_proxy", "operating_cf",
+    ]] = 0.0
+    incomplete.loc[:, "financial_six_fact_available"] = False
+    with_incomplete = pd.concat([complete, incomplete], ignore_index=True)
+
+    expected = QualityFactor().compute(complete)
+    actual = QualityFactor().compute(with_incomplete)
+
+    assert "INCOMPLETE" not in set(actual["ticker"])
+    pd.testing.assert_frame_equal(
+        actual.drop(columns=["financial_six_fact_available"], errors="ignore")
+        if "financial_six_fact_available" in actual.columns
+        else actual,
+        expected,
+    )
+
+
+def test_legacy_opmargin_config_alias_preserves_non_default_weight() -> None:
+    legacy = K200MQConfig(QUALITY_WEIGHT_OPMARGIN=0.37)
+    canonical = K200MQConfig(QUALITY_WEIGHT_GROSS_MARGIN=0.37)
+    legacy_factor = QualityFactor(weight_opmargin=0.37)
+    canonical_factor = QualityFactor(weight_gross_margin_proxy=0.37)
+
+    assert legacy.QUALITY_WEIGHT_GROSS_MARGIN == pytest.approx(0.37)
+    assert legacy.QUALITY_WEIGHT_GROSS_MARGIN == canonical.QUALITY_WEIGHT_GROSS_MARGIN
+    assert legacy_factor.raw_weights == canonical_factor.raw_weights
+    assert legacy_factor.weights == canonical_factor.weights
 
 
 def test_regime_min_return_is_bullish_threshold() -> None:
@@ -144,7 +215,7 @@ def test_manifest_records_factor_formula_versions() -> None:
         K200MQConfig(
             QUALITY_WEIGHT_ROE=2.0,
             QUALITY_WEIGHT_DE=1.0,
-            QUALITY_WEIGHT_OPMARGIN=1.0,
+            QUALITY_WEIGHT_GROSS_MARGIN=1.0,
             QUALITY_WEIGHT_CASHCONV=0.0,
         )
     )
@@ -157,13 +228,13 @@ def test_manifest_records_factor_formula_versions() -> None:
     assert definitions["quality"]["configured_raw_weights"] == {
         "roe": 2.0,
         "de": 1.0,
-        "opmargin": 1.0,
+        "gross_margin_proxy": 1.0,
         "cashconv": 0.0,
     }
     assert definitions["quality"]["effective_normalized_weights"] == {
         "roe": pytest.approx(0.5),
         "de": pytest.approx(0.25),
-        "opmargin": pytest.approx(0.25),
+        "gross_margin_proxy": pytest.approx(0.25),
         "cashconv": pytest.approx(0.0),
     }
     assert definitions["quality"]["weights_used"] == "effective_normalized_weights"

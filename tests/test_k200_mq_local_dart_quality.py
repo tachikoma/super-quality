@@ -185,5 +185,5 @@ def test_quality_factor_computes_nontrivial_score_from_local_pivot(tmp_path: Pat
     last = primary.iloc[-1]
     assert last["net_income"] / last["total_equity"] == pytest.approx(100.0 / 1200.0)
     assert last["total_debt"] / last["total_equity"] == pytest.approx(800.0 / 1200.0)
-    assert last["operating_income"] / last["revenue"] == pytest.approx(600.0 / 1000.0)
+    assert last["gross_profit_proxy"] / last["revenue"] == pytest.approx(600.0 / 1000.0)
     assert last["operating_cf"] / last["net_income"] == pytest.approx(80.0 / 100.0)

@@ -6,7 +6,7 @@ pydantic-settings를 사용하여 환경 변수와 .env 파일에서 설정을 �
 from pathlib import Path
 import math
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -205,9 +205,15 @@ class K200MQConfig(BacktestConfig):
         default=0.25,
         description="부채비율 가중치 (낮을수록 좋은 방향)",
     )
-    QUALITY_WEIGHT_OPMARGIN: float = Field(
+    QUALITY_WEIGHT_GROSS_MARGIN: float = Field(
         default=0.20,
-        description="영업이익률 가중치",
+        validation_alias=AliasChoices(
+            "QUALITY_WEIGHT_GROSS_MARGIN",
+            "QUALITY_WEIGHT_OPMARGIN",
+        ),
+        description=(
+            "gross margin proxy 가중치; QUALITY_WEIGHT_OPMARGIN은 deprecated alias"
+        ),
     )
     QUALITY_WEIGHT_CASHCONV: float = Field(
         default=0.20,
@@ -224,7 +230,7 @@ class K200MQConfig(BacktestConfig):
         weights = (
             self.QUALITY_WEIGHT_ROE,
             self.QUALITY_WEIGHT_DE,
-            self.QUALITY_WEIGHT_OPMARGIN,
+            self.QUALITY_WEIGHT_GROSS_MARGIN,
             self.QUALITY_WEIGHT_CASHCONV,
         )
         if any(not math.isfinite(weight) or weight < 0 for weight in weights):
