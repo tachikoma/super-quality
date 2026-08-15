@@ -414,3 +414,41 @@
 - parser fail-closed 27건.
 - FY2014 XBRL 보강은 재무 PIT facts를 개선하지만, `momentum_z` 가격 warmup을
   충족시키거나 first-ready 147/198을 변경하는 해결책은 아니다.
+
+## Day 10 실행 기록 (2026-08-15, strict PIT WF + FY2014 XBRL 병합)
+
+- 배경: Day 8/9의 첫 리밸런스(2015-05-29) financial six-fact 커버리지 0/198은
+  배치 스펙 `--financial-start-year 2015`로 FY2014 facts가 전체 누락된 것이 근본
+  원인. FY2014 XBRL 파이프라인(141 수용 → 92 strict accepted, 6 facts/corp)이
+  구축되어 있었으나 확장 집계(`dart_aggregated_day4_extended`)에 반영되지 않았다.
+- 병합 스크립트 (신규, 커밋 `0113611`):
+  - `scripts/merge_fy2014_xbrl_into_aggregate.py`
+  - 확장 facts CSV를 `load_financial_facts`(사이드카 매니페스트 검증)로 로드하고,
+    92개 XBRL 아티팩트 각각을 `.derived.manifest.json`(XBRL provenance 체인 포함)으로
+    검증 로드 후 concat + dedup.
+  - 출력: `data/raw/dart_aggregated_day4_extended_fy2014/` (facts 304,245행 =
+    확장 303,693 + FY2014 552, dedup 0건; reload 검증 `verified=True`).
+  - filings CSV + 매니페스트는 그대로 복사 (92개 접수는 이미 존재).
+- strict 실행
+  - 명령: Day 9와 동일하되 `--local-dart-*` 4개 경로를
+    `data/raw/dart_aggregated_day4_extended_fy2014/`로 교체, 출력
+    `outputs_k200mq_day10_strict_extended_fy2014` (소요 ~80분).
+  - 결과: 5/5 폴드 `valid=True`, OOS 1,231점 (2020-2024), preflight 실패 0건.
+  - 분류: `mechanical_expanding_walk_forward_non_pit` 유지 (검증된 성과 주장 아님).
+- 커버리지 개선 (핵심)
+  - 첫 리밸런스 2015-05-29: six-fact available **0/198 → 92/198**.
+  - 2015-03-31부터 8/198, 2015-04-30부터 92/198 (FY2014 보고서 접수일 2015-03~04).
+  - 재무 데이터: 1,223행 → 1,775행 (256,204 → 283,664 커버리지 행), 품질 커버리지
+    티커 138/187 (73.8%)은 Day 9와 동일 (FY2014 추가는 초기 구간에만 영향).
+- OOS 성과 (stitched, 2020-2024): Day 9와 동일
+  - 폴드별: 2020 +25.1% / 2021 +2.4% / 2022 -11.5% / 2023 +9.2% / 2024 +16.4%
+    (모두 Day 9와 동일 수치; 후보 선택 TOP_N_10/BASE 순위 불변).
+  - train 기간(2015-2019) 팩터는 실제로 변경됨 (fold1 train_scores:
+    BASE n_exits 768→757, TOP_N_10 Sharpe -0.061→-0.144 등) — FY2014 반영 확인.
+  - OOS 동일 원인: OOS 구간 quality는 2015+ 재무 데이터만 사용하므로 FY2014 병합이
+    2020-2024 OOS 팩터·후보 순위에 영향을 주지 않음. 정상.
+- 잔여 갭 (불변): momentum_z readiness 첫 리밸런스 147/198 (가격 warmup, FY2014와
+  무관), 유니버스 proxy(B/C 44개)는 역사적 KOSPI 200 구성원으로만 해결.
+- 산출물: `outputs_k200mq_day10_strict_extended_fy2014/true_walkforward/{summary.csv,oos_returns.csv,selection_and_folds.json}`
+- 다음 우선순위: momentum warmup/readiness 검토 → PIT 민감도, 생존자 편향 비교,
+  ADV 영향, 스트레스 테스트 (classification 승격 전제조건은 유니버스 PIT화).

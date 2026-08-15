@@ -185,3 +185,20 @@ ruff check
   momentum warmup/readiness review, then run PIT sensitivity, survivorship-bias
   comparison, ADV impact, and stress tests. The classification remains
   `mechanical_expanding_walk_forward_non_pit`.
+
+## TASK LOG — 2026-08-15
+
+- **FY2014 XBRL 병합 + Day 10 strict WF**: `scripts/merge_fy2014_xbrl_into_aggregate.py`
+  (커밋 `0113611`)가 확장 facts CSV와 92개 FY2014 XBRL 아티팩트를 로더 검증 경로로
+  병합해 `data/raw/dart_aggregated_day4_extended_fy2014/` 생성 (facts 304,245행 =
+  303,693 + 552, dedup 0, reload `verified=True`). Day 10 strict WF
+  (`outputs_k200mq_day10_strict_extended_fy2014`)는 5/5 폴드 valid, OOS 1,231점,
+  첫 리밸런스 2015-05-29 six-fact 커버리지 **0/198 → 92/198** 개선 확인.
+- **OOS 성과 Day 9와 동일**: 2020-2024 stitched 수치가 Day 9와 일치하는 것은
+  정상 — OOS 구간 quality는 2015+ 재무 데이터만 사용하므로 FY2014 병합이 OOS
+  팩터·후보 순위에 영향 없음. train 기간 팩터는 실제 변경됨 (fold1 train_scores
+  변경으로 반영 확인). 분류는 `mechanical_expanding_walk_forward_non_pit` 유지.
+- **잔여 갭 (불변)**: momentum_z readiness 147/198 (가격 warmup, FY2014와 무관),
+  유니버스 proxy (B/C 44개)는 역사적 KOSPI 200 구성원 데이터로만 해결.
+- **Next priority**: momentum warmup/readiness 검토 → PIT 민감도, 생존자 편향
+  비교, ADV 영향, 스트레스 테스트. classification 승격 전제: 유니버스 PIT화.
