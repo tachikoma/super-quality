@@ -284,6 +284,49 @@ def test_after_close_filing_maps_to_next_exchange_session() -> None:
     assert daily.loc[daily["date"] == pd.Timestamp("2024-05-16"), "revenue"].iloc[0] == 100.0
 
 
+def test_converter_measures_filing_date_mapped_rows() -> None:
+    financial_data = pd.DataFrame({
+        "ticker": ["A", "A"],
+        "filing_timestamp": [
+            "2024-05-15T09:00:00+09:00",
+            "2024-05-16T09:00:00+09:00",
+        ],
+        "revenue": [100.0, 110.0],
+    })
+    financial_data.attrs["financial_provenance_contract"] = _filing_timestamp_contract()
+    dates = pd.date_range("2024-05-15", "2024-05-17", freq="B")
+
+    daily = main_module._convert_financial_to_daily(financial_data, dates)
+
+    provenance = daily.attrs["financial_provenance"]
+    assert provenance["filing_date_used"] is True
+    assert provenance["pit_valid"] is True
+    assert daily.attrs["filing_date_mapped_row_count"] == 2
+    assert daily.attrs["quarter_end_fallback_row_count"] == 0
+    assert provenance["filing_date_mapped_row_count"] == 2
+    assert provenance["quarter_end_fallback_row_count"] == 0
+
+
+def test_converter_measures_quarter_end_fallback_rows() -> None:
+    financial_data = pd.DataFrame({
+        "ticker": ["A", "A"],
+        "year": [2024, 2024],
+        "quarter": [1, 2],
+        "revenue": [100.0, 110.0],
+    })
+    dates = pd.date_range("2024-03-28", "2024-06-28", freq="B")
+
+    daily = main_module._convert_financial_to_daily(financial_data, dates)
+
+    provenance = daily.attrs["financial_provenance"]
+    assert provenance["filing_date_used"] is False
+    assert provenance["pit_valid"] is False
+    assert daily.attrs["filing_date_mapped_row_count"] == 0
+    assert daily.attrs["quarter_end_fallback_row_count"] == 2
+    assert provenance["filing_date_mapped_row_count"] == 0
+    assert provenance["quarter_end_fallback_row_count"] == 2
+
+
 @pytest.mark.parametrize(
     "filing_value",
     [

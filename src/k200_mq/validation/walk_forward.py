@@ -550,6 +550,7 @@ def select_candidate(
     min_exits: int | None = None,
     tie_tolerance: float = DEFAULT_TIE_TOLERANCE,
     classification: str = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+    pit_valid_evidence: Mapping[str, Any] | None = None,
 ) -> SelectionResult:
     """Select a candidate using only finite, valid training Sharpe values.
 
@@ -559,6 +560,11 @@ def select_candidate(
     meets the configured minimum.  Among scores within ``tie_tolerance`` of
     the best score, ``BASE`` wins; otherwise the candidate id is the stable
     secondary key.
+
+    The validated PIT classification cannot be emitted from the bare string
+    alone: ``pit_valid_evidence`` must carry the actual validator outputs that
+    authorize the label.  A string is not evidence, so an empty evidence
+    mapping is rejected for the validated label.
     """
     if min_exits is not None:
         if minimum_exits != DEFAULT_MIN_EXITS and minimum_exits != min_exits:
@@ -577,10 +583,11 @@ def select_candidate(
     if len(library_versions) != 1:
         raise ValueError("candidate_library contains mixed library versions")
     if classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT:
-        raise ValueError(
-            "validated PIT classification is deferred until provenance validators are wired"
-        )
-    if classification != MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT:
+        if not pit_valid_evidence:
+            raise ValueError(
+                "validated PIT classification requires validator evidence"
+            )
+    elif classification != MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT:
         raise ValueError(f"unknown walk-forward classification: {classification!r}")
 
     raw_scores = _normalise_scores(candidate_scores)

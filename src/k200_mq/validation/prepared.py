@@ -116,9 +116,18 @@ def _validate_prepared_pit_provenance(prepared: PreparedK200MQInputs) -> None:
             "provenance; caller-supplied pit_valid mappings are not accepted."
         )
     try:
+        mapped_row_count = prepared.financial_filing_date_mapped_row_count
+        if mapped_row_count is not None:
+            # Hard evidence from the engine mapping pass: the measured number
+            # of rows the engine actually mapped through filing dates.
+            filing_date_used = mapped_row_count > 0
+        else:
+            # Legacy/test bundles that predate the measured counter keep the
+            # conservative structural proxy so strict behavior is unchanged.
+            filing_date_used = has_usable_filing_dates(prepared.financial_data)
         financials = validate_financial_provenance(
             prepared.financial_data,
-            filing_date_used=has_usable_filing_dates(prepared.financial_data),
+            filing_date_used=filing_date_used,
         )
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError) as exc:
         raise RuntimeError(
@@ -197,8 +206,20 @@ class PreparedK200MQInputs:
     ranking_fingerprint: str | None = None
     ranking_pit_valid: bool = False
     financial_data: pd.DataFrame | None = None
+    financial_filing_date_mapped_row_count: int | None = None
 
     def __post_init__(self) -> None:
+        if self.financial_filing_date_mapped_row_count is not None:
+            if isinstance(self.financial_filing_date_mapped_row_count, bool) or not isinstance(
+                self.financial_filing_date_mapped_row_count, int
+            ):
+                raise TypeError(
+                    "financial_filing_date_mapped_row_count must be an int or None"
+                )
+            if self.financial_filing_date_mapped_row_count < 0:
+                raise ValueError(
+                    "financial_filing_date_mapped_row_count must be non-negative"
+                )
         for field_name in ("price_data", "factor_data", "index_data", "universe_history"):
             value = getattr(self, field_name)
             if not isinstance(value, pd.DataFrame):

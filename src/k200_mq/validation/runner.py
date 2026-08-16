@@ -11,9 +11,10 @@ The separation between :mod:`walk_forward` and this module is deliberate:
 owns the order in which those pure pieces are called.
 
 This is orchestration only and remains independent of the live data loaders.
-The CLI integration supplies prepared K200MQ inputs, while the runner still
-emits only the mechanical non-PIT classification until actual universe and
-financial provenance validator outputs support a validated PIT result.
+The CLI integration supplies prepared K200MQ inputs, while the runner threads
+the validator-backed ``pit_valid_context`` into the selector so a validated PIT
+classification is emitted only when actual universe and financial provenance
+validator outputs authorize it.
 """
 
 from __future__ import annotations
@@ -114,9 +115,9 @@ class PITValidContext:
     """Deprecated placeholder for a future validator-backed PIT context.
 
     This record is intentionally not accepted by :func:`run_walk_forward`.
-    A boolean and descriptive evidence are not enough to establish PIT
-    validity; the actual universe and financial provenance validator outputs
-    must be connected before the validated label can be emitted.
+    The runner requires a plain mapping of actual universe and financial
+    provenance validator outputs; a wrapper object (or a bare boolean) is not
+    the raw validator evidence needed to establish PIT validity.
     """
 
     pit_valid: bool
@@ -778,11 +779,10 @@ def _validate_inputs(
             raise ValueError("fold test_end values must strictly increase")
         if current.test_start <= previous.test_end:
             raise ValueError("fold test periods must be chronological and non-overlapping")
-    if classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT:
-        raise ValueError(
-            "validated PIT classification is deferred until provenance validators are wired"
-        )
-    if classification != MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT:
+    if classification not in {
+        MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+        VALIDATED_EXPANDING_WALK_FORWARD_PIT,
+    }:
         raise ValueError(f"unknown walk-forward classification: {classification!r}")
     return folds, candidates
 
@@ -809,7 +809,7 @@ def run_walk_forward(
     *,
     selector: TrainSelector = select_candidate,
     classification: str = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
-    pit_valid_context: object | None = None,
+    pit_valid_context: Mapping[str, Any] | None = None,
     base_runtime_config: Mapping[str, Any] | object | None = None,
     preparation_manifest_context: Mapping[str, Any] | None = None,
     git_state: Mapping[str, Any] | None = None,
@@ -827,6 +827,11 @@ def run_walk_forward(
     as invalid fold results.  Structural OOS violations (duplicate dates,
     dates outside the fold, or non-finite returns) raise ``ValueError`` because
     silently stitching such data would make the report unsafe.
+
+    ``pit_valid_context`` carries the actual validator outputs that authorize a
+    validated PIT classification.  It must be a mapping, and the validated
+    classification cannot be requested without it: a bare string is never
+    evidence.
     """
     if not callable(train_evaluator) or not callable(test_evaluator):
         raise TypeError("train_evaluator and test_evaluator must be callable")
@@ -834,11 +839,10 @@ def run_walk_forward(
         raise TypeError("selector must be callable")
     folds, candidates = _validate_inputs(fold_specs, candidate_specs, classification)
 
-    if pit_valid_context is not None:
-        raise ValueError(
-            "pit_valid_context is unsupported until actual universe and financial "
-            "provenance validator outputs are wired"
-        )
+    if pit_valid_context is not None and not isinstance(pit_valid_context, Mapping):
+        raise ValueError("pit_valid_context must be a mapping of validator outputs")
+    if classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT and pit_valid_context is None:
+        raise ValueError("validated PIT classification requires validator evidence")
 
     candidate_hashes = {
         candidate.candidate_id: candidate_config_hash(candidate)
@@ -909,11 +913,14 @@ def run_walk_forward(
 
         deterministic_scores = tuple(sorted(train_scores, key=lambda score: score.candidate_id))
         try:
+            selector_kwargs: dict[str, Any] = {"classification": classification}
+            if pit_valid_context is not None:
+                selector_kwargs["pit_valid_evidence"] = pit_valid_context
             selected = selector(
                 deterministic_scores,
                 fold.train_end,
                 candidate_library=candidates,
-                classification=classification,
+                **selector_kwargs,
             )
             if isinstance(selected, Mapping):
                 selected = SelectionResult.from_dict(selected)
@@ -1204,7 +1211,11 @@ def run_walk_forward(
         stitched_oos_returns=tuple(stitched),
         valid=all_valid,
         status="valid" if all_valid else "invalid",
-        pit_valid_context=None,
+        pit_valid_context=(
+            _freeze_json_value(pit_valid_context)
+            if pit_valid_context is not None
+            else None
+        ),
         base_runtime_config=public_base_config,
         base_runtime_config_hash=base_config_hash,
         effective_candidate_configs_by_fold={

@@ -227,33 +227,64 @@ def test_invalid_train_and_test_results_are_explicit() -> None:
     assert empty_test.folds[0].valid is False
 
 
-def test_validated_classification_is_deferred_without_validator_outputs() -> None:
+def test_validated_classification_requires_mapping_evidence() -> None:
     def train(fold, candidate, config):
         return {"train_sharpe": 0.5, "n_exits": 5}
 
     def test(fold, candidate, config):
         return {"returns": {fold.test_start: 0.01}}
 
+    # A non-mapping context is not validator evidence.
     with pytest.raises(ValueError, match="pit_valid_context"):
         run_walk_forward(
             _folds()[:1], DEFAULT_CANDIDATE_LIBRARY[:1], train, test,
-            pit_valid_context=True,
+            pit_valid_context=True,  # type: ignore[arg-type]
         )
 
-    with pytest.raises(ValueError, match="deferred"):
+    # The validated classification cannot be requested without evidence.
+    with pytest.raises(ValueError, match="validator evidence"):
         run_walk_forward(
             _folds()[:1], DEFAULT_CANDIDATE_LIBRARY[:1], train, test,
             classification=VALIDATED_EXPANDING_WALK_FORWARD_PIT,
         )
 
+    # The deprecated wrapper is still rejected: it is not a raw validator map.
     with pytest.raises(ValueError, match="pit_valid_context"):
         run_walk_forward(
             _folds()[:1],
             DEFAULT_CANDIDATE_LIBRARY[:1],
             train,
             test,
-            pit_valid_context=PITValidContext(True, {"source": "synthetic"}),
+            pit_valid_context=PITValidContext(True, {"source": "synthetic"}),  # type: ignore[arg-type]
         )
+
+
+def test_validated_classification_passes_with_validator_evidence() -> None:
+    def train(fold, candidate, config):
+        return {"train_sharpe": 0.5, "n_exits": 5}
+
+    def test(fold, candidate, config):
+        return {"returns": {fold.test_start: 0.01}}
+
+    result = run_walk_forward(
+        _folds()[:1],
+        DEFAULT_CANDIDATE_LIBRARY[:1],
+        train,
+        test,
+        classification=VALIDATED_EXPANDING_WALK_FORWARD_PIT,
+        pit_valid_context={
+            "universe_pit_valid": True,
+            "financial_pit_valid": True,
+        },
+    )
+
+    assert result.valid is True
+    assert result.classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT
+    assert result.pit_valid_context == {
+        "universe_pit_valid": True,
+        "financial_pit_valid": True,
+    }
+    assert result.folds[0].classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT
 
 
 def test_valid_flags_require_actual_booleans() -> None:

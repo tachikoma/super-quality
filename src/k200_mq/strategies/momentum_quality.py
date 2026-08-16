@@ -144,7 +144,13 @@ class MomentumQualityStrategy:
         eligible: pd.DataFrame,
         adv_ratio_by_ticker: Mapping[str, float] | None,
     ) -> pd.DataFrame:
-        """Filter eligible candidates by trailing ADV turnover ratio."""
+        """Filter eligible candidates by trailing ADV turnover ratio.
+
+        Tickers whose ADV ratio cannot be measured (e.g. delisted names with no
+        market cap in the price cache) are excluded from the candidate pool
+        with a warning instead of failing the whole run. A missing map itself
+        (wiring bug) still fails closed.
+        """
         if adv_ratio_by_ticker is None:
             raise RuntimeError(
                 "ENABLE_ADV_FILTER requires precomputed ADV turnover ratios"
@@ -153,18 +159,25 @@ class MomentumQualityStrategy:
         ratio_series = eligible["ticker"].map(
             lambda ticker: adv_ratio_by_ticker.get(str(ticker))
         )
-        if ratio_series.isna().any():
+        missing_mask = ratio_series.isna()
+        if missing_mask.any():
             missing = sorted(
                 str(ticker)
-                for ticker in eligible.loc[ratio_series.isna(), "ticker"].unique()
+                for ticker in eligible.loc[missing_mask, "ticker"].unique()
             )
-            raise RuntimeError(
-                "ENABLE_ADV_FILTER requires ADV turnover coverage for all eligible "
-                f"tickers; missing: {', '.join(missing)}"
+            logger.warning(
+                "ADV 커버리지 누락으로 후보에서 제외: %d개 [%s]",
+                len(missing),
+                ", ".join(missing),
             )
+            eligible = eligible.loc[~missing_mask].copy()
 
-        eligible = eligible.copy()
-        eligible["adv_ratio"] = ratio_series.astype(float)
+        if eligible.empty:
+            return eligible
+
+        eligible["adv_ratio"] = eligible["ticker"].map(
+            lambda ticker: adv_ratio_by_ticker.get(str(ticker))
+        ).astype(float)
         threshold = float(self.config.MIN_ADV_RATIO)
         filtered = eligible[eligible["adv_ratio"] >= threshold].copy()
         return filtered.drop(columns=["adv_ratio"])

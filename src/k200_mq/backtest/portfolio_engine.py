@@ -438,7 +438,12 @@ class PortfolioRebalanceEngine:
         signal_date: pd.Timestamp,
         tickers: set[str],
     ) -> dict[str, float]:
-        """Build trailing ADV turnover ratios (volume*close/mcap) by ticker."""
+        """Build trailing ADV turnover ratios (volume*close/mcap) by ticker.
+
+        Tickers whose ADV ratio cannot be computed (e.g. mcap <= 0 for
+        delisted names) are excluded from the map; the caller decides the
+        coverage policy for missing tickers.
+        """
         if not tickers:
             return {}
         if price_data.empty or not isinstance(price_data.index, pd.MultiIndex):

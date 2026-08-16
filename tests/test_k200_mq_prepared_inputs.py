@@ -684,7 +684,7 @@ def test_candidate_allows_adv_filter_runtime_overrides() -> None:
     assert not result["portfolio_snapshots"].empty
 
 
-def test_adv_filter_fails_closed_on_missing_turnover_coverage() -> None:
+def test_adv_filter_skips_missing_turnover_coverage() -> None:
     base = _prepared_inputs()
     price_data = base.price_data.copy(deep=True)
     # Remove mcap signal for one name so turnover cannot be validated.
@@ -699,8 +699,8 @@ def test_adv_filter_fails_closed_on_missing_turnover_coverage() -> None:
         universe_history=pd.DataFrame([
             {"as_of": pd.Timestamp("2024-01-04"), "ticker": "A"},
             {"as_of": pd.Timestamp("2024-01-04"), "ticker": "B"},
-            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "A"},
-            {"as_of": pd.Timestamp("2024-01-09"), "ticker": "B"},
+            {"as_of": pd.Timestamp("2024-01-08"), "ticker": "A"},
+            {"as_of": pd.Timestamp("2024-01-08"), "ticker": "B"},
         ]),
         regime_scale_map=base.regime_scale_map,
         runtime_config=base.runtime_config.model_copy(update={
@@ -711,14 +711,22 @@ def test_adv_filter_fails_closed_on_missing_turnover_coverage() -> None:
         }),
     )
 
-    with pytest.raises(RuntimeError, match="ADV turnover coverage"):
-        execute_engine_interval(
-            prepared,
-            CandidateSpec("ADV_FAIL", {"TOP_N": 2}),
-            measured_start=pd.Timestamp("2024-01-02"),
-            measured_end=pd.Timestamp("2024-01-09"),
-            active_trading_start=pd.Timestamp("2024-01-04"),
-        )
+    # Missing ADV coverage must not fail the run: B is excluded from the
+    # candidate pool with a warning while A keeps trading normally.  The
+    # second rebalance (2024-01-08) is used because the first signal has only
+    # three trailing price rows, which is below the 5-row ADV history floor.
+    result = execute_engine_interval(
+        prepared,
+        CandidateSpec("ADV_SKIP", {"TOP_N": 2}),
+        measured_start=pd.Timestamp("2024-01-02"),
+        measured_end=pd.Timestamp("2024-01-09"),
+        active_trading_start=pd.Timestamp("2024-01-08"),
+    )
+
+    assert not result["portfolio_snapshots"].empty
+    held_tickers = result["trade_log"]["ticker"].dropna().tolist()
+    assert "B" not in held_tickers
+    assert "A" in held_tickers
 
 
 def test_ranking_metadata_is_explicitly_non_pit_in_manifest() -> None:

@@ -40,6 +40,7 @@ from k200_mq.validation.runner import (
 )
 from k200_mq.validation.walk_forward import (
     MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+    VALIDATED_EXPANDING_WALK_FORWARD_PIT,
     get_candidate_library,
     get_expanding_window_folds,
 )
@@ -1031,6 +1032,14 @@ def _convert_financial_to_daily(
         filing_date_used=use_filing_dates,
     )
 
+    # The filing-date path below is the engine's actual availability mapping.
+    # ``filing_date_mapped_rows`` is measured hard evidence of rows that were
+    # really mapped through filing dates; rows skipped by ``continue`` are not
+    # counted.  The self-referential ``has_usable_filing_dates`` proxy must not
+    # be the only thing deciding ``filing_date_used`` for the final attrs.
+    filing_date_mapped_rows = 0
+    quarter_end_fallback_rows = 0
+
     records: list[dict[str, Any]] = []
     for _, row in financial_data.iterrows():
         ticker_value = row.get("ticker", row.get("stock_code"))
@@ -1046,11 +1055,13 @@ def _convert_financial_to_daily(
             )
             if dt is None:
                 continue
+            filing_date_mapped_rows += 1
         else:
             try:
                 dt = _quarter_end_date(int(row["year"]), int(row["quarter"]))
             except (ValueError, KeyError):
                 continue
+            quarter_end_fallback_rows += 1
 
         def _finite_source_value(column: str) -> float | None:
             """Return a finite raw fact, preserving legitimate zero values."""
@@ -1106,8 +1117,25 @@ def _convert_financial_to_daily(
             "financial_six_fact_available": six_fact_available,
         })
 
+    # Re-validate with the measured mapping evidence: ``filing_date_used`` is
+    # true only when at least one row was actually mapped through a filing
+    # date, not merely when a parseable column exists.  The measured row
+    # counts ride along as attrs and in the provenance payload so downstream
+    # strict gates can use the same hard evidence.
+    measured_provenance = validate_financial_provenance(
+        financial_data,
+        filing_date_used=filing_date_mapped_rows > 0,
+    )
+    measured_provenance = dict(measured_provenance)
+    measured_provenance["filing_date_mapped_row_count"] = filing_date_mapped_rows
+    measured_provenance["quarter_end_fallback_row_count"] = quarter_end_fallback_rows
+
     if not records:
-        return pd.DataFrame()
+        empty = pd.DataFrame()
+        empty.attrs["financial_provenance"] = measured_provenance
+        empty.attrs["filing_date_mapped_row_count"] = filing_date_mapped_rows
+        empty.attrs["quarter_end_fallback_row_count"] = quarter_end_fallback_rows
+        return empty
 
     fin_df = pd.DataFrame(records).sort_values(["ticker", "date"])
 
@@ -1138,7 +1166,9 @@ def _convert_financial_to_daily(
     ]
     result[financial_cols] = result[financial_cols].fillna(0.0)
     # This flag is deliberately separate from the neutral-filled factor inputs.
-    result.attrs["financial_provenance"] = financial_provenance
+    result.attrs["financial_provenance"] = measured_provenance
+    result.attrs["filing_date_mapped_row_count"] = filing_date_mapped_rows
+    result.attrs["quarter_end_fallback_row_count"] = quarter_end_fallback_rows
     return result
 
 
@@ -2391,6 +2421,9 @@ def prepare_k200mq_inputs(
         index_data=index_raw,
         universe_history=universe_history,
         financial_data=financial_data,
+        financial_filing_date_mapped_row_count=financial_provenance.get(
+            "filing_date_mapped_row_count"
+        ),
         regime_scale_map=regime_scale_map,
         sector_map_by_as_of=sector_map_by_as_of,
         kospi_mcap_ranking=kospi_mcap_ranking,
@@ -2870,6 +2903,124 @@ def _true_walkforward_summary_rows(result: WalkForwardResult) -> list[dict[str, 
     return rows
 
 
+def _true_walkforward_claim(classification: str) -> str:
+    """Return the auditable claim text for a walk-forward classification."""
+    if classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT:
+        return "validated PIT walk-forward; universe + financial provenance validators passed"
+    return "mechanical non-PIT walk-forward; not a validated performance claim"
+
+
+def _true_walkforward_first_rebalance_coverage(
+    prepared: PreparedK200MQInputs,
+) -> dict[str, Any]:
+    """Read measured first-rebalance coverage from the prepared bundle.
+
+    Sources are ``financial_coverage.records[0]`` and
+    ``rebalance_readiness.first_ready_rebalance``; values are read dynamically
+    and never hard-coded (the 73/200 and 121/200 figures in AGENTS.md are
+    Day-14 examples, not constants).
+    """
+    coverage = dict(prepared.coverage or {})
+    financial_coverage = coverage.get("financial_coverage", {})
+    first_record = None
+    if isinstance(financial_coverage, Mapping):
+        records = financial_coverage.get("records")
+        if isinstance(records, list) and records and isinstance(records[0], Mapping):
+            first_record = records[0]
+    readiness = coverage.get("rebalance_readiness", {})
+    first_ready = readiness.get("first_ready_rebalance")
+    first_ready = first_ready if isinstance(first_ready, Mapping) else None
+
+    six_fact_ratio: float | None = None
+    six_fact_count: int | None = None
+    six_fact_universe_count: int | None = None
+    if isinstance(first_record, Mapping):
+        raw_ratio = first_record.get("six_fact_source_coverage_ratio")
+        if raw_ratio is not None:
+            try:
+                six_fact_ratio = float(raw_ratio)
+            except (TypeError, ValueError):
+                six_fact_ratio = None
+        raw_count = first_record.get("six_fact_available_ticker_count")
+        if isinstance(raw_count, int) and not isinstance(raw_count, bool):
+            six_fact_count = raw_count
+        raw_universe = first_record.get("universe_ticker_count")
+        if isinstance(raw_universe, int) and not isinstance(raw_universe, bool):
+            six_fact_universe_count = raw_universe
+
+    momentum_ratio: float | None = None
+    momentum_count: int | None = None
+    momentum_universe_count: int | None = None
+    if first_ready is not None:
+        usable = first_ready.get("usable_ticker_count")
+        universe_count = first_ready.get("universe_ticker_count")
+        if (
+            isinstance(usable, (int, float))
+            and not isinstance(usable, bool)
+            and isinstance(universe_count, (int, float))
+            and not isinstance(universe_count, bool)
+            and universe_count > 0
+        ):
+            momentum_ratio = float(usable) / float(universe_count)
+            momentum_count = int(usable)
+            momentum_universe_count = int(universe_count)
+    return {
+        "six_fact_ratio": six_fact_ratio,
+        "six_fact_count": six_fact_count,
+        "six_fact_universe_count": six_fact_universe_count,
+        "momentum_ratio": momentum_ratio,
+        "momentum_count": momentum_count,
+        "momentum_universe_count": momentum_universe_count,
+    }
+
+
+def _true_walkforward_coverage_summary(
+    prepared: PreparedK200MQInputs,
+) -> dict[str, Any] | None:
+    """Return the numeric coverage summary for a validated manifest."""
+    measured = _true_walkforward_first_rebalance_coverage(prepared)
+    if measured["six_fact_ratio"] is None and measured["momentum_ratio"] is None:
+        return None
+    return {
+        "first_rebalance": {
+            "six_fact_ratio": measured["six_fact_ratio"],
+            "momentum_ratio": measured["momentum_ratio"],
+        },
+    }
+
+
+def _true_walkforward_validated_limitations(
+    prepared: PreparedK200MQInputs,
+) -> list[str]:
+    """Return measured-coverage limitation lines for a validated manifest."""
+    measured = _true_walkforward_first_rebalance_coverage(prepared)
+    limitations: list[str] = []
+    if measured["six_fact_ratio"] is not None:
+        count = measured["six_fact_count"]
+        universe_count = measured["six_fact_universe_count"]
+        if count is not None and universe_count:
+            count_text = f"{count}/{universe_count}"
+        else:
+            count_text = "unknown"
+        limitations.append(
+            "first-rebalance six-fact financial coverage %s (%.1f%%); "
+            "missing facts are neutral-zero-filled in quality_z"
+            % (count_text, measured["six_fact_ratio"] * 100)
+        )
+    if measured["momentum_ratio"] is not None:
+        count = measured["momentum_count"]
+        universe_count = measured["momentum_universe_count"]
+        if count is not None and universe_count:
+            count_text = f"{count}/{universe_count}"
+        else:
+            count_text = "unknown"
+        limitations.append(
+            "first-rebalance momentum readiness %s (%.1f%%)"
+            % (count_text, measured["momentum_ratio"] * 100)
+        )
+    return limitations
+
+
 def _save_true_walkforward_artifacts(
     result: WalkForwardResult,
     prepared: PreparedK200MQInputs,
@@ -2880,11 +3031,18 @@ def _save_true_walkforward_artifacts(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = result.to_dict()
+    classification = result.classification
+    claim = _true_walkforward_claim(classification)
+    limitations = list(_TRUE_WALKFORWARD_LIMITATIONS)
+    coverage_summary: dict[str, Any] | None = None
+    if classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT:
+        coverage_summary = _true_walkforward_coverage_summary(prepared)
+        limitations.extend(_true_walkforward_validated_limitations(prepared))
     manifest.update({
         "command": "true-walkforward",
-        "classification": MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
-        "claim": "mechanical non-PIT walk-forward; not a validated performance claim",
-        "limitations": list(_TRUE_WALKFORWARD_LIMITATIONS),
+        "classification": classification,
+        "claim": claim,
+        "limitations": limitations,
         "base_runtime_config": _true_walkforward_json_safe(
             result.base_runtime_config
         ),
@@ -2922,6 +3080,8 @@ def _save_true_walkforward_artifacts(
             result.effective_candidate_config_hashes_by_fold
         ),
     })
+    if coverage_summary is not None:
+        manifest["coverage_summary"] = coverage_summary
     manifest_path = output_dir / "selection_and_folds.json"
     with manifest_path.open("w", encoding="utf-8") as manifest_file:
         json.dump(
@@ -2966,8 +3126,12 @@ def _save_true_walkforward_failure_artifact(
     prepared: PreparedK200MQInputs | None,
     config: Any,
     error: str,
+    classification: str = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+    claim: str | None = None,
 ) -> Path:
     """Persist a diagnostic manifest when orchestration fails early."""
+    if claim is None:
+        claim = _true_walkforward_claim(classification)
     output_dir = Path(config.OUTPUT_DIR) / "true_walkforward"
     output_dir.mkdir(parents=True, exist_ok=True)
     base_runtime_config = _manifest_config(
@@ -2983,11 +3147,11 @@ def _save_true_walkforward_failure_artifact(
     ).hexdigest()
     diagnostic = {
         "command": "true-walkforward",
-        "classification": MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+        "classification": classification,
         "status": "invalid",
         "valid": False,
         "error": error,
-        "claim": "mechanical non-PIT walk-forward; not a validated performance claim",
+        "claim": claim,
         "limitations": list(_TRUE_WALKFORWARD_LIMITATIONS),
         "base_runtime_config": base_runtime_config,
         "base_runtime_config_hash": base_runtime_config_hash,
@@ -3062,9 +3226,15 @@ def _preflight_true_walkforward_strict_inputs(prepared: PreparedK200MQInputs) ->
 
 
 def _run_true_walkforward(config: Any) -> WalkForwardResult:
-    """Run mechanical expanding WF over one shared prepared input bundle."""
+    """Run expanding WF over one shared prepared input bundle.
+
+    The classification is mechanical unless strict PIT validation is enabled
+    AND the universe/financial provenance validators both pass; only then is
+    the validated PIT label emitted.
+    """
     logger.warning(
-        "true-walkforward: mechanical non-PIT WF only; not a validated performance claim"
+        "true-walkforward: mechanical non-PIT WF by default; validated PIT "
+        "requires strict-PIT inputs with passing provenance validators"
     )
     logger.warning(
         "현재 universe/quality provenance 및 coverage limitations remain; "
@@ -3091,7 +3261,8 @@ def _run_true_walkforward(config: Any) -> WalkForwardResult:
             "the full 2015-01-01 through 2024-12-31 range"
         )
 
-    if bool(getattr(config, "STRICT_PIT_VALIDATION", False)):
+    strict_pit = bool(getattr(config, "STRICT_PIT_VALIDATION", False))
+    if strict_pit:
         try:
             _preflight_true_walkforward_strict_inputs(prepared)
         except RuntimeError as exc:
@@ -3108,13 +3279,52 @@ def _run_true_walkforward(config: Any) -> WalkForwardResult:
 
     folds = get_expanding_window_folds()
     candidates = get_candidate_library()
+    classification = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
+    pit_valid_context: Mapping[str, Any] | None = None
+    if strict_pit:
+        # Re-run the actual validators on the prepared bundle to decide the
+        # classification.  The preflight above fails closed; here the outputs
+        # are the evidence that authorizes (or withholds) the validated label.
+        from k200_mq.data.provenance import (
+            validate_financial_provenance,
+            validate_universe_provenance,
+        )
+
+        universe_ok = (
+            validate_universe_provenance(prepared.universe_history).get("pit_valid")
+            is True
+        )
+        financial_ok = (
+            prepared.financial_data is not None
+            and not prepared.financial_data.empty
+            and validate_financial_provenance(
+                prepared.financial_data,
+                filing_date_used=(
+                    prepared.financial_filing_date_mapped_row_count or 0
+                )
+                > 0,
+            ).get("pit_valid")
+            is True
+        )
+        provenance_ok = strict_pit and universe_ok and financial_ok
+        classification = (
+            VALIDATED_EXPANDING_WALK_FORWARD_PIT
+            if provenance_ok
+            else MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
+        )
+        pit_valid_context = {
+            "universe_pit_valid": universe_ok,
+            "financial_pit_valid": financial_ok,
+            "provenance_valid": provenance_ok,
+        }
     try:
         result = run_walk_forward(
             folds,
             candidates,
             _true_walkforward_train_evaluator(prepared),
             _true_walkforward_test_evaluator(prepared),
-            classification=MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
+            classification=classification,
+            pit_valid_context=pit_valid_context,
             base_runtime_config=prepared.runtime_config,
             preparation_manifest_context=_true_walkforward_json_safe(
                 dict(prepared.manifest_context)
@@ -3123,27 +3333,46 @@ def _run_true_walkforward(config: Any) -> WalkForwardResult:
             expected_test_dates=_expected_true_walkforward_test_dates(prepared, folds),
         )
     except Exception as exc:
-        _save_true_walkforward_failure_artifact(prepared, config, str(exc))
+        _save_true_walkforward_failure_artifact(
+            prepared,
+            config,
+            str(exc),
+            classification=classification,
+        )
         raise RuntimeError(
             f"true-walkforward failed before a valid result was produced; "
             f"diagnostic artifacts were saved: {Path(config.OUTPUT_DIR) / 'true_walkforward'}"
         ) from exc
-    _save_true_walkforward_artifacts(result, prepared, config)
     if not result.valid:
         invalid_folds = [
             f"fold {fold.fold_number}: {fold.status}"
             for fold in result.folds
             if not fold.valid
         ]
-        raise RuntimeError(
+        error_message = (
             "true-walkforward produced an invalid result; diagnostic artifacts were "
             f"saved: {Path(config.OUTPUT_DIR) / 'true_walkforward'}; "
             + ", ".join(invalid_folds)
         )
-    logger.warning(
-        "true-walkforward 완료: classification=%s; 결과는 검증된 성과 주장이 아님",
-        MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT,
-    )
+        _save_true_walkforward_failure_artifact(
+            prepared,
+            config,
+            error_message,
+            classification=result.classification,
+        )
+        raise RuntimeError(error_message)
+    _save_true_walkforward_artifacts(result, prepared, config)
+    if result.classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT:
+        logger.warning(
+            "true-walkforward 완료: classification=%s; universe + financial "
+            "provenance validators passed",
+            result.classification,
+        )
+    else:
+        logger.warning(
+            "true-walkforward 완료: classification=%s; 결과는 검증된 성과 주장이 아님",
+            result.classification,
+        )
     return result
 
 

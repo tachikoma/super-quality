@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 import pytest
 
@@ -568,6 +570,83 @@ def test_adv_filter_excludes_low_turnover_names() -> None:
 
     assert tickers == ["A", "B"]
     assert sum(row["weight"] for row in selected) == pytest.approx(1.0)
+
+
+def test_adv_filter_skips_missing_coverage_and_filters_remainder(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=3,
+            ENABLE_ADV_FILTER=True,
+            MIN_ADV_RATIO=0.02,
+            EXCLUDE_KOSPI_TOP_N=0,
+        )
+    )
+    eligible = pd.DataFrame({
+        "ticker": ["A", "B", "C", "D"],
+        "momentum_z": [3.0, 2.0, 1.0, 0.5],
+        "quality_z": [0.0, 0.0, 0.0, 0.0],
+    })
+    # "D" has no measurable ADV ratio (e.g. delisted name with mcap missing);
+    # "C" is below the threshold and must still be filtered out.
+    adv_ratio_by_ticker = {"A": 0.05, "B": 0.03, "C": 0.005}
+
+    with caplog.at_level(
+        logging.WARNING, logger="k200_mq.strategies.momentum_quality"
+    ):
+        filtered = strategy._apply_adv_filter(eligible, adv_ratio_by_ticker)
+
+    # No RuntimeError: the missing ticker is dropped with a warning and the
+    # remaining names are filtered by the ADV threshold as before.
+    assert "adv_ratio" not in filtered.columns
+    assert filtered["ticker"].tolist() == ["A", "B"]
+    assert any(
+        "ADV 커버리지 누락" in record.message for record in caplog.records
+    )
+    assert any("D" in record.message for record in caplog.records)
+
+
+def test_adv_filter_none_map_still_fails_closed() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=2,
+            ENABLE_ADV_FILTER=True,
+            MIN_ADV_RATIO=0.02,
+            EXCLUDE_KOSPI_TOP_N=0,
+        )
+    )
+    eligible = pd.DataFrame({
+        "ticker": ["A", "B"],
+        "momentum_z": [2.0, 1.0],
+        "quality_z": [2.0, 1.0],
+    })
+
+    # A missing map is a wiring bug and must fail closed.
+    with pytest.raises(RuntimeError, match="precomputed ADV turnover ratios"):
+        strategy._apply_adv_filter(eligible, None)
+
+
+def test_adv_filter_all_missing_coverage_returns_empty() -> None:
+    strategy = MomentumQualityStrategy(
+        K200MQConfig(
+            TOP_N=3,
+            ENABLE_ADV_FILTER=True,
+            MIN_ADV_RATIO=0.02,
+            EXCLUDE_KOSPI_TOP_N=0,
+        )
+    )
+    eligible = pd.DataFrame({
+        "ticker": ["A", "B"],
+        "momentum_z": [2.0, 1.0],
+        "quality_z": [2.0, 1.0],
+    })
+    # No eligible ticker has a measurable ADV ratio.
+    adv_ratio_by_ticker = {"Z": 0.5}
+
+    filtered = strategy._apply_adv_filter(eligible, adv_ratio_by_ticker)
+
+    assert filtered.empty
 
 
 def test_min_cash_ratio_reserves_cash_during_rebalance_buys() -> None:

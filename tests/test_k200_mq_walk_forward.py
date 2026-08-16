@@ -228,11 +228,20 @@ def test_pit_classification_is_explicit() -> None:
     assert classify_walk_forward_result(pit_valid=True) == (
         MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
     )
-    with pytest.raises(ValueError, match="deferred"):
+    # A bare string classification is not validator evidence either.
+    with pytest.raises(ValueError, match="validator evidence"):
         select_candidate(
             {"BASE": {"train_sharpe": 0.5, "n_exits": 5}},
             classification=VALIDATED_EXPANDING_WALK_FORWARD_PIT,
         )
+    # Actual validator outputs authorize the validated label.
+    validated = select_candidate(
+        {"BASE": {"train_sharpe": 0.5, "n_exits": 5}},
+        classification=VALIDATED_EXPANDING_WALK_FORWARD_PIT,
+        pit_valid_evidence={"universe_pit_valid": True, "financial_pit_valid": True},
+    )
+    assert validated.classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT
+    assert validated.selected_candidate_id == "BASE"
 
 
 def test_valid_mapping_flag_is_not_truthiness_coerced() -> None:
