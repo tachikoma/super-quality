@@ -304,3 +304,29 @@ ruff check
 - **Next priority**: ① 성과 게이트 재평가 — 모멘텀 0.7/0.3 validated에서
   CAGR ~8.9%/Sharpe ~0.7 근접 (Day 20 +53.23%), ② ADV 필터 임계값 재설계 또는
   비활성 유지, ③ PIT 기준 재무 커버리지 개선 (73/200 = 36.5%).
+
+## TASK LOG — 2026-08-17 (cont., 검증 인프라 확장)
+
+- **몬테카를로 부트스트랩 (`scripts/monte_carlo_bootstrap.py`, 커밋 `5ded220`)**:
+  OOS 1,231일 일별 수익률 stationary bootstrap (블록 20, 5,000회). Day 20
+  (0.7/0.3 validated): CAGR 9.13% CI[-10.1%,+32.4%] / Sharpe 0.555 CI[-0.47,1.58]
+  / MDD -31.2% CI[-58.3%,-19.3%] / Calmar 0.293 CI[-0.19,1.46]. 게이트 통과
+  확률: CAGR≥5% 65.4% / Sharpe≥0.7 40.5% / MDD≥-25% **17.4%** / Calmar≥0.3
+  48.6% — **성과 게이트 미달은 표본 우연이 아닌 구조적 신호** (MDD 취약).
+- **WFA 후보 라이브러리 확장 (커밋 `48f3fc8`)**: `MOM60`(0.6/0.4),
+  `MOM70`(0.7/0.3) 후보 추가 (`k200mq-wf-candidates-v3`) — Oracle 지적
+  "0.7/0.3 사후 탐색 스누핑" 해소. 이제 train 성과로 가중 축이 선택됨.
+- **실전 적용 검토 (Oracle, 커밋 `78dfa9e` scorecard 반영)**: **자동 주문
+  실전 No, paper trading 조건부 Yes.** 실전 전 필수 5항목: ① 0.7/0.3 WF
+  후보화(완료), ② ADV 유동성 정책 명시, ③ 상장폐지/거래정지 감지+강제청산,
+  ④ 데이터 갱신 자동화(가격 일일/유니버스 월별/DART 공시 트리거),
+  ⑤ 리스크 가드레일(일일/월간 손실한도, 드로다운 중단). 신호 export 어댑터
+  (signals.json)와 주문 게이트웨이 부재. EXCLUDE_KOSPI_TOP_N=0 고정 전제.
+- **scorecard 2026-08-17 (`08_go_no_go_scorecard_2026-08-17.md`)**: **Hold** —
+  CAGR point 통과(9.13%)지만 MDD/Sharpe/Calmar 미달 + 부트스트랩 MDD 통과
+  17.4% + 2020 서브기간 편중. 실전 자본 배치는 scorecard Go + 필수 5항목
+  완료 후.
+- **Next priority**: ① 파라미터 안정성 그리드 결과 수렴 (`outputs_k200mq_grid_*`,
+  모멘텀 가중 0.4~0.8/rebalance Q/손절 ±0.10,0.20/비중·현금 — 실행 중),
+  ② scorecard 재판정 (그리드 + bootstrap 반영), ③ 실전 준비 5항목 중
+  ②-⑤ 진행.
