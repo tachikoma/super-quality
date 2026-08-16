@@ -12,6 +12,7 @@ import pytest
 from k200_mq import main as main_module
 from k200_mq.config import K200MQConfig
 from k200_mq.validation.prepared import PreparedK200MQInputs
+from k200_mq.validation.runner import WalkForwardResult
 
 
 def _prepared(output_dir: str, *, strict: bool = False) -> PreparedK200MQInputs:
@@ -201,3 +202,165 @@ def test_true_walkforward_strict_pit_runs_when_preflight_is_satisfied(
 
     assert result.classification == main_module.MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
     assert len(engine_calls) == 5 * 4 + 5
+
+
+def _prepared_with_first_ready_coverage() -> PreparedK200MQInputs:
+    """A bundle whose first scheduled rebalance has zero six-fact coverage
+    while the first *ready* rebalance (the one the engine trades on) has
+    73/200 six-fact and 121/200 momentum coverage."""
+    return PreparedK200MQInputs(
+        price_data=pd.DataFrame(),
+        factor_data=pd.DataFrame(),
+        index_data=pd.DataFrame(),
+        universe_history=pd.DataFrame(),
+        measured_start=date(2015, 1, 1),
+        measured_end=date(2024, 12, 31),
+        coverage={
+            "rebalance_readiness": {
+                "first_ready_rebalance": {
+                    "scheduled_date": "2015-05-29",
+                    "usable_ticker_count": 121,
+                    "universe_ticker_count": 200,
+                },
+            },
+            "financial_coverage": {
+                "records": [
+                    {
+                        "scheduled_date": "2015-01-30",
+                        "six_fact_available_ticker_count": 0,
+                        "universe_ticker_count": 200,
+                        "six_fact_source_coverage_ratio": 0.0,
+                    },
+                    {
+                        "scheduled_date": "2015-05-29",
+                        "six_fact_available_ticker_count": 73,
+                        "universe_ticker_count": 200,
+                        "six_fact_source_coverage_ratio": 0.365,
+                    },
+                ],
+            },
+        },
+    )
+
+
+def test_validated_coverage_summary_uses_first_ready_rebalance_record() -> None:
+    summary = main_module._true_walkforward_coverage_summary(
+        _prepared_with_first_ready_coverage()
+    )
+
+    assert summary is not None
+    first = summary["first_rebalance"]
+    # records[0] is the first scheduled rebalance (0/200 = 0.0); the matching
+    # first-ready record must be used instead.
+    assert first["six_fact_ratio"] == pytest.approx(0.365)
+    assert first["momentum_ratio"] == pytest.approx(0.605)
+
+
+def test_validated_coverage_summary_falls_back_to_first_record_on_missing_match() -> None:
+    prepared = _prepared_with_first_ready_coverage()
+    # No financial record matches this ready date -> conservative records[0].
+    prepared = PreparedK200MQInputs(
+        price_data=pd.DataFrame(),
+        factor_data=pd.DataFrame(),
+        index_data=pd.DataFrame(),
+        universe_history=pd.DataFrame(),
+        coverage={
+            "rebalance_readiness": {
+                "first_ready_rebalance": {
+                    "scheduled_date": "2015-06-30",
+                    "usable_ticker_count": 121,
+                    "universe_ticker_count": 200,
+                },
+            },
+            "financial_coverage": {
+                "records": [
+                    {
+                        "scheduled_date": "2015-01-30",
+                        "six_fact_available_ticker_count": 0,
+                        "universe_ticker_count": 200,
+                        "six_fact_source_coverage_ratio": 0.0,
+                    },
+                ],
+            },
+        },
+    )
+
+    summary = main_module._true_walkforward_coverage_summary(prepared)
+
+    assert summary is not None
+    assert summary["first_rebalance"]["six_fact_ratio"] == pytest.approx(0.0)
+    assert summary["first_rebalance"]["momentum_ratio"] == pytest.approx(0.605)
+
+
+def _empty_walkforward_result(classification: str) -> WalkForwardResult:
+    return WalkForwardResult(
+        classification=classification,
+        candidate_library_version="k200mq-wf-candidates-v2",
+        candidate_config_hashes={},
+        folds=(),
+        stitched_oos_returns=(),
+        valid=True,
+        status="valid",
+    )
+
+
+def test_validated_manifest_uses_ready_record_and_drops_mechanical_limitation(
+    tmp_path,
+) -> None:
+    config = K200MQConfig(OUTPUT_DIR=str(tmp_path))
+    main_module._save_true_walkforward_artifacts(
+        _empty_walkforward_result(
+            main_module.VALIDATED_EXPANDING_WALK_FORWARD_PIT
+        ),
+        _prepared_with_first_ready_coverage(),
+        config,
+    )
+
+    manifest_path = tmp_path / "true_walkforward" / "selection_and_folds.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["classification"] == "validated_expanding_walk_forward_pit"
+    # The mechanical-only disclaimer must not survive a validated manifest.
+    assert not any(
+        item.startswith("Mechanical non-PIT walk-forward only")
+        for item in manifest["limitations"]
+    )
+    assert any(
+        item.startswith("Universe and financial provenance validators passed")
+        for item in manifest["limitations"]
+    )
+    # Measured coverage lines are kept and reflect the first-ready record.
+    assert any(
+        "six-fact financial coverage 73/200 (36.5%)" in item
+        for item in manifest["limitations"]
+    )
+    assert any(
+        "momentum readiness 121/200 (60.5%)" in item
+        for item in manifest["limitations"]
+    )
+    assert manifest["coverage_summary"]["first_rebalance"]["six_fact_ratio"] == (
+        pytest.approx(0.365)
+    )
+    assert manifest["coverage_summary"]["first_rebalance"]["momentum_ratio"] == (
+        pytest.approx(0.605)
+    )
+
+
+def test_mechanical_manifest_keeps_mechanical_limitation(tmp_path) -> None:
+    config = K200MQConfig(OUTPUT_DIR=str(tmp_path))
+    main_module._save_true_walkforward_artifacts(
+        _empty_walkforward_result(
+            main_module.MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
+        ),
+        _prepared(str(tmp_path)),
+        config,
+    )
+
+    manifest_path = tmp_path / "true_walkforward" / "selection_and_folds.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert any(
+        item.startswith("Mechanical non-PIT walk-forward only")
+        for item in manifest["limitations"]
+    )
+    assert "coverage_summary" not in manifest

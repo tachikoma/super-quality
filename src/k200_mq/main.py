@@ -87,6 +87,19 @@ _TRUE_WALKFORWARD_LIMITATIONS = (
     "Exact OOS date coverage is enforced when the prepared trading calendar is available; otherwise structural and non-empty OOS checks apply.",
 )
 
+# The validated manifest replaces the mechanical-only first limitation with an
+# explicit validated statement; the remaining items are generic enough for both
+# paths and are kept unchanged.
+_TRUE_WALKFORWARD_VALIDATED_LIMITATION = (
+    "Universe and financial provenance validators passed; coverage limitations "
+    "below are measured, not implied complete."
+)
+
+
+def _is_mechanical_only_limitation(item: str) -> bool:
+    """Return whether a limitation line applies only to mechanical runs."""
+    return item.startswith("Mechanical non-PIT walk-forward only")
+
 
 class _UnsupportedCLIOption(argparse.Action):
     """Reject a retained compatibility option instead of silently ignoring it."""
@@ -2910,26 +2923,65 @@ def _true_walkforward_claim(classification: str) -> str:
     return "mechanical non-PIT walk-forward; not a validated performance claim"
 
 
+def _coverage_date_key(value: Any) -> str | None:
+    """Return the canonical ``YYYY-MM-DD`` key for a coverage scheduled date."""
+    if value is None:
+        return None
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if pd.isna(timestamp):
+        return None
+    return timestamp.date().isoformat()
+
+
 def _true_walkforward_first_rebalance_coverage(
     prepared: PreparedK200MQInputs,
 ) -> dict[str, Any]:
     """Read measured first-rebalance coverage from the prepared bundle.
 
-    Sources are ``financial_coverage.records[0]`` and
-    ``rebalance_readiness.first_ready_rebalance``; values are read dynamically
-    and never hard-coded (the 73/200 and 121/200 figures in AGENTS.md are
-    Day-14 examples, not constants).
+    Financial coverage is taken from the record whose ``scheduled_date``
+    matches ``rebalance_readiness.first_ready_rebalance.scheduled_date`` --
+    the first rebalance the engine actually traded on.  The first *scheduled*
+    record is often earlier (e.g. a momentum-warmup pre-ready date with
+    zero coverage) and must not be reported as the first-ready ratio.  When no
+    record matches, the first record is kept as a conservative fallback.
+
+    Values are read dynamically and never hard-coded (the 73/200 and 121/200
+    figures in AGENTS.md are Day-14 examples, not constants).
     """
     coverage = dict(prepared.coverage or {})
     financial_coverage = coverage.get("financial_coverage", {})
-    first_record = None
-    if isinstance(financial_coverage, Mapping):
-        records = financial_coverage.get("records")
-        if isinstance(records, list) and records and isinstance(records[0], Mapping):
-            first_record = records[0]
     readiness = coverage.get("rebalance_readiness", {})
     first_ready = readiness.get("first_ready_rebalance")
     first_ready = first_ready if isinstance(first_ready, Mapping) else None
+
+    records: list[Mapping[str, Any]] = []
+    if isinstance(financial_coverage, Mapping):
+        raw_records = financial_coverage.get("records")
+        if isinstance(raw_records, list):
+            records = [
+                record for record in raw_records if isinstance(record, Mapping)
+            ]
+
+    first_record = None
+    if records:
+        ready_scheduled_date = (
+            first_ready.get("scheduled_date") if first_ready else None
+        )
+        if ready_scheduled_date is not None:
+            first_record = next(
+                (
+                    record
+                    for record in records
+                    if _coverage_date_key(record.get("scheduled_date"))
+                    == _coverage_date_key(ready_scheduled_date)
+                ),
+                None,
+            )
+        if first_record is None:
+            first_record = records[0]
 
     six_fact_ratio: float | None = None
     six_fact_count: int | None = None
@@ -3037,6 +3089,15 @@ def _save_true_walkforward_artifacts(
     coverage_summary: dict[str, Any] | None = None
     if classification == VALIDATED_EXPANDING_WALK_FORWARD_PIT:
         coverage_summary = _true_walkforward_coverage_summary(prepared)
+        # A validated manifest must not retain the mechanical-only disclaimer:
+        # it directly contradicts the validated claim.  The measured coverage
+        # lines are added below alongside a validated-specific statement.
+        limitations = [
+            item
+            for item in limitations
+            if not _is_mechanical_only_limitation(item)
+        ]
+        limitations.insert(0, _TRUE_WALKFORWARD_VALIDATED_LIMITATION)
         limitations.extend(_true_walkforward_validated_limitations(prepared))
     manifest.update({
         "command": "true-walkforward",
