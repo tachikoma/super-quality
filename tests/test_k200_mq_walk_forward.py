@@ -54,10 +54,25 @@ def test_fold_spec_rejects_datetime_boundaries_and_serializes_dates() -> None:
 def test_candidate_library_is_versioned_and_conservative() -> None:
     ids = [candidate.candidate_id for candidate in DEFAULT_CANDIDATE_LIBRARY]
 
-    assert ids == ["BASE", "TOP_N_10", "TOP_N_30", "REGIME_OFF"]
-    assert all(candidate.library_version for candidate in DEFAULT_CANDIDATE_LIBRARY)
+    assert ids == ["BASE", "MOM60", "MOM70", "TOP_N_10", "TOP_N_30", "REGIME_OFF"]
+    assert all(
+        candidate.library_version == "k200mq-wf-candidates-v3"
+        for candidate in DEFAULT_CANDIDATE_LIBRARY
+    )
     assert all("MAX_HOLDINGS" not in candidate.parameters for candidate in DEFAULT_CANDIDATE_LIBRARY)
     assert all("QUALITY_WEIGHT_ROE" not in candidate.parameters for candidate in DEFAULT_CANDIDATE_LIBRARY)
+    # The weight-axis candidates carry runtime-safe momentum/quality overrides
+    # so the train pass can select them instead of post-hoc sensitivity search.
+    weights = {
+        candidate.candidate_id: (
+            candidate.parameters.get("WEIGHT_MOMENTUM"),
+            candidate.parameters.get("WEIGHT_QUALITY"),
+        )
+        for candidate in DEFAULT_CANDIDATE_LIBRARY
+    }
+    assert weights["MOM60"] == (0.6, 0.4)
+    assert weights["MOM70"] == (0.7, 0.3)
+    assert weights["BASE"] == (None, None)
 
 
 def _scores(**sharpes: float) -> dict[str, dict[str, object]]:

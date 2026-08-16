@@ -30,7 +30,7 @@ VALIDATED_EXPANDING_WALK_FORWARD_PIT = "validated_expanding_walk_forward_pit"
 mechanical_expanding_walk_forward_non_pit = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
 validated_expanding_walk_forward_pit = VALIDATED_EXPANDING_WALK_FORWARD_PIT
 
-CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v2"
+CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v3"
 DEFAULT_MIN_EXITS = 5
 DEFAULT_TIE_TOLERANCE = 0.05
 OBJECTIVE_TRAIN_SHARPE = "train_sharpe"
@@ -193,6 +193,27 @@ BASE_CANDIDATE = CandidateSpec(
 
 DEFAULT_CANDIDATE_LIBRARY: tuple[CandidateSpec, ...] = (
     BASE_CANDIDATE,
+    # Momentum/quality weight-axis snapshots.  BASE is the 0.5/0.5 midpoint;
+    # MOM60 and MOM70 let the train pass select a momentum-leaning weight
+    # instead of leaving it to post-hoc sensitivity search.
+    CandidateSpec(
+        "MOM60",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "WEIGHT_MOMENTUM": 0.6,
+            "WEIGHT_QUALITY": 0.4,
+        },
+    ),
+    CandidateSpec(
+        "MOM70",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "WEIGHT_MOMENTUM": 0.7,
+            "WEIGHT_QUALITY": 0.3,
+        },
+    ),
     CandidateSpec("TOP_N_10", {"TOP_N": 10, "REGIME_FILTER_ENABLED": True}),
     CandidateSpec("TOP_N_30", {"TOP_N": 30, "REGIME_FILTER_ENABLED": True}),
     CandidateSpec("REGIME_OFF", {"TOP_N": 20, "REGIME_FILTER_ENABLED": False}),
