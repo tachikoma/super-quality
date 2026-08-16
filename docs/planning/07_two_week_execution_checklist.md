@@ -613,3 +613,41 @@
   (proxy/PIT 공통), ② 손절은 MDD 방어에 유효 (proxy/PIT 공통), ③ ADV 필터는
   PIT 유니버스에서 실행 불가 — 상장폐지 종목 mcap 보강 또는 ADV 커버리지
   정책(fail-open/제외) 필요.
+
+## Day 18 — classification 승격 구현·검증 (2026-08-17)
+
+- **승격 구현 (커밋 `5b45211`, Oracle 스펙 A/B/C/D)**:
+  - `filing_date_used` 하드 증명: `_convert_financial_to_daily`가
+    `filing_date_mapped_rows`/`quarter_end_fallback_rows` 실측 카운트 →
+    attrs 및 `PreparedK200MQInputs.financial_filing_date_mapped_row_count`
+    전달. strict preflight는 측정 카운트 사용(레거시 None이면 기존
+    `has_usable_filing_dates` 폴백).
+  - guard 완화: `walk_forward.py:579` deferral raise 제거,
+    `select_candidate`에 `pit_valid_evidence` 요구(문자열 단독 승격 불가
+    불변식 유지), `runner.py`는 Mapping `pit_valid_context`만 수용·
+    스레딩·freeze.
+  - adapter(`main.py:3094-3142`): strict preflight 후 유니버스/재무 validator
+    재실행 → `strict_pit && universe_ok && financial_ok`일 때만 validated,
+    invalid 결과는 아티팩트 저장 전 차단(누수 가드).
+  - ADV 필터: 커버리지 누락 티커(상장폐지 mcap=0)는 경고+제외로 진행
+    (None 맵은 여전히 fail-closed) — Day 15 PIT 실패 해소.
+- **증거 품질 수정 (커밋 `4da34ad`)**: coverage_summary가 `records[0]`
+  (2015-01-30, 0/200) 대신 `first_ready_rebalance.scheduled_date` 매칭
+  record(2015-05-29, 73/200=36.5%) 사용; validated limitations에서
+  "Mechanical non-PIT" 문구 제거 → validated 문구 + 실측 커버리지 명시.
+- **Day 18 검증 (`outputs_k200mq_day18_validation_check_v2`)**:
+  - 최초로 **classification=`validated_expanding_walk_forward_pit`** 승격.
+    valid=True, 5/5 폴드, OOS 1,231점, preflight 실패 0건.
+  - coverage_summary: `{"first_rebalance": {"six_fact_ratio": 0.365,
+    "momentum_ratio": 0.605}}` (73/200, 121/200 실측).
+  - claim: "validated PIT walk-forward; universe + financial provenance
+    validators passed". limitations: validated 문구 + 실측 커버리지
+    (36.5%/60.5%) 명시 — "Mechanical non-PIT" 잔존 없음.
+  - stitched OOS **+20.55%**, Day 14와 폴드별 완전 동일 — 승격 코드가 성과
+    로직에 영향 없음 (라벨 정직성 개선).
+- **scorecard**: `08_go_no_go_scorecard_2026-08-16.md` **Hold** — 데이터
+  게이트 완성, 성과 게이트 미달(OOS CAGR/Sharpe/Calmar 기준 이하, 2020
+  서브기간 편중). classification 승격은 판정 변경이 아님.
+- **Next priority**: ① 성과 게이트 미달 구간 분석 (모멘텀 가중 0.7/0.3
+  승격 후 재검증 — Day 16 +53.23% 신호), ② ADV 필터 PIT 유니버스 재실행
+  (수정 반영), ③ PIT 기준 재무 커버리지 개선 (73/200 = 36.5%).

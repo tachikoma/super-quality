@@ -99,13 +99,13 @@
 |------|-----------|
 | 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, 테스트가 구현됨. |
 | 기계적 비-PIT 진단 | `robustness` 독립 하위 기간 테스트와 expanding-window `true-walkforward`를 사용할 수 있음. |
-| 검증된 PIT 근거 | 아직 없음. strict preflight는 통과했으나 분류는 여전히 `mechanical_expanding_walk_forward_non_pit`. 승격은 하드코딩 제거 + 증거 프록시 2건 해소 후 adapter에서 결정. |
+| 검증된 PIT 근거 | **classification 승격 달성 (2026-08-17, Day 18)**: `validated_expanding_walk_forward_pit` 최초 산출. 유니버스 PIT + 재무 PIT validator 통과 + 5/5 fold valid + `filing_date_used` 하드 증명. coverage_summary에 실측 커버리지(36.5%/60.5%) 명시. |
 | 유니버스 PIT | **달성 (2026-08-16)**: `data/universe/kospi200_bundle_pit/` — pykrx KRX 공식 역사 구성원 120개 as-of, 전 as-of `pit_valid=true`. |
 | 재무 PIT | 달성: `dart_aggregated_day4_extended_fy2014/` (FY2014 XBRL 병합), `pit_filing_date` + `pit_valid=true`. |
-| 현재 공식 진단 | Day 14 strict WF (PIT 유니버스, 2020-2024): stitched **+20.55%** (proxy +44.15% 대비 -23.6%p, 생존자 편향 제거 효과). 5/5 valid, OOS 1,231점. 첫 리밸런스 momentum 121/200, six-fact 73/200 (36.5%). 분류는 `mechanical_expanding_walk_forward_non_pit`. |
-| 파라미터 진단 | proxy: ADV -1.37% / mom0.7 +71.42% / no-SL +117%(MDD↑). PIT: mom0.7 **+53.23%** / no-SL +35.85%(MDD↑) / ADV 실행 불가(상장폐지 mcap=0). 모두 기계적 진단. |
+| 현재 공식 진단 | Day 18 strict WF (PIT 유니버스, 2020-2024): **classification=`validated_expanding_walk_forward_pit`**, stitched **+20.55%** (Day 14와 동일 — 승격은 라벨 정직성 개선). 5/5 valid, OOS 1,231점. 첫 리밸런스 momentum 121/200 (60.5%), six-fact 73/200 (36.5%) — limitations에 명시. |
+| 파라미터 진단 | proxy: ADV -1.37% / mom0.7 +71.42% / no-SL +117%(MDD↑). PIT: mom0.7 **+53.23%** / no-SL +35.85%(MDD↑) / ADV 필터 수정 후 재실행 대기(상장폐지 mcap=0 제외 정책). 모두 기계적 진단. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | classification 승격 전제조건 2건 (filing_date_used 하드 증명, quality 커버리지 게이트/명시 한계) 해소 후 adapter에서 validator 결과로 classification 결정. ADV 필터 상장폐지 mcap 보강 또는 커버리지 정책. |
+| 다음 게이트 | ① scorecard 성과 게이트 미달 구간 분석 (모멘텀 가중 0.7/0.3 승격 후 재검증), ② ADV 필터 PIT 유니버스 재실행, ③ PIT 기준 재무 커버리지 개선 (73/200 = 36.5%). |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
@@ -314,30 +314,33 @@ DART_API_KEY="" uv run python -m k200_mq.main true-walkforward \
 
 ## 검증된 PIT 근거
 
-**검증된 PIT 성과 근거는 아직 없습니다.** Day 14 strict 실행(PIT 유니버스 +
-FY2014 병합 DART)은 strict preflight(유니버스 전 as-of `pit_valid=true` + financial
-`pit_filing_date`)를 통과하고 5/5 폴드 valid를 달성했지만, 분류는 여전히
-`mechanical_expanding_walk_forward_non_pit`으로 유지된다.
+**classification 승격 달성 (2026-08-17, Day 18).** Day 18 strict 실행
+(`outputs_k200mq_day18_validation_check_v2`, PIT 유니버스 + FY2014 병합 DART)이
+**`validated_expanding_walk_forward_pit`** 분류를 최초로 산출했다. 승격 조건:
+strict_pit + 유니버스 validator 통과(전 as-of `pit_valid=true`) + 재무 validator
+통과(`pit_filing_date`, `filing_date_used` 하드 증명) + 5/5 폴드 valid.
 
-현재 `true-walkforward` 경로는 `validated_expanding_walk_forward_pit`로 표시할 수
-없습니다. 승격 차단 (2026-08-16 Oracle 검토로 확정):
-- **하드코딩**: `main.py:3117` (`run_walk_forward(classification=MECHANICAL...)`),
-  `main.py:2885,2986` (매니페스트 classification/claim 덮어씀), `main.py:3145`
-  (로그 문구), `walk_forward.py:39-49` (`classify_walk_forward_result` 무조건
-  MECHANICAL), `walk_forward.py:579-582` + `runner.py:781-786,837-841,1207`
-  (deferral guard, `pit_valid_context=None` 고정).
-- **증거 프록시 2건** (승격 전 반드시 해소):
-  1. `filing_date_used`가 엔진 소비 증명이 아닌 자기참조 프록시
-     (`prepared.py:121`, `main.py:919,1029-1031` — `has_usable_filing_dates(data)`).
-  2. quality 6-fact 부분 커버리지(`partial_allowed_fill_missing_with_zero`)가
-     PIT 유효성에 미포함 — "validated PIT"가 완전 커버리지를 함의하면 과장.
-- **이미 wiring된 validator**: `_validate_prepared_pit_provenance`
-  (`validation/prepared.py:81-134`)가 strict preflight(`main.py:3057-3061`)과
-  strict interval마다(`prepared.py:618-620`) 유니버스/재무 검증 실행 — Day 14에서
-  모두 통과. 승격은 이 validator 결과를 adapter에서 classification 문자열로
-  승격하는 배선만 남음.
+승격 구현 (커밋 `5b45211`, `4da34ad`; Oracle 스펙 A/B/C/D):
+- **`filing_date_used` 하드 증명**: `_convert_financial_to_daily`가
+  `filing_date_mapped_rows`/`quarter_end_fallback_rows` 실측 카운트 →
+  attrs + `PreparedK200MQInputs.financial_filing_date_mapped_row_count`.
+  strict preflight는 측정 카운트 사용(레거시 None은 기존 proxy 폴백).
+- **guard 완화**: `walk_forward.py:579` deferral raise 제거, `select_candidate`에
+  `pit_valid_evidence` 요구(문자열 단독 승격 불가 불변식 유지), `runner.py`는
+  Mapping `pit_valid_context`만 수용·스레딩·freeze.
+- **adapter**: strict preflight 후 유니버스/재무 validator 재실행 →
+  `strict_pit && universe_ok && financial_ok`일 때만 validated, invalid 결과는
+  아티팩트 저장 전 차단(누수 가드).
+- **커버리지 명시**: validated 매니페스트에 `coverage_summary`
+  (`six_fact_ratio 0.365`, `momentum_ratio 0.605`) + limitations 실측 문구
+  ("Mechanical non-PIT" 잔존 없음).
+- **ADV 필터** (동반 수정): 커버리지 누락 티커(상장폐지 mcap=0)는 경고+제외,
+  None 맵은 fail-closed 유지 — Day 15 PIT 실패 해소.
 - PIT 민감도(proxy/PIT), 생존자 편향 비교(Day 14), ADV 영향(proxy 성공/PIT
-  실행 불가), 스트레스 테스트(proxy/PIT)는 Day 11-17에서 기계적 진단으로 실행됨.
+  재실행 대기), 스트레스 테스트(proxy/PIT)는 Day 11-17에서 기계적 진단으로 실행됨.
+- **scorecard (2026-08-16)**: **Hold** — classification 승격은 라벨 정직성
+  개선이지 성과 판정 변경이 아님. 성과 게이트(OOS CAGR/Sharpe/Calmar) 미달은
+  별도 분석 대상.
 
 strict 모드 `true-walkforward`는 더 이상 옵션 자체를 사전 거부하지 않습니다.
 대신 실행 전 prepared 입력의 유니버스/재무 provenance를 strict preflight로
@@ -396,11 +399,19 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
    손절 MDD 방어 유효(양쪽 공통), ADV 필터는 proxy에서 성과 악화 / PIT에서
    실행 불가(상장폐지 mcap=0 fail-closed), 생존자 편향 정량화(Day 14: proxy
    ~46% 상이, stitched -23.6%p).
-5. **classification 승격 (다음 게이트)**: 전제조건 2건 해소 — ① `filing_date_used`
+5. ~~**classification 승격**: 전제조건 2건 해소 — ① `filing_date_used`
    엔진 소비 하드 증명, ② quality 6-fact 커버리지 게이트/명시 한계 — 후
    adapter(`main.py:3094-3124`)에서 실제 validator 결과로 classification 결정,
    deferral guard(`walk_forward.py:579`, `runner.py:781,837`) 제거,
-   `pit_valid_context` 스레딩, 매니페스트/로그 하드코딩 제거.
+   `pit_valid_context` 스레딩, 매니페스트/로그 하드코딩 제거.~~
+   **해소됨 (2026-08-17)**: 커밋 `5b45211` + `4da34ad`. Day 18 strict WF
+   (`outputs_k200mq_day18_validation_check_v2`)에서 최초
+   `validated_expanding_walk_forward_pit` 산출 (coverage_summary 0.365/0.605,
+   limitations에 실측 커버리지 명시, "Mechanical non-PIT" 잔존 없음).
+6. **성과 게이트 미달 분석 (다음 게이트)**: scorecard 2026-08-16 **Hold** —
+   OOS CAGR/Sharpe/Calmar 기준 미달 + 2020 서브기간 편중. 모멘텀 가중
+   0.7/0.3(Day 16 +53.23%) 승격 후 재검증, ADV 필터 PIT 재실행, PIT 기준
+   재무 커버리지 개선(73/200 = 36.5%).
 
 이 단계가 완료될 때까지 출력 수치는 기계적 진단으로만 취급합니다. (Day 14 실행은 strict
 preflight(유니버스 전 as-of `pit_valid=true` + financial `pit_filing_date`)를 통과하고
