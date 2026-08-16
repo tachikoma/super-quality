@@ -215,7 +215,7 @@ ruff check
   (`outputs_k200mq_day12_sensitivity_mom70`) +71.42% — 개선 신호. ③ 손절 비활성
   (`outputs_k200mq_day13_stress_nostop`) +117.00%지만 2020 MDD -37.4% 급증 —
   손절이 MDD 방어에 유효. 모두 기계적 non-PIT 진단.
-- **유니버스 PIT화 + Day 14 (커밋 `e59f483` 이후)**: pykrx
+- **유니버스 PIT화 + Day 14 (커밋 `b2740ee`)**: pykrx
   `get_index_portfolio_deposit_file`(KRX 공식, 과거 날짜 지원)로 120개 as-of
   실제 구성원 fetch → `data/universe/kospi200_bundle_pit/` (323 유니크 티커,
   스냅샷 200~202). 가격 캐시에 없던 155개 티커 백필 (0 missing).
@@ -226,6 +226,15 @@ ruff check
   (proxy +44.15% 대비 -23.6%p — 생존자 편향 제거로 하향). classification은
   `mechanical_expanding_walk_forward_non_pit` 유지 (`walk_forward.py:579-582`가
   validated 승격을 provenance validators wiring 전까지 명시적 거부).
-- **Next priority**: ① classification 승격용 provenance validator wiring 검토,
-  ② PIT 유니버스 기준 민감도/스트레스 재실행, ③ PIT 유니버스 기준 DART 재무
-  커버리지 재점검.
+- **Classification 승격 검토 (Oracle, `docs/planning/07_*` 기록)**: validator
+  wiring은 이미 완료·통과 중 (`_validate_prepared_pit_provenance`가 strict
+  preflight + interval마다 유니버스/재무 검증). 차단은 하드코딩
+  (`main.py:3117,2885,2986,3145` + `walk_forward.py:39-49,579`)와 증거 프록시
+  2건 — ① `filing_date_used`가 엔진 소비 증명이 아닌 자기참조 프록시,
+  ② quality 6-fact 부분 커버리지가 PIT 유효성에 미포함. 두 전제조건을 닫고
+  adapter에서 실제 validator 결과로 classification을 결정해야 승격 가능.
+- **Next priority**: ① classification 승격 전제조건 2건 해소 (filing_date_used
+  하드 증명, quality 커버리지 게이트/명시 한계), ② PIT 유니버스 기준
+  민감도/스트레스 재실행 (Day 15-17, `scripts/run_day15_17_pit_diagnostics.sh`),
+  ③ PIT 유니버스 기준 DART 재무 커버리지 재점검 (Day 14: 첫 리밸런스 73/200 =
+  36.5%, proxy 대비 하향).

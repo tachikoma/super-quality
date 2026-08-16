@@ -543,3 +543,42 @@
 - 남은 작업: ① classification 승격을 위한 provenance validator wiring 검토,
   ② PIT 유니버스 기준 PIT 민감도/스트레스 재실행(현재 파라미터 진단은 proxy
   기준), ③ DART 재무 커버리지 PIT 유니버스 기준 재점검.
+
+## Classification 승격 검토 (2026-08-16, Oracle)
+
+- **결론: validator wiring은 이미 완료되어 있고 Day 14 strict WF에서 통과함.
+  승격 차단은 코드 하드코딩 + 증거 프록시 2건이며, 전제조건을 닫기 전까지
+  무조건 승격은 안전하지 않음.**
+- 현재 하드코딩 지점:
+  - `main.py:3117` `run_walk_forward(classification=MECHANICAL...)` — 핵심 결정점.
+  - `main.py:2885, 2986` 매니페스트 classification/claim 하드코딩
+    (`_save_true_walkforward_artifacts`가 `result.classification`을 덮어씀).
+  - `main.py:3145` 완료 로그 문구.
+  - `walk_forward.py:39-49` `classify_walk_forward_result`가 무조건 MECHANICAL 반환.
+  - `walk_forward.py:579-582`, `runner.py:781-786, 837-841, 1207` deferral guard +
+    `pit_valid_context=None` 고정.
+- **이미 wiring된 validator** (승격에 필요한 검증은 존재·통과 중):
+  - 유니버스: `validate_universe_provenance`/`is_pit_valid_universe`
+    (`data/provenance.py:451-635`) — KRX 검증 매니페스트 체인, Day 14 전 as-of
+    `pit_valid=true`.
+  - 재무: `validate_financial_provenance`/`is_pit_valid_financial_data`
+    (`data/provenance.py:1037,1134`) — filing/publication 계약 + `filing_date_used`.
+  - 실전 호출: `_validate_prepared_pit_provenance` (`validation/prepared.py:81-134`)가
+    strict preflight(`main.py:3057-3061`)과 strict interval마다
+    (`prepared.py:618-620`) 실행.
+- **승격 전 반드시 닫을 전제조건 2건**:
+  1. `filing_date_used`가 증명이 아니라 프록시 — `prepared.py:121`,
+     `main.py:919,1029-1031`에서 `has_usable_filing_dates(data)`로 자기참조.
+     엔진이 filing date를 실제로 소비했다는 hard assertion으로 대체 필요
+     (`_convert_financial_to_daily` 경유 연결은 실질적이지만 validator 플래그가
+     소비를 보증하지 않음).
+  2. quality 6-fact 부분 커버리지(`partial_allowed_fill_missing_with_zero`)가
+     PIT 유효성에 포함 안 됨 — "validated PIT"가 완전 커버리지를 함의하면 과장.
+     커버리지 게이트 추가 또는 매니페스트에 잔여 한계로 명시.
+- **승격 시 최소 변경 (1-5)**: ① adapter가 실제 validator 결과로 classification
+  결정 (`main.py:3094-3124`, `VALIDATED...` import 추가), ② deferral guard 제거
+  (stamping은 runner/adapter 계층에서), ③ `pit_valid_context` 스레딩
+  (`runner.py:837-841,1207`), ④ 매니페스트/로그가 `result.classification` 사용,
+  ⑤ `classify_walk_forward_result`는 pure core 유지(증거 기반 승격은 adapter에서).
+- momentum warmup 갭은 PIT와 무관해 승격을 막지 않으나, 완전 커버리지로
+  오독되지 않게 문서화 필요. `EXCLUDE_KOSPI_TOP_N>0`은 strict가 이미 차단.
