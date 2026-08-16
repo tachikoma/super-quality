@@ -582,3 +582,34 @@
   ⑤ `classify_walk_forward_result`는 pure core 유지(증거 기반 승격은 adapter에서).
 - momentum warmup 갭은 PIT와 무관해 승격을 막지 않으나, 완전 커버리지로
   오독되지 않게 문서화 필요. `EXCLUDE_KOSPI_TOP_N>0`은 strict가 이미 차단.
+
+## Day 15-17 — PIT 유니버스 기준 파라미터 진단 (2026-08-16)
+
+- 실행기: `scripts/run_day15_17_pit_diagnostics.sh` — Day 14와 동일한 PIT
+  유니버스 + FY2014 병합 DART 입력, 환경 변수로 단일 설정만 변경.
+- **Day 15 — ADV 필터 (`outputs_k200mq_day15_pit_adv_filter`): 실행 실패**
+  - 5/5 폴드 `invalid_train_selection`, 전 후보 `train_engine_error` (n_exits=0).
+  - 근본 원인 (재현 확인): PIT 유니버스 2015-01-30 구성원 200개 중 16개
+    상장폐지 종목(000030, 000830, 002270 등)이 가격 캐시에서 **mcap=0**
+    (KRX 상장폐지 데이터는 시가총액 미제공) → `_build_adv_ratio_map`
+    (`portfolio_engine.py:435-483`)이 `mcap>0` 조건으로 제외 →
+    `_apply_adv_filter`(`momentum_quality.py:142-170`)가 fail-closed
+    RuntimeError("requires ADV turnover coverage for all eligible tickers") →
+    엔진 예외로 기록.
+  - Day 11(proxy+ADV)이 성공한 이유: proxy 유니버스에는 상장폐지 종목이
+    없어 전 티커의 mcap>0이 보장됨. PIT 유니버스에서는 ADV 필터가
+    fail-closed라 실행 불가 — 유동성 필터에 상장폐지 종목의 가격 데이터
+    mcap 보강 또는 ADV 커버리지 정책(fail-open/제외)이 필요.
+- **Day 16 — 모멘텀 가중 0.7/0.3 (`outputs_k200mq_day16_pit_sensitivity_mom70`)**:
+  - Stitched OOS **+53.23%** (Day 14 기준 +20.55% 대비 개선). 전 폴드 REGIME_OFF.
+  - 연도별: 2020 +54.7% / 2021 -10.3% / 2022 -8.2% / 2023 +4.2% / 2024 +15.4%.
+  - proxy 기준(Day 12: +71.42% vs Day 10: +44.15%)과 동일한 방향 — 모멘텀 가중
+    상향이 PIT 유니버스에서도 개선 신호.
+- **Day 17 — 손절 비활성 (`outputs_k200mq_day17_pit_stress_nostop`)**:
+  - Stitched OOS **+35.85%** (Day 14 대비 +15.3%p)지만 2020 MDD -37.9%로 급증
+    (손절 활성 Day 14: -20.8%) — 손절이 MDD 방어에 기여함을 PIT 유니버스에서도 확인.
+  - 연도별: 2020 +40.5% / 2021 -13.2% / 2022 -12.1% / 2023 +6.2% / 2024 +19.2%.
+- 종합 (PIT 유니버스, 기계적 non-PIT 진단): ① 모멘텀 가중 상향 개선 신호
+  (proxy/PIT 공통), ② 손절은 MDD 방어에 유효 (proxy/PIT 공통), ③ ADV 필터는
+  PIT 유니버스에서 실행 불가 — 상장폐지 종목 mcap 보강 또는 ADV 커버리지
+  정책(fail-open/제외) 필요.

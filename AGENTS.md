@@ -238,3 +238,18 @@ ruff check
   민감도/스트레스 재실행 (Day 15-17, `scripts/run_day15_17_pit_diagnostics.sh`),
   ③ PIT 유니버스 기준 DART 재무 커버리지 재점검 (Day 14: 첫 리밸런스 73/200 =
   36.5%, proxy 대비 하향).
+- **Day 15-17 PIT 유니버스 진단 (커밋 `57efeec` 이후)**: ① Day 15 ADV 필터
+  (`outputs_k200mq_day15_pit_adv_filter`) — 5/5 폴드 실패. 원인: PIT 유니버스
+  상장폐지 종목 16개(000030 등)가 가격 캐시에서 mcap=0 (KRX 상장폐지 데이터는
+  시가총액 미제공) → `_build_adv_ratio_map`이 제외 → `_apply_adv_filter`가
+  fail-closed RuntimeError. proxy 유니버스(Day 11)는 상장폐지가 없어 통과했음.
+  ADV 필터는 상장폐지 mcap 보강 또는 커버리지 정책(fail-open/제외) 필요.
+  ② Day 16 모멘텀 0.7/0.3 (`outputs_k200mq_day16_pit_sensitivity_mom70`)
+  stitched **+53.23%** (Day 14 +20.55% 대비 개선, proxy와 같은 방향).
+  ③ Day 17 손절 비활성 (`outputs_k200mq_day17_pit_stress_nostop`) **+35.85%**
+  이나 2020 MDD -37.9% 급증 (손절 활성 -20.8%) — 손절 MDD 방어 PIT에서도 확인.
+- **Next priority (갱신)**: ① classification 승격 전제조건 2건 해소
+  (filing_date_used 하드 증명, quality 커버리지 게이트/명시 한계) 후 adapter에서
+  실제 validator 결과로 classification 결정, ② ADV 필터 상장폐지 mcap 보강
+  또는 커버리지 정책 정리, ③ PIT 유니버스 기준 DART 재무 커버리지 재점검
+  (첫 리밸런스 73/200 = 36.5%).
