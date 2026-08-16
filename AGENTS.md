@@ -202,3 +202,30 @@ ruff check
   유니버스 proxy (B/C 44개)는 역사적 KOSPI 200 구성원 데이터로만 해결.
 - **Next priority**: momentum warmup/readiness 검토 → PIT 민감도, 생존자 편향
   비교, ADV 영향, 스트레스 테스트. classification 승격 전제: 유니버스 PIT화.
+
+## TASK LOG — 2026-08-16
+
+- **Momentum readiness 검토 (커밋 `b9ad9c1`)**: 첫 리밸런스(2015-05-29)
+  momentum_z 147/198의 missing 51개 = 47개(2015-05-29 이후 첫 가격일, 상장 전)
+  + 4개(2014년 하반기 상장 warmup 부족). 가격 데이터 수집 누락 0건 —
+  전부 유니버스 proxy 특성. 갭은 유니버스 PIT화로만 해소.
+- **Day 11-13 파라미터 진단 (커밋 `0f0f1b7`)**: ① ADV 필터
+  (`outputs_k200mq_day11_adv_filter`) stitched -1.37% — 필터가 후보 풀을 축소해
+  분산 붕괴, 임계값 재검토 필요. ② 모멘텀 가중 0.7/0.3
+  (`outputs_k200mq_day12_sensitivity_mom70`) +71.42% — 개선 신호. ③ 손절 비활성
+  (`outputs_k200mq_day13_stress_nostop`) +117.00%지만 2020 MDD -37.4% 급증 —
+  손절이 MDD 방어에 유효. 모두 기계적 non-PIT 진단.
+- **유니버스 PIT화 + Day 14 (커밋 `e59f483` 이후)**: pykrx
+  `get_index_portfolio_deposit_file`(KRX 공식, 과거 날짜 지원)로 120개 as-of
+  실제 구성원 fetch → `data/universe/kospi200_bundle_pit/` (323 유니크 티커,
+  스냅샷 200~202). 가격 캐시에 없던 155개 티커 백필 (0 missing).
+  생존자 편향 정량화: 2015-05-29 기준 proxy와 일치 108 / proxy-only 90 /
+  pit-only 92 — proxy 구성원 ~46%가 역사 구성원과 다름.
+  Day 14 strict WF (`outputs_k200mq_day14_strict_pit_universe`): 유니버스
+  전 as-of `pit_valid=true` (최초), 5/5 폴드 valid, stitched **+20.55%**
+  (proxy +44.15% 대비 -23.6%p — 생존자 편향 제거로 하향). classification은
+  `mechanical_expanding_walk_forward_non_pit` 유지 (`walk_forward.py:579-582`가
+  validated 승격을 provenance validators wiring 전까지 명시적 거부).
+- **Next priority**: ① classification 승격용 provenance validator wiring 검토,
+  ② PIT 유니버스 기준 민감도/스트레스 재실행, ③ PIT 유니버스 기준 DART 재무
+  커버리지 재점검.

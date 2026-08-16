@@ -501,3 +501,45 @@
   방어에 유효. 어느 것도 검증된 성과 주장이 아니며 유니버스 PIT화 전에는
   민감도 결론으로 사용하지 않음.
 - 남은 게이트: 생존자 편향 비교(역사 구성원 필요), 유니버스 PIT화 후 최종 재검증.
+
+## Day 14 — 유니버스 PIT화 + 생존자 편향 비교 (2026-08-16)
+
+- 배경: momentum readiness 검토(커밋 `b9ad9c1`)에서 갭 51개 전부가 유니버스
+  proxy 특성임을 확정. classification 승격의 유일한 데이터 게이트인 유니버스
+  PIT화를 진행.
+- 역사적 KOSPI 200 구성원 수집:
+  - `scripts/fetch_kospi200_pit_snapshots.py` (신규): pykrx
+    `get_index_portfolio_deposit_file`(KRX 공식, 과거 날짜 지원, KRX_ID/KRX_PW
+    필요 — .env 보유)로 120개 as-of 날짜(2015-01-30 ~ 2024-12-31)의 실제
+    구성원을 fetch → `data/universe/kospi200_bundle_pit_src/kospi200_*.parquet`
+    (323 유니크 티커, 스냅샷 크기 200~202).
+  - `scripts/build_local_pit_universe_bundle.py --source-is-krx`로
+    `data/universe/kospi200_bundle_pit/` 번들 빌드 (120개 per-date CSV + sidecar
+    manifest + bundle.manifest.json).
+- 가격 데이터 보강: PIT 유니버스 323개 중 가격 캐시에 없던 155개 티커를
+  loader `get_price_data`로 백필 (2014-2024 전체 기간, 상장폐지 포함 0 missing
+  확인). 2014 캐시도 323개 티커로 확장.
+- 생존자 편향 정량화 (proxy vs PIT):
+  - 2015-05-29 기준: proxy 198 vs PIT 200, **일치 108 / proxy-only 90 /
+    pit-only 92** — proxy 구성원의 ~46%가 실제 역사 구성원과 다름.
+  - PIT 323 유니크 vs proxy 198 (proxy는 전 기간 동일 구성원 고정).
+  - pit-only 92개는 상장폐지·편출 종목(예: 000030, 000070, 000080) — proxy가
+    생존자 편향을 내포함을 확인.
+- Day 14 strict WF (`outputs_k200mq_day14_strict_pit_universe`, PIT 유니버스 +
+  FY2014 병합 DART):
+  - 유니버스 provenance: 전 as-of `pit_valid=true`, `provenance=pit` (최초).
+  - 5/5 폴드 valid, OOS 1,231점, preflight 실패 0건.
+  - 첫 리밸런스 2015-05-29: momentum 121/200 usable (79 missing) — PIT
+    구성원의 상장 시점 분산 반영. `quality_required=false`.
+  - Stitched OOS **+20.55%**: 2020 +50.7% / 2021 -14.3% / 2022 -14.3% /
+    2023 +1.6% / 2024 +7.2%. 전 폴드 REGIME_OFF 선택.
+  - **proxy(+44.15%) 대비 -23.6%p** — 생존자 편향 제거가 성과를 하향
+    조정. proxy 유니버스는 편출·상장폐지 종목의 부진을 반영하지 않아 성과를
+    과대 추정했음.
+- classification: 여전히 `mechanical_expanding_walk_forward_non_pit` —
+  `walk_forward.py:579-582`가 `validated_expanding_walk_forward_pit`를
+  "provenance validators wiring" 전까지 명시적으로 거부. 유니버스 PIT화(데이터
+  게이트)는 달성됐으나 코드 레벨 승격은 별도 작업 필요.
+- 남은 작업: ① classification 승격을 위한 provenance validator wiring 검토,
+  ② PIT 유니버스 기준 PIT 민감도/스트레스 재실행(현재 파라미터 진단은 proxy
+  기준), ③ DART 재무 커버리지 PIT 유니버스 기준 재점검.
