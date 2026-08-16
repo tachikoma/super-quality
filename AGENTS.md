@@ -287,3 +287,20 @@ ruff check
   0.7/0.3 승격 후 재검증 — Day 16 +53.23% 신호), ② ADV 필터 PIT 유니버스
   재실행 (Day 15 수정 후, `outputs_k200mq_day15_pit_adv_filter` 재실행),
   ③ PIT 유니버스 기준 재무 커버리지 개선 (첫 리밸런스 73/200 = 36.5%).
+
+## TASK LOG — 2026-08-17 (cont., Day 19-20 승격 후 검증)
+
+- **Day 19 — ADV 필터 재실행 (`outputs_k200mq_day19_pit_adv_rerun`)**:
+  classification=`validated_expanding_walk_forward_pit`, valid=True, 5/5 폴드 —
+  ADV 커버리지 정책 수정(fix-2, 커밋 `5b45211`)이 Day 15 실패를 해소 (누락
+  티커 경고+제외, 예: 000030/002270/003410). Stitched **-22.74%** (2020 +45.4%
+  / 2021 -10.9% / 2022 -3.9% / 2023 -13.6% / 2024 -28.2%, 전 폴드 TOP_N_10).
+  ADV 필터는 PIT에서도 성과를 크게 악화 — 커버리지 누락으로 후보 풀 축소,
+  분산 붕괴. 임계값 재설계 또는 비활성 유지 권장.
+- **Day 20 — 모멘텀 0.7/0.3 승격 후 검증 (`outputs_k200mq_day20_validated_mom70`)**:
+  classification=`validated_expanding_walk_forward_pit`, valid=True, 5/5 폴드.
+  Stitched **+53.23%**, Day 16(mechanical)와 폴드별 완전 동일 — 승격 코드가
+  성과에 영향 없음 재확인. coverage_summary 0.365/0.605.
+- **Next priority**: ① 성과 게이트 재평가 — 모멘텀 0.7/0.3 validated에서
+  CAGR ~8.9%/Sharpe ~0.7 근접 (Day 20 +53.23%), ② ADV 필터 임계값 재설계 또는
+  비활성 유지, ③ PIT 기준 재무 커버리지 개선 (73/200 = 36.5%).

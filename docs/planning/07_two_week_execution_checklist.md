@@ -651,3 +651,27 @@
 - **Next priority**: ① 성과 게이트 미달 구간 분석 (모멘텀 가중 0.7/0.3
   승격 후 재검증 — Day 16 +53.23% 신호), ② ADV 필터 PIT 유니버스 재실행
   (수정 반영), ③ PIT 기준 재무 커버리지 개선 (73/200 = 36.5%).
+
+## Day 19-20 — 승격 후 검증 재실행 (2026-08-17)
+
+- 실행기: `scripts/run_day19_20_validated.sh` — Day 14와 동일 입력, 승격 코드
+  (커밋 `5b45211`/`4da34ad`) 반영 상태에서 파라미터 진단 재실행.
+- **Day 19 — ADV 필터 재실행 (`outputs_k200mq_day19_pit_adv_rerun`)**:
+  - classification=`validated_expanding_walk_forward_pit`, valid=True, 5/5 폴드
+    valid — **ADV 필터 커버리지 정책 수정(fix-2)이 Day 15 실패를 해소**.
+    커버리지 누락 티커(상장폐지 mcap=0, 예: 000030/002270/003410)는 경고 후
+    후보에서 제외되고 실행은 계속됨.
+  - Stitched OOS **-22.74%**: 2020 +45.4% / 2021 -10.9% / 2022 -3.9% /
+    2023 -13.6% / 2024 -28.2%. 전 폴드 TOP_N_10 선택.
+  - ADV 필터는 PIT 유니버스에서도 성과를 크게 악화 (proxy Day 11 -1.37%보다
+    심함) — 커버리지 누락으로 후보 풀이 줄어 분산 효과가 붕괴. MIN_ADV_RATIO
+    임계값 재검토 또는 필터 비활성 유지 권장.
+- **Day 20 — 모멘텀 가중 0.7/0.3 승격 후 검증 (`outputs_k200mq_day20_validated_mom70`)**:
+  - classification=`validated_expanding_walk_forward_pit`, valid=True, 5/5 폴드.
+  - Stitched OOS **+53.23%**, Day 16(mechanical)와 폴드별 완전 동일 —
+    승격 코드가 성과 로직에 영향 없음을 재확인 (라벨만 변경).
+  - coverage_summary: six_fact 0.365 (73/200), momentum 0.605 (121/200).
+  - 연도별: 2020 +54.7% / 2021 -10.3% / 2022 -8.2% / 2023 +4.2% / 2024 +15.4%.
+- 함의: ① 모멘텀 가중 0.7/0.3은 validated 라벨에서도 +53.23% — 성과 게이트
+  재평가 후보 (CAGR ~8.9%, Sharpe ~0.7 근접). ② ADV 필터는 유니버스 유형과
+  무관하게 성과 악화 — 활성화 전 임계값 재설계 필요.
