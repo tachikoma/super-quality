@@ -38,7 +38,8 @@ point 통과.
 
 | 항목 | 기준 | 현재 값 | 통과 여부 | 근거 |
 |---|---|---|---|---|
-| 파라미터 소폭 변화 내구성 | 붕괴 없음 | 모멘텀 0.6/0.4, 0.8/0.2, rebalance Q, 손절 ±0.10/0.20, 비중/현금 그리드 실행 중 (`outputs_k200mq_grid_*`) | 평가 중 | Day 21+ 그리드 결과 대기 |
+| 파라미터 소폭 변화 내구성 | 붕괴 없음 | 그리드 8개 완료: sl20(SL-20%) **+58.48%** 최고 / mom06 +37.14% / cash10 +33.18% (MDD **-22.55%** 유일 게이트 통과) / mom08 +32.33% / sl10 +13.89% / mom04 +0.40% (붕괴). 모멘텀 0.7 최적, 손절 -20% 상향 개선 | 부분 (mom04 붕괴, 0.4 가중 미지원) | `outputs_k200mq_grid_*` |
+| 파라미터 그리드 유효성 | 변형 유효 | **rebalQ 무효** — PIT 번들 import가 `requested_rebalance_dates=None`으로 개별 concat → REBALANCE_FREQ=Q 무시 (rebalQ==pos15 byte 동일=월간 기본). **pos15 무효** — 등액 5%<10% 캡 | 무효 2건 제외 | `pit_universe.py:_import_local_pit_snapshot_bundle` |
 | 서브기간 편중 | 과도 편중 없음 | 2020 한 해가 stitched 성과의 대부분 (+54.7%) | 편중 있음 | `oos_returns.csv` |
 | 샘플 불확실성 | 신뢰구간 폭 | MDD CI 폭 ~39%p, Sharpe CI 폭 ~2.05 | 통과 (기록용) | 부트스트랩 |
 
@@ -59,19 +60,23 @@ point 통과.
 - Hold: 필수 게이트 통과, 성과 컷오프 일부 미달
 - Pivot: 필수 게이트 미통과 또는 안정성 반복 실패
 
-최종 판정: **Hold (성과 게이트 미달 — MDD 구조적 한계 + 서브기간 편중)**
+최종 판정: **Hold (성과 게이트 미달 — MDD 구조적 한계 + 서브기간 편중. 단, sl20 조합이 게이트에 가장 근접)**
 
 판정 사유 (3줄 요약):
-1. 모멘텀 0.7/0.3 (Day 20, validated)이 기본 대비 전 지표 개선 (CAGR 9.13%,
-   Sharpe 0.555, MDD -31.2%, Calmar 0.293) — CAGR 게이트는 point 통과.
-2. 그러나 부트스트랩에서 MDD≥-25% 통과 확률 17.4%, Sharpe≥0.7 40.5% — 성과
-   게이트 미달은 구조적. 2020 단일 연도 편중도 지속.
-3. classification 승격·WFA 후보 확장(MOM60/70)으로 검증 인프라는 완성됨.
-   실전 적용은 자동 주문 No / paper trading 조건부 Yes — 실전 전 필수 5항목
-   (①은 완료, ②-⑤ 진행 필요).
+1. 그리드 8개 중 **sl20 (모멘텀 0.7/0.3 + SL-20%)**이 최고: stitched +58.48%,
+   CAGR 9.66% (게이트 통과), Calmar 0.340 (게이트 통과), Sharpe 0.567 (근접),
+   MDD -28.37% (근접 미달). cash10은 MDD -22.55%로 유일하게 MDD 게이트 통과
+   (성과는 +33.18%로 희생).
+2. 그러나 부트스트랩 MDD≥-25% 통과 확률 17.4% (SL-15% 기준)는 구조적 한계를
+   시사하며 SL-20%에서 재검증 필요. 2020 단일 연도 편중은 전 조합 공통 —
+   성과 게이트 완전 통과는 아직 미달.
+3. 검증 인프라 완성: classification 승격 + WFA v3 후보 라이브러리 (MOM60/70,
+   train 선택 확인) + 몬테카를로 부트스트랩 + 파라미터 그리드. rebalQ/pos15
+   변형은 PIT 번들 경로 제약으로 무효임을 확인 (REBALANCE_FREQ=Q 미반영).
+   실전 적용은 자동 주문 No / paper trading 조건부 Yes.
 
 관련 산출물:
 - `outputs_k200mq_day20_validated_mom70/`, `outputs_k200mq_day18_validation_check_v2/`
 - `scripts/monte_carlo_bootstrap.py` + 부트스트랩 JSON
-- `outputs_k200mq_grid_*` (파라미터 그리드, 실행 중)
+- `outputs_k200mq_grid_*` (파라미터 그리드 8개, 완료)
 - Oracle 실전 적용 검토 (세션 ora-1, 2026-08-17)
