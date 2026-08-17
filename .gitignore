@@ -31,3 +31,6 @@ docs_cache/
 !.omo/evidence/
 !.omo/plans/
 .slim/deepwork/
+
+# Backtest run artifacts (regenerable; not committed)
+outputs_k200mq_*/
