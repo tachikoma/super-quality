@@ -30,7 +30,7 @@ VALIDATED_EXPANDING_WALK_FORWARD_PIT = "validated_expanding_walk_forward_pit"
 mechanical_expanding_walk_forward_non_pit = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
 validated_expanding_walk_forward_pit = VALIDATED_EXPANDING_WALK_FORWARD_PIT
 
-CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v3"
+CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v4"
 DEFAULT_MIN_EXITS = 5
 DEFAULT_TIE_TOLERANCE = 0.05
 OBJECTIVE_TRAIN_SHARPE = "train_sharpe"
@@ -212,6 +212,32 @@ DEFAULT_CANDIDATE_LIBRARY: tuple[CandidateSpec, ...] = (
             "REGIME_FILTER_ENABLED": True,
             "WEIGHT_MOMENTUM": 0.7,
             "WEIGHT_QUALITY": 0.3,
+        },
+    ),
+    # Grid-derived improvements over MOM70 (validated PIT universe).  SL20 is
+    # the best-performing grid cell (stop-loss -20%); SL20_CASH10 adds a 10%
+    # cash buffer which was the only cell to clear the -25% MDD gate.  Both
+    # stop-loss and cash-reserve are runtime-only engine settings, so they are
+    # safe candidate dimensions.
+    CandidateSpec(
+        "SL20",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "WEIGHT_MOMENTUM": 0.7,
+            "WEIGHT_QUALITY": 0.3,
+            "SL_STOP_LOSS": -0.20,
+        },
+    ),
+    CandidateSpec(
+        "SL20_CASH10",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "WEIGHT_MOMENTUM": 0.7,
+            "WEIGHT_QUALITY": 0.3,
+            "SL_STOP_LOSS": -0.20,
+            "MIN_CASH_RATIO": 0.10,
         },
     ),
     CandidateSpec("TOP_N_10", {"TOP_N": 10, "REGIME_FILTER_ENABLED": True}),

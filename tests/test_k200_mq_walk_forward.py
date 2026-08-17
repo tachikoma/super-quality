@@ -54,9 +54,12 @@ def test_fold_spec_rejects_datetime_boundaries_and_serializes_dates() -> None:
 def test_candidate_library_is_versioned_and_conservative() -> None:
     ids = [candidate.candidate_id for candidate in DEFAULT_CANDIDATE_LIBRARY]
 
-    assert ids == ["BASE", "MOM60", "MOM70", "TOP_N_10", "TOP_N_30", "REGIME_OFF"]
+    assert ids == [
+        "BASE", "MOM60", "MOM70", "SL20", "SL20_CASH10",
+        "TOP_N_10", "TOP_N_30", "REGIME_OFF",
+    ]
     assert all(
-        candidate.library_version == "k200mq-wf-candidates-v3"
+        candidate.library_version == "k200mq-wf-candidates-v4"
         for candidate in DEFAULT_CANDIDATE_LIBRARY
     )
     assert all("MAX_HOLDINGS" not in candidate.parameters for candidate in DEFAULT_CANDIDATE_LIBRARY)
@@ -72,7 +75,16 @@ def test_candidate_library_is_versioned_and_conservative() -> None:
     }
     assert weights["MOM60"] == (0.6, 0.4)
     assert weights["MOM70"] == (0.7, 0.3)
+    assert weights["SL20"] == (0.7, 0.3)
+    assert weights["SL20_CASH10"] == (0.7, 0.3)
     assert weights["BASE"] == (None, None)
+    # Grid-derived stop-loss/cash-buffer candidates carry runtime-only engine
+    # settings that must not be confused with factor/schedule dimensions.
+    by_id = {candidate.candidate_id: candidate.parameters for candidate in DEFAULT_CANDIDATE_LIBRARY}
+    assert by_id["SL20"]["SL_STOP_LOSS"] == -0.20
+    assert "MIN_CASH_RATIO" not in by_id["SL20"]
+    assert by_id["SL20_CASH10"]["SL_STOP_LOSS"] == -0.20
+    assert by_id["SL20_CASH10"]["MIN_CASH_RATIO"] == 0.10
 
 
 def _scores(**sharpes: float) -> dict[str, dict[str, object]]:

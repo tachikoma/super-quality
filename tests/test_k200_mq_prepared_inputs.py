@@ -649,7 +649,6 @@ def test_strict_preparation_cannot_be_disabled_by_candidate() -> None:
         "REGIME_MA_PERIOD",
         "REGIME_REDUCTION",
         "SECTOR_CAP",
-        "MIN_CASH_RATIO",
         "USE_52WEEK_HIGH",
         "MAX_HOLDINGS",
         "QUALITY_MIN_TTM_QUARTERS",
@@ -660,6 +659,25 @@ def test_candidate_overrides_requiring_recomputation_are_rejected(field: str) ->
 
     with pytest.raises(ValueError, match=field):
         execute_engine_interval(prepared, CandidateSpec("UNSAFE", {field: 7}))
+
+
+def test_candidate_allows_min_cash_ratio_runtime_override() -> None:
+    # MIN_CASH_RATIO is a runtime-only engine cash-reserve setting; it must be
+    # a legal candidate dimension (used by the SL20_CASH10 WF candidate).
+    prepared = _prepared_inputs()
+
+    result = execute_engine_interval(
+        prepared,
+        CandidateSpec(
+            "CASH_BUFFER",
+            {"TOP_N": 1, "MIN_CASH_RATIO": 0.10},
+        ),
+        measured_start=pd.Timestamp("2024-01-02"),
+        measured_end=pd.Timestamp("2024-01-09"),
+        active_trading_start=pd.Timestamp("2024-01-08"),
+    )
+
+    assert not result["portfolio_snapshots"].empty
 
 
 def test_candidate_allows_adv_filter_runtime_overrides() -> None:

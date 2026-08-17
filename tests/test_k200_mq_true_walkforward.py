@@ -117,9 +117,9 @@ def test_true_walkforward_prepares_once_and_serializes_artifacts(monkeypatch, tm
     result = main_module._run_true_walkforward(config)
 
     assert prepare_calls == [(date(2015, 1, 1), date(2024, 12, 31), 252)]
-    assert len(engine_calls) == 5 * 6 + 5
-    assert all(phase == "train" for phase, _, _ in engine_calls[:30])
-    assert all(phase == "test" for phase, _, _ in engine_calls[30:])
+    assert len(engine_calls) == 5 * 8 + 5
+    assert all(phase == "train" for phase, _, _ in engine_calls[:40])
+    assert all(phase == "test" for phase, _, _ in engine_calls[40:])
     assert result.classification == main_module.MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
 
     artifact_dir = tmp_path / "true_walkforward"
@@ -127,7 +127,7 @@ def test_true_walkforward_prepares_once_and_serializes_artifacts(monkeypatch, tm
         selection = json.load(selection_file)
     assert selection["classification"] == "mechanical_expanding_walk_forward_non_pit"
     assert len(selection["folds"]) == 5
-    assert len(selection["folds"][0]["train_scores"]) == 6
+    assert len(selection["folds"][0]["train_scores"]) == 8
     assert len(selection["selected_config_hashes_by_fold"]) == 5
     assert selection["limitations"]
     assert (artifact_dir / "oos_returns.csv").exists()
@@ -201,7 +201,7 @@ def test_true_walkforward_strict_pit_runs_when_preflight_is_satisfied(
     result = main_module._run_true_walkforward(config)
 
     assert result.classification == main_module.MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
-    assert len(engine_calls) == 5 * 6 + 5
+    assert len(engine_calls) == 5 * 8 + 5
 
 
 def _prepared_with_first_ready_coverage() -> PreparedK200MQInputs:
@@ -295,7 +295,7 @@ def test_validated_coverage_summary_falls_back_to_first_record_on_missing_match(
 def _empty_walkforward_result(classification: str) -> WalkForwardResult:
     return WalkForwardResult(
         classification=classification,
-        candidate_library_version="k200mq-wf-candidates-v3",
+        candidate_library_version="k200mq-wf-candidates-v4",
         candidate_config_hashes={},
         folds=(),
         stitched_oos_returns=(),
