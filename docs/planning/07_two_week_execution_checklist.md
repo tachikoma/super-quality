@@ -716,3 +716,20 @@
 - scorecard 재판정: 성과 게이트 기준에 가장 근접한 조합은 **sl20**
   (CAGR 9.66% 통과, Sharpe 0.567 근접, Calmar 0.340 통과, MDD -28.37% 근접
   미달) — 단 부트스트랩 MDD 통과 확률 17.4%는 SL-20%에서도 재검증 필요.
+
+## Day 22 — 후보 경쟁 정직 검증 (2026-08-17, v4 라이브러리)
+
+- 실행: `outputs_k200mq_day22_candidate_v4` — 기본 config(0.5/0.5, SL-15%)에서
+  v4 후보 8개(REGIME_OFF 포함)가 train 성과로 경쟁.
+- **결과: 모든 폴드에서 REGIME_OFF 선택** (train Sharpe 최고):
+  - fold1 REGIME_OFF -0.446 vs SL20 -0.761 / SL20_CASH10 -0.784 / MOM70 -0.778
+  - fold2 REGIME_OFF -0.005 vs SL20 -0.328 / SL20_CASH10 -0.340
+  - SL20/SL20_CASH10/MOM60/MOM70 전부 train에서 패배.
+- OOS: Day 18과 완전 동일 (+20.55%, CAGR 3.81%, Sharpe 0.299, MDD -37.68%).
+- **정정 (중요)**: 그리드의 sl20 +58.48% / cash10 +33.18%는 **사후 OOS 선택
+  (스누핑)** 이었고, 정직한 WFA train 선택에서는 기각됨. Day 20의 +53.23%
+  (0.7/0.3)도 train 선택이 아닌 base config 사후 조정 결과 — 동일한 한계.
+- 함의: 파라미터 조정(가중/손절/현금)으로는 성과 게이트 통과 불가. 유일한
+  구조적 경로는 quality 커버리지 개선(재무 데이터) 또는 전략 차원 변경.
+- classification은 `validated_expanding_walk_forward_pit` 유지 (승격 자체는
+  정상 동작 — 후보 경쟁 결과와 무관).

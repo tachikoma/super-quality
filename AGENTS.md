@@ -357,3 +357,25 @@ ruff check
   분석 (모멘텀 0.7/0.3 + SL-20% 승격 후보), ② scorecard Go 조건 재정립,
   ③ 실전 준비 5항목 중 ②-⑤ 진행 (ADV 정책 명시, 상장폐지 감지, 데이터
   갱신 자동화, 리스크 가드레일).
+
+## TASK LOG — 2026-08-17 (cont., Day 22 정직 WFA 검증)
+
+- **후보 라이브러리 v4 (커밋 `f5e8000`)**: SL20(0.7/0.3+SL-20%)과
+  SL20_CASH10(0.7/0.3+SL-20%+현금10%) 후보 추가 — 그리드 최고 조합을
+  train 성과로 검증하기 위함. `MIN_CASH_RATIO`를 `_SAFE_RUNTIME_FIELDS`에
+  추가 (SL20_CASH10 interval 실행용).
+- **Day 22 — 후보 경쟁 정직 검증 (`outputs_k200mq_day22_candidate_v4`)**:
+  기본 config(0.5/0.5, SL-15%)에서 v4 후보 8개 경쟁 → **모든 폴드에서
+  REGIME_OFF 선택** (train Sharpe 최고: fold1 -0.446 vs SL20 -0.761 /
+  SL20_CASH10 -0.784 / MOM70 -0.778; fold2 -0.005 vs -0.328 / -0.340).
+  OOS는 Day 18과 완전 동일 (+20.55%).
+- **정정 (중요)**: 그리드의 sl20 +58.48% / cash10 +33.18%는 **사후 OOS
+  선택(스누핑)** 이었으며 정직한 WFA train 선택에서 기각됨. Day 20의
+  +53.23%(0.7/0.3)도 base config 사후 조정 결과로 동일 한계. **파라미터
+  조정(가중/손절/현금)으로는 성과 게이트 통과 불가**가 확증됨 — 유일한
+  구조적 경로는 quality 커버리지 개선(재무 데이터) 또는 전략 차원 변경.
+- classification은 `validated_expanding_walk_forward_pit` 유지 (승격은
+  정상 동작 — 후보 경쟁 결과와 무관).
+- **Next priority**: ① quality 커버리지 개선 (36.5% → 상승) — 유일한
+  구조적 게이트 통과 경로, ② 실전 준비 5항목 중 ②-⑤ 진행 (paper trading
+  조건부 시작), ③ scorecard Go 조건 재정립 (파라미터 축 제외 명시).
