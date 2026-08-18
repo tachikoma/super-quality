@@ -60,15 +60,15 @@ point 통과.
 - Hold: 필수 게이트 통과, 성과 컷오프 일부 미달
 - Pivot: 필수 게이트 미통과 또는 안정성 반복 실패
 
-최종 판정: **Hold (성과 게이트 미달 — MDD 구조적 한계 + 서브기간 편중. Day 22 정직 WFA가 파라미터 경로 기각)**
+최종 판정: **Hold (성과 게이트 미달 — MDD 구조적 한계 + 서브기간 편중. Day 22/23이 파라미터·데이터 경로 모두 기각)**
 
 판정 사유 (3줄 요약):
-1. **Day 22 후보 경쟁 정직 검증 (커밋 `649de40`, `outputs_k200mq_day22_candidate_v4`)**: v4 후보 8개(SL20/SL20_CASH10/MOM60/MOM70 포함)를 train 성과로 경쟁시킨 결과 **모든 폴드에서 REGIME_OFF 선택** (fold1 train Sharpe -0.446 vs SL20 -0.761 / SL20_CASH10 -0.784). OOS는 Day 18과 동일 (+20.55%).
-2. **정정**: 그리드의 sl20 +58.48% / cash10 +33.18% / Day 20 +53.23%(0.7/0.3)는 **사후 OOS 선택(스누핑)** 이었고 정직한 WFA에서 기각됨. **파라미터 조정(가중/손절/현금)으로 성과 게이트 통과 불가**가 확증 — 유일한 구조적 경로는 quality 커버리지 개선(재무 데이터, 36.5% → 상승) 또는 전략 차원 변경.
-3. 검증 인프라 완성: classification 승격 + WFA v4 후보 라이브러리 (train 선택 검증) + 몬테카를로 부트스트랩 (MDD 통과 확률 17.4%) + 파라미터 그리드 + Day 22 정직 검증. 실전 적용은 자동 주문 No / paper trading 조건부 Yes.
+1. **Day 22 후보 경쟁 정직 검증 (커밋 `649de40`)**: v4 후보 8개(SL20/SL20_CASH10/MOM60/MOM70 포함)를 train 성과로 경쟁 → **모든 폴드에서 REGIME_OFF 선택** (fold1 -0.446 vs SL20 -0.761). 그리드의 sl20 +58.48% / cash10 +33.18% / Day 20 +53.23%(0.7/0.3)는 **사후 OOS 선택(스누핑)** 이었고 기각됨 — 파라미터 경로 불가 확증.
+2. **Day 23 DART 재무 보강 (커밋 `7dabdc1`)**: 97개 corp 연간 facts 802건 보강으로 리밸런스 커버리지 70%+ (2020-01: 98/200→148/200). 그러나 stitched **+16.85%** (Day 22 +20.55% 대비 하락) — **데이터/커버리지 경로도 기각.** 성과 게이트 미달은 파라미터·데이터 모두로 해결 불가한 구조적 상태.
+3. 검증 인프라 완성 (classification 승격 + WFA v4 + 부트스트랩 + 그리드 + Day 22/23). **성과 게이트 통과의 유일한 구조적 경로는 전략 차원 변경** (regime 강화, quality 팩터 재설계, 팩터 window 조정) 또는 OOS/게이트 기준 재검토. 실전 적용은 자동 주문 No / paper trading 조건부 Yes.
 
 관련 산출물:
-- `outputs_k200mq_day20_validated_mom70/`, `outputs_k200mq_day18_validation_check_v2/`
+- `outputs_k200mq_day22_candidate_v4/`, `outputs_k200mq_day23_pit_annual_merge/`
 - `scripts/monte_carlo_bootstrap.py` + 부트스트랩 JSON
-- `outputs_k200mq_grid_*` (파라미터 그리드 8개, 완료)
+- `outputs_k200mq_grid_*` (파라미터 그리드 8개), `data/raw/dart_aggregated_day4_extended_fy2014_pit/`
 - Oracle 실전 적용 검토 (세션 ora-1, 2026-08-17)

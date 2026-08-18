@@ -379,3 +379,28 @@ ruff check
 - **Next priority**: ① quality 커버리지 개선 (36.5% → 상승) — 유일한
   구조적 게이트 통과 경로, ② 실전 준비 5항목 중 ②-⑤ 진행 (paper trading
   조건부 시작), ③ scorecard Go 조건 재정립 (파라미터 축 제외 명시).
+
+## TASK LOG — 2026-08-18 (Day 23: DART 재무 보강 — 데이터 경로도 기각)
+
+- **작업 (커밋 `7dabdc1`)**: `.env`의 DART_API_KEY 확인 후, 2015-05-29
+  유니버스 중 facts 전무한 97개 corp의 2015~2024 연간(11011)을 DART API로
+  fetch (802건 성공 / 168건 status 013). FY2014는 fnlttSinglAcntAll
+  미지원(XBRL만). filing은 페이지네이션 필요 확인 — page_no/page_count=100
+  으로 20페이지 + 2026-12-31 확장, (corp_code, rcept_no) 키 중복 제거
+  (페이지 반복 25회 해소). 병합 `dart_aggregated_day4_extended_fy2014_pit/`:
+  facts 468,921행, filings 303,570행, 조인 무결성 0.
+- **커버리지 개선**: 2017-01 86/200→**141/200 (70.5%)**, 2020-01
+  98/200→**148/200 (74.0%)**, 2024-01 116/200→**140/200 (70.0%)**. 첫
+  리밸런스 36.5%는 FY2014 XBRL 한계로 불변.
+- **Day 23 strict WF (`outputs_k200mq_day23_pit_annual_merge`)**: validated
+  유지, 5/5 폴드, fold 4/5에서 MOM60 선택(재무 보강이 train 선택에 영향).
+  Stitched **+16.85%** (Day 22 +20.55% 대비 소폭 하락).
+- **정정 (중요)**: quality 커버리지 개선으로도 성과 게이트 통과 불가 확증.
+  파라미터 경로(Day 22)와 데이터 경로(Day 23) 모두 기각 — **성과 게이트
+  통과의 구조적 경로는 전략 차원 변경만 남음** (regime/sector 필터 재설계,
+  팩터 정의 변경, 또는 OOS/게이트 기준 재검토). 참고: facts 468,921행으로
+  재무 로드 ~50분 증가.
+- **Next priority (갱신)**: ① 전략 차원 변경 검토 (regime 강화, quality
+  팩터 재설계, 팩터 window 조정), ② 실전 준비 5항목 중 ②-⑤ 진행 (paper
+  trading 조건부 시작), ③ scorecard Go 조건 재정립 (파라미터·데이터 축
+  제외 명시).

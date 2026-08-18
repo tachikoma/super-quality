@@ -101,11 +101,11 @@
 | 기계적 비-PIT 진단 | `robustness` 독립 하위 기간 테스트와 expanding-window `true-walkforward`를 사용할 수 있음. |
 | 검증된 PIT 근거 | **classification 승격 달성 (2026-08-17, Day 18)**: `validated_expanding_walk_forward_pit` 최초 산출. 유니버스 PIT + 재무 PIT validator 통과 + 5/5 fold valid + `filing_date_used` 하드 증명. coverage_summary에 실측 커버리지(36.5%/60.5%) 명시. |
 | 유니버스 PIT | **달성 (2026-08-16)**: `data/universe/kospi200_bundle_pit/` — pykrx KRX 공식 역사 구성원 120개 as-of, 전 as-of `pit_valid=true`. |
-| 재무 PIT | 달성: `dart_aggregated_day4_extended_fy2014/` (FY2014 XBRL 병합), `pit_filing_date` + `pit_valid=true`. |
-| 현재 공식 진단 | Day 18 strict WF (PIT 유니버스, 2020-2024): **classification=`validated_expanding_walk_forward_pit`**, stitched **+20.55%** (Day 14와 동일 — 승격은 라벨 정직성 개선). 5/5 valid, OOS 1,231점. 첫 리밸런스 momentum 121/200 (60.5%), six-fact 73/200 (36.5%) — limitations에 명시. |
-| 파라미터 진단 | proxy: ADV -1.37% / mom0.7 +71.42% / no-SL +117%(MDD↑). PIT: mom0.7 **+53.23%** / no-SL +35.85%(MDD↑) / ADV 필터 수정 후 재실행 대기(상장폐지 mcap=0 제외 정책). 모두 기계적 진단. |
+| 재무 PIT | 달성: `dart_aggregated_day4_extended_fy2014_pit/` (FY2014 XBRL + PIT 연간 2015-2024 보강, 커밋 `7dabdc1`), `pit_filing_date` + `pit_valid=true`. |
+| 현재 공식 진단 | Day 22/23 strict WF (PIT 유니버스, 2020-2024, v4 후보): **classification=`validated_expanding_walk_forward_pit`**, stitched **+16.85%** (Day 23, 재무 보강 후). 5/5 valid. **성과 게이트 미달은 구조적** — 파라미터 경로(Day 22)와 데이터/커버리지 경로(Day 23) 모두 기각. |
+| 파라미터/데이터 진단 | 파라미터 그리드 8개(Day 21) + 후보 경쟁(Day 22) + DART 재무 보강(Day 23): 모멘텀 가중 0.7/손절 -20%/현금 10% 조합 모두 사후 스누핑으로 기각, 재무 커버리지 70%+ 개선에도 성과 무개선. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | ① scorecard 성과 게이트 미달 구간 분석 (모멘텀 가중 0.7/0.3 승격 후 재검증), ② ADV 필터 PIT 유니버스 재실행, ③ PIT 기준 재무 커버리지 개선 (73/200 = 36.5%). |
+| 다음 게이트 | ① 전략 차원 변경 검토 (regime 강화, quality 팩터 재설계, 팩터 window 조정) — 파라미터·데이터 경로 기각 후 유일한 구조적 경로, ② 실전 준비 5항목 중 ②-⑤ 진행 (paper trading 조건부 시작), ③ scorecard Go 조건 재정립 (파라미터·데이터 축 제외 명시). |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
