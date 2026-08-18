@@ -733,3 +733,31 @@
   구조적 경로는 quality 커버리지 개선(재무 데이터) 또는 전략 차원 변경.
 - classification은 `validated_expanding_walk_forward_pit` 유지 (승격 자체는
   정상 동작 — 후보 경쟁 결과와 무관).
+
+## Day 23 — PIT 연간 재무 보강 (2026-08-18)
+
+- **작업**: `.env`의 DART_API_KEY 확인 후, 2015-05-29 유니버스 중 DART facts가
+  전혀 없던 97개 corp의 2015~2024 연간 보고서(11011)를 DART API로 fetch.
+  (FY2014는 fnlttSinglAcntAll 미지원 — XBRL 경로만 가능, 92 corp 한계 유지)
+  - 연간 facts: 802건 성공 / 168건 status 013 (해당 corp/year 보고서 없음)
+  - filing 메타데이터: 페이지네이션 필요 확인 (list.json이 corp당 최신 10건만
+    반환) → page_no/page_count=100으로 20페이지 fetch (2026-12-31까지 확장),
+    (corp_code, rcept_no) 키 중복 제거 (페이지 중복 25회 반복 문제 해소)
+  - 병합 결과: `data/raw/dart_aggregated_day4_extended_fy2014_pit/` —
+    facts 468,921행 (304,245+164,676), filings 303,570행 (243,285+60,285),
+    조인 무결성 0건 (strict preflight 통과)
+- **커버리지 개선 (리밸런스별 six-fact, Day 22 → Day 23)**:
+  - 2017-01: 86/200 → **141/200 (70.5%)**, 2020-01: 98/200 → **148/200 (74.0%)**,
+    2024-01: 116/200 → **140/200 (70.0%)** — 2016년 이후 구간 대폭 개선
+  - 첫 리밸런스(2015-05-29) 36.5%는 FY2014 XBRL 한계로 불변 (API 미지원)
+- **결과 (`outputs_k200mq_day23_pit_annual_merge`)**:
+  - classification=`validated_expanding_walk_forward_pit`, valid=True, 5/5 폴드
+  - fold 4/5에서 MOM60 선택 (재무 보강이 train 선택에 영향 — Day 22는 전 폴드
+    REGIME_OFF)
+  - Stitched **+16.85%** (CAGR 3.17%, Sharpe 0.279, MDD -38.0%, Calmar 0.083)
+    — Day 22 (+20.55%) 대비 오히려 소폭 하락
+- **결론: quality 커버리지 개선으로는 성과 게이트 통과 불가 확증.** 재무
+  커버리지가 70%+로 올라가도 OOS 성과가 개선되지 않음 (2020/2021 폴드
+  하락). 파라미터 경로(Day 22)와 데이터 경로(Day 23) 모두 기각 — 성과
+  게이트 통과를 위한 구조적 경로는 **전략 차원 변경**만 남음.
+- 참고: facts 468,921행으로 재무 로드가 ~50분으로 증가 (조인 부하).
