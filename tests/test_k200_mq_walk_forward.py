@@ -57,6 +57,7 @@ def test_candidate_library_is_versioned_and_conservative() -> None:
     assert ids == [
         "BASE", "MOM60", "MOM70", "SL20", "SL20_CASH10",
         "TOP_N_10", "TOP_N_30", "REGIME_OFF",
+        "REGIME_70", "REGIME_50", "REGIME_30",
     ]
     assert all(
         candidate.library_version == "k200mq-wf-candidates-v4"
@@ -85,6 +86,19 @@ def test_candidate_library_is_versioned_and_conservative() -> None:
     assert "MIN_CASH_RATIO" not in by_id["SL20"]
     assert by_id["SL20_CASH10"]["SL_STOP_LOSS"] == -0.20
     assert by_id["SL20_CASH10"]["MIN_CASH_RATIO"] == 0.10
+    # Regime reduction-axis candidates carry runtime-safe reduction ratios so
+    # the train pass can choose an optimal ratio instead of binary on/off.
+    assert by_id["REGIME_70"] == {
+        "TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.70,
+    }
+    assert by_id["REGIME_50"] == {
+        "TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.50,
+    }
+    assert by_id["REGIME_30"] == {
+        "TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.30,
+    }
+    assert by_id["REGIME_OFF"]["REGIME_FILTER_ENABLED"] is False
+    assert "REGIME_REDUCTION" not in by_id["REGIME_OFF"]
 
 
 def _scores(**sharpes: float) -> dict[str, dict[str, object]]:

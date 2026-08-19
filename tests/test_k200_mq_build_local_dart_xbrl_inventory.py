@@ -10,6 +10,8 @@ import pytest
 
 from k200_mq.data.dart_xbrl import request_params_sha256
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+
 
 def _load_script_module(path: Path):
     spec = importlib.util.spec_from_file_location("build_local_dart_xbrl_inventory", path)
@@ -63,7 +65,7 @@ def _row(
 
 def test_inventory_dispositions_and_deterministic_specs(tmp_path: Path) -> None:
     script = _load_script_module(
-        Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/build_local_dart_xbrl_inventory.py")
+        _SCRIPTS_DIR / "build_local_dart_xbrl_inventory.py"
     )
     rows = [
         _row("00100001", "20150331000002", "사업보고서 (2014.12)"),
@@ -110,7 +112,7 @@ def test_inventory_dispositions_and_deterministic_specs(tmp_path: Path) -> None:
 
 def test_inventory_requires_exactly_one_selected_original(tmp_path: Path) -> None:
     script = _load_script_module(
-        Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/build_local_dart_xbrl_inventory.py")
+        _SCRIPTS_DIR / "build_local_dart_xbrl_inventory.py"
     )
     rows = [
         _row("00100001", "20150331000001", "사업보고서 (2014.12)"),
@@ -123,7 +125,7 @@ def test_inventory_requires_exactly_one_selected_original(tmp_path: Path) -> Non
 
 def test_inventory_requires_original_when_only_foreign_notice_exists(tmp_path: Path) -> None:
     script = _load_script_module(
-        Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/build_local_dart_xbrl_inventory.py")
+        _SCRIPTS_DIR / "build_local_dart_xbrl_inventory.py"
     )
     filing, manifest = _write_filing_bundle(tmp_path, [
         _row("00100001", "20150331000001", "사업보고서 (2014.12) 외국환거래"),
@@ -134,7 +136,7 @@ def test_inventory_requires_original_when_only_foreign_notice_exists(tmp_path: P
 
 def test_inventory_rejects_unverified_filing_manifest(tmp_path: Path) -> None:
     script = _load_script_module(
-        Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/build_local_dart_xbrl_inventory.py")
+        _SCRIPTS_DIR / "build_local_dart_xbrl_inventory.py"
     )
     filing, manifest = _write_filing_bundle(tmp_path, [
         _row("00100001", "20150331000001", "사업보고서 (2014.12)"),
@@ -148,7 +150,7 @@ def test_inventory_rejects_unverified_filing_manifest(tmp_path: Path) -> None:
 
 def test_inventory_outputs_bind_hashes_and_counts(tmp_path: Path) -> None:
     script = _load_script_module(
-        Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/build_local_dart_xbrl_inventory.py")
+        _SCRIPTS_DIR / "build_local_dart_xbrl_inventory.py"
     )
     filing, filing_manifest = _write_filing_bundle(tmp_path, [
         _row("00100001", "20150331000001", "사업보고서 (2014.12)"),

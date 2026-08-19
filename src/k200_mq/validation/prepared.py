@@ -399,6 +399,7 @@ def _candidate_overrides(candidate_config: Any) -> dict[str, Any]:
 _SAFE_RUNTIME_FIELDS = frozenset({
     "TOP_N",
     "REGIME_FILTER_ENABLED",
+    "REGIME_REDUCTION",
     "EXCLUDE_KOSPI_TOP_N",
     "WEIGHT_MOMENTUM",
     "WEIGHT_QUALITY",

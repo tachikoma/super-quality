@@ -10,6 +10,8 @@ import zipfile
 
 import pytest
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+
 
 def _load_script_module(path: Path):
     spec = importlib.util.spec_from_file_location("fetch_local_dart_response", path)
@@ -21,7 +23,7 @@ def _load_script_module(path: Path):
 
 
 def test_normalize_request_params_and_manifest_building() -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     params = script._normalize_request_params({
         "crtfc_key": "secret",
@@ -47,7 +49,7 @@ def test_normalize_request_params_and_manifest_building() -> None:
 
 
 def test_build_url_includes_api_key_and_preserves_request_params() -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     url = script._build_url(
         script.OPEN_DART_ENDPOINTS["financial"],
@@ -60,7 +62,7 @@ def test_build_url_includes_api_key_and_preserves_request_params() -> None:
 
 
 def test_financial_error_status_preserves_financial_facts_source_type() -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     manifest = script._build_manifest(
         endpoint=script.OPEN_DART_ENDPOINTS["financial"],
@@ -106,7 +108,7 @@ def _write_manifest_for_spec(
 
 
 def test_is_verified_spec_rejects_mutated_raw_hash_and_request_params(tmp_path: Path) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
     raw = json.dumps({"status": "000"}).encode("utf-8")
     spec = _write_manifest_for_spec(
         script,
@@ -132,7 +134,7 @@ def test_is_verified_spec_rejects_mutated_raw_hash_and_request_params(tmp_path: 
 
 @pytest.mark.parametrize("mutation", ["source_url", "source_type"])
 def test_is_verified_spec_rejects_mismatched_source_metadata(tmp_path: Path, mutation: str) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
     raw = json.dumps({"status": "000"}).encode("utf-8")
     spec = _write_manifest_for_spec(
         script,
@@ -150,7 +152,7 @@ def test_is_verified_spec_rejects_mismatched_source_metadata(tmp_path: Path, mut
 
 
 def test_is_verified_spec_accepts_valid_xbrl_success(tmp_path: Path) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
     raw_buffer = BytesIO()
     with zipfile.ZipFile(raw_buffer, "w") as archive:
         archive.writestr("statement.xml", "<statement />")
@@ -167,7 +169,7 @@ def test_is_verified_spec_accepts_valid_xbrl_success(tmp_path: Path) -> None:
 
 
 def test_financial_xbrl_endpoint_and_manifest_metadata(tmp_path: Path, monkeypatch) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     assert script.OPEN_DART_ENDPOINTS["financial_xbrl"] == (
         "https://opendart.fss.or.kr/api/fnlttXbrl.xml"
@@ -227,7 +229,7 @@ def test_financial_xbrl_endpoint_and_manifest_metadata(tmp_path: Path, monkeypat
     ],
 )
 def test_financial_xbrl_success_formats_are_verified(raw: bytes, response_format: str) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
     if response_format == "zip":
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -249,7 +251,7 @@ def test_financial_xbrl_success_formats_are_verified(raw: bytes, response_format
 
 
 def test_financial_xbrl_json_error_is_not_verified() -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
     manifest = script._build_manifest(
         endpoint=script.OPEN_DART_ENDPOINTS["financial_xbrl"],
         request_params={"rcept_no": "20240329000123", "reprt_code": "11011"},
@@ -265,7 +267,7 @@ def test_financial_xbrl_json_error_is_not_verified() -> None:
 
 
 def test_batch_mode_writes_multiple_responses_and_summary(tmp_path: Path, monkeypatch) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     payloads = {
         "https://opendart.fss.or.kr/api/list.json?bgn_de=20240101&corp_code=001&crtfc_key=secret":
@@ -316,7 +318,7 @@ def test_batch_mode_writes_multiple_responses_and_summary(tmp_path: Path, monkey
 
 
 def test_batch_mode_supports_chunking_and_continue_on_error(tmp_path: Path, monkeypatch) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     payloads = {
         "https://opendart.fss.or.kr/api/list.json?bgn_de=20240101&corp_code=001&crtfc_key=secret":
@@ -381,7 +383,7 @@ def test_batch_mode_supports_chunking_and_continue_on_error(tmp_path: Path, monk
 
 
 def test_batch_mode_skip_verified_preserves_good_files(tmp_path: Path, monkeypatch) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     good_payload = json.dumps({"status": "000", "page_no": 1, "total_page": 1}, ensure_ascii=False).encode("utf-8")
     out_dir = tmp_path / "out"
@@ -445,7 +447,7 @@ def test_batch_mode_skip_verified_preserves_good_files(tmp_path: Path, monkeypat
 
 
 def test_batch_mode_delay_seconds_pauses_between_requests(tmp_path: Path, monkeypatch) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/fetch_local_dart_response.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "fetch_local_dart_response.py")
 
     payload = json.dumps({"status": "000", "page_no": 1, "total_page": 1}, ensure_ascii=False).encode("utf-8")
     monkeypatch.setattr(script, "_fetch_response_bytes", lambda url: payload)

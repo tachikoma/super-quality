@@ -12,6 +12,8 @@ import pytest
 
 from k200_mq.data.dart_xbrl import XBRL_ENDPOINT, request_params_sha256
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+
 
 def _load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -25,14 +27,14 @@ def _load_module(name: str, path: Path):
 def _inventory_module():
     return _load_module(
         "build_local_dart_xbrl_inventory_for_batch_test",
-        Path("scripts/build_local_dart_xbrl_inventory.py"),
+        _SCRIPTS_DIR / "build_local_dart_xbrl_inventory.py",
     )
 
 
 def _batch_module():
     return _load_module(
         "parse_local_dart_xbrl_batch",
-        Path("scripts/parse_local_dart_xbrl_batch.py"),
+        _SCRIPTS_DIR / "parse_local_dart_xbrl_batch.py",
     )
 
 
@@ -163,7 +165,7 @@ def test_builder_output_uses_shared_manifest_contract_end_to_end(tmp_path: Path)
     manifest = json.loads(inventory_manifest.read_text(encoding="utf-8"))
     contract = _load_module(
         "xbrl_inventory_contract_for_batch_test",
-        Path("scripts/xbrl_inventory_contract.py"),
+        _SCRIPTS_DIR / "xbrl_inventory_contract.py",
     )
     assert manifest["manifest_version"] == contract.INVENTORY_MANIFEST_VERSION
     assert manifest["selection_rules_version"] == contract.INVENTORY_MANIFEST_VERSION

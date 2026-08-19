@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import sys
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+
 
 def _load_script_module(path: Path):
     spec = importlib.util.spec_from_file_location("build_local_dart_bundle", path)
@@ -38,7 +40,7 @@ def _write_raw(tmp_path: Path, name: str, rows: list[dict[str, object]]) -> tupl
 
 
 def test_local_dart_bundle_script_writes_canonical_outputs(tmp_path: Path) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/build_local_dart_bundle.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "build_local_dart_bundle.py")
 
     filing_source, filing_manifest = _write_raw(tmp_path, "filing.json", [{
         "corp_code": "001",

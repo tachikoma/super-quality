@@ -647,7 +647,6 @@ def test_strict_preparation_cannot_be_disabled_by_candidate() -> None:
         "MOMENTUM_SKIP_DAYS",
         "REBALANCE_FREQ",
         "REGIME_MA_PERIOD",
-        "REGIME_REDUCTION",
         "SECTOR_CAP",
         "USE_52WEEK_HIGH",
         "MAX_HOLDINGS",

@@ -51,6 +51,19 @@ class PortfolioRebalanceEngine:
             sector_map_by_as_of=sector_map_by_as_of,
         )
         self._execution_stats = self._zero_execution_stats()
+        # Risk guardrail state
+        self._peak_nav: float = float(config.INITIAL_CAPITAL)
+        self._month_start_nav: float = float(config.INITIAL_CAPITAL)
+        self._current_month: int | None = None
+        self._drawdown_halt_active: bool = False
+        self._drawdown_halt_start_date: pd.Timestamp | None = None
+        self._trading_halted: bool = False
+        self._halt_reason: str | None = None
+        self._halt_events: list[dict[str, Any]] = []
+        # Delisting detection state
+        self._volume_zero_streak: dict[str, int] = {}
+        self._price_stale_streak: dict[str, int] = {}
+        self._last_known_price: dict[str, tuple[pd.Timestamp, float]] = {}
 
     def run(
         self,
@@ -92,6 +105,17 @@ class PortfolioRebalanceEngine:
             ``portfolio_snapshots``, ``trade_log``, ``daily_returns``.
         """
         self._execution_stats = self._zero_execution_stats()
+        self._peak_nav = float(self.config.INITIAL_CAPITAL)
+        self._month_start_nav = float(self.config.INITIAL_CAPITAL)
+        self._current_month = None
+        self._drawdown_halt_active = False
+        self._drawdown_halt_start_date = None
+        self._trading_halted = False
+        self._halt_reason = None
+        self._halt_events = []
+        self._volume_zero_streak = {}
+        self._price_stale_streak = {}
+        self._last_known_price = {}
         start_ts = pd.Timestamp(measured_start).normalize() if measured_start is not None else None
         end_ts = pd.Timestamp(measured_end).normalize() if measured_end is not None else None
         all_dates = self._measured_price_dates(price_data)
@@ -141,6 +165,7 @@ class PortfolioRebalanceEngine:
         positions: dict[str, dict[str, Any]] = {}
         trade_log: list[dict[str, Any]] = []
         snapshots: list[dict[str, Any]] = []
+        self._snapshots = snapshots
 
         # Pending orders are intentionally represented as plain dictionaries
         # to keep this engine's public surface small.
@@ -176,28 +201,85 @@ class PortfolioRebalanceEngine:
                     )
                     pending_rebalance = None
 
+            # Risk guardrail check (after execution, before new signals).
+            holdings_value = self._holdings_value(
+                positions, price_data, current_ts, "close"
+            )
+            nav = cash + holdings_value
+            should_halt, halt_reason = self._check_risk_guardrails(current_ts, nav)
+
+            if should_halt and not self._trading_halted:
+                self._trading_halted = True
+                self._halt_reason = halt_reason
+                self._halt_events.append({
+                    "date": str(current_date),
+                    "reason": halt_reason,
+                    "nav": nav,
+                    "action": "liquidate_all",
+                })
+                logger.warning(
+                    "Risk guardrail: %s at %s (NAV=%.0f)", halt_reason, current_ts, nav
+                )
+                # Create liquidation order for next-bar execution.
+                if positions:
+                    pending_rebalance = {
+                        "signal_date": current_ts,
+                        "selected": [],
+                        "regime_scale": 0.0,
+                    }
+                    pending_stops.clear()
+            elif self._trading_halted and not should_halt:
+                self._trading_halted = False
+                self._halt_reason = None
+                self._halt_events.append({
+                    "date": str(current_date),
+                    "reason": "guardrail_lifted",
+                    "nav": nav,
+                    "action": "resume_trading",
+                })
+                logger.info("Risk guardrail lifted at %s (NAV=%.0f)", current_ts, nav)
+
             # Close-based stop detection.  It creates a pending order only if
             # a next bar exists, so the final close can never fabricate a
-            # trade.
+            # trade.  While halted, signal formation is skipped — only the
+            # queued liquidation executes.
             if i + 1 < len(all_dates) and (
                 active_start_ts is None or current_ts >= active_start_ts
             ):
-                self._queue_stop_signals(
-                    positions,
-                    price_data,
-                    current_ts,
-                    pending_stops,
-                )
+                if not self._trading_halted:
+                    # Delisting detection for held positions.
+                    if bool(getattr(self.config, "ENABLE_DELISTING_DETECTION", False)):
+                        for ticker in list(positions.keys()):
+                            if self._update_delisting_status(ticker, current_ts, price_data):
+                                if ticker not in pending_stops:
+                                    last_price_info = self._last_known_price.get(ticker)
+                                    force_price = last_price_info[1] if last_price_info else None
+                                    pending_stops[ticker] = {
+                                        "signal_date": current_ts,
+                                        "reason": "delisting_suspension",
+                                        "force_price": force_price,
+                                    }
+                                    logger.warning(
+                                        "Delisting detected: %s at %s", ticker, current_ts,
+                                    )
 
-                if current_ts in rebalance_lookup:
-                    pending_rebalance = self._form_rebalance_signal(
-                        current_ts,
+                    self._queue_stop_signals(
+                        positions,
                         price_data,
-                        factor_data,
-                        rebalance_lookup[current_ts],
-                        regime_scale_map,
+                        current_ts,
+                        pending_stops,
                     )
 
+                    if current_ts in rebalance_lookup:
+                        pending_rebalance = self._form_rebalance_signal(
+                            current_ts,
+                            price_data,
+                            factor_data,
+                            rebalance_lookup[current_ts],
+                            regime_scale_map,
+                        )
+
+            # Record snapshot (always, even during halt).
             holdings_value = self._holdings_value(
                 positions, price_data, current_ts, "close"
             )
@@ -230,6 +312,7 @@ class PortfolioRebalanceEngine:
                 **self._execution_stats,
                 "initial_capital": float(self.config.INITIAL_CAPITAL),
             },
+            "halt_events": list(self._halt_events),
         }
 
     @staticmethod
@@ -319,6 +402,101 @@ class PortfolioRebalanceEngine:
                 value += position["shares"] * price
         return value
 
+    def _check_risk_guardrails(
+        self,
+        current_ts: pd.Timestamp,
+        nav: float,
+    ) -> tuple[bool, str | None]:
+        """Check risk guardrails and return (should_halt, reason)."""
+        # Update peak NAV
+        if nav > self._peak_nav:
+            self._peak_nav = nav
+
+        # Monthly reset
+        current_month = current_ts.month
+        if self._current_month != current_month:
+            self._month_start_nav = nav
+            self._current_month = current_month
+
+        # Daily loss limit
+        if bool(getattr(self.config, "ENABLE_DAILY_LOSS_LIMIT", False)):
+            if len(self._halt_events) == 0 and len(self._snapshots) > 0:
+                prev_nav = self._snapshots[-1]["nav"]
+                if prev_nav > 0:
+                    daily_change_pct = (nav - prev_nav) / prev_nav
+                    threshold = float(self.config.DAILY_LOSS_LIMIT_PCT)
+                    if daily_change_pct <= threshold:
+                        return True, f"daily_loss_limit ({daily_change_pct:.4%} <= {threshold:.2%})"
+
+        # Monthly loss limit
+        if bool(getattr(self.config, "ENABLE_MONTHLY_LOSS_LIMIT", False)):
+            if self._month_start_nav > 0:
+                monthly_change_pct = (nav - self._month_start_nav) / self._month_start_nav
+                threshold = float(self.config.MONTHLY_LOSS_LIMIT_PCT)
+                if monthly_change_pct <= threshold:
+                    return True, f"monthly_loss_limit ({monthly_change_pct:.4%} <= {threshold:.2%})"
+
+        # Drawdown halt
+        if bool(getattr(self.config, "ENABLE_DRAWDOWN_HALT", False)):
+            if self._peak_nav > 0:
+                drawdown_pct = (nav - self._peak_nav) / self._peak_nav
+                threshold = float(self.config.DRAWDOWN_HALT_PCT)
+                if drawdown_pct <= threshold:
+                    if not self._drawdown_halt_active:
+                        self._drawdown_halt_active = True
+                        self._drawdown_halt_start_date = current_ts
+                        return True, f"drawdown_halt ({drawdown_pct:.4%} <= {threshold:.2%})"
+                    # Already halted and still below the threshold: keep the
+                    # halt active so trading cannot resume mid-drawdown.
+                    return True, f"drawdown_halt_active ({drawdown_pct:.4%} <= {threshold:.2%})"
+                elif self._drawdown_halt_active:
+                    cooldown = int(self.config.DRAWDOWN_HALT_COOLDOWN_DAYS)
+                    days_since = (current_ts - self._drawdown_halt_start_date).days
+                    if days_since >= cooldown and drawdown_pct > threshold:
+                        self._drawdown_halt_active = False
+                        self._drawdown_halt_start_date = None
+                    else:
+                        return True, f"drawdown_halt_cooldown ({days_since}/{cooldown}d)"
+
+        return False, None
+
+    def _update_delisting_status(
+        self,
+        ticker: str,
+        current_ts: pd.Timestamp,
+        price_data: pd.DataFrame,
+    ) -> bool:
+        """Returns True if ticker should be force-liquidated."""
+        if not bool(getattr(self.config, "ENABLE_DELISTING_DETECTION", False)):
+            return False
+
+        try:
+            bar = price_data.loc[(ticker, current_ts)]
+            volume = float(bar.get("volume", 0)) if hasattr(bar, "get") else 0
+            close = float(bar.get("close", 0)) if hasattr(bar, "get") else 0
+        except (KeyError, ValueError, TypeError):
+            volume = 0
+            close = 0
+
+        # Update streaks
+        if volume == 0:
+            self._volume_zero_streak[ticker] = self._volume_zero_streak.get(ticker, 0) + 1
+        else:
+            self._volume_zero_streak[ticker] = 0
+
+        if close > 0:
+            self._last_known_price[ticker] = (current_ts, close)
+            self._price_stale_streak[ticker] = 0
+        else:
+            self._price_stale_streak[ticker] = self._price_stale_streak.get(ticker, 0) + 1
+
+        vol_zero = self._volume_zero_streak.get(ticker, 0)
+        price_stale = self._price_stale_streak.get(ticker, 0)
+        vol_threshold = int(self.config.DELISTING_VOLUME_ZERO_DAYS)
+        price_threshold = int(self.config.DELISTING_PRICE_STALE_DAYS)
+
+        return vol_zero >= vol_threshold or price_stale >= price_threshold
+
     def _queue_stop_signals(
         self,
         positions: dict[str, dict[str, Any]],
@@ -360,6 +538,10 @@ class PortfolioRebalanceEngine:
             if ticker not in positions:
                 continue
             sell_price = self._price(price_data, ticker, execution_date, "open")
+            # Use forced price if provided (delisting case)
+            force_price = order.get("force_price")
+            if force_price is not None and force_price > 0:
+                sell_price = force_price
             if sell_price is None or sell_price <= 0:
                 remaining[ticker] = order
                 continue
@@ -429,7 +611,7 @@ class PortfolioRebalanceEngine:
         return {
             "signal_date": signal_date,
             "selected": selected,
-            "regime_scale": self._regime_scale(regime_scale_map, signal_date),
+            "regime_scale": 0.0 if self._trading_halted else self._regime_scale(regime_scale_map, signal_date),
         }
 
     def _build_adv_ratio_map(
@@ -823,6 +1005,7 @@ class PortfolioRebalanceEngine:
                 **self._execution_stats,
                 "initial_capital": float(self.config.INITIAL_CAPITAL),
             },
+            "halt_events": list(self._halt_events),
         }
 
     @staticmethod

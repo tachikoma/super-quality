@@ -271,6 +271,25 @@ class K200MQConfig(BacktestConfig):
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_risk_guardrails(self) -> "K200MQConfig":
+        """Validate risk guardrail thresholds."""
+        if self.ENABLE_DAILY_LOSS_LIMIT and not -1.0 < self.DAILY_LOSS_LIMIT_PCT < 0.0:
+            raise ValueError("DAILY_LOSS_LIMIT_PCT must satisfy -1.0 < DAILY_LOSS_LIMIT_PCT < 0.0")
+        if self.ENABLE_MONTHLY_LOSS_LIMIT and not -1.0 < self.MONTHLY_LOSS_LIMIT_PCT < 0.0:
+            raise ValueError("MONTHLY_LOSS_LIMIT_PCT must satisfy -1.0 < MONTHLY_LOSS_LIMIT_PCT < 0.0")
+        if self.ENABLE_DRAWDOWN_HALT and not -1.0 < self.DRAWDOWN_HALT_PCT < 0.0:
+            raise ValueError("DRAWDOWN_HALT_PCT must satisfy -1.0 < DRAWDOWN_HALT_PCT < 0.0")
+        if self.ENABLE_DRAWDOWN_HALT and self.DRAWDOWN_HALT_COOLDOWN_DAYS < 1:
+            raise ValueError("DRAWDOWN_HALT_COOLDOWN_DAYS must be >= 1")
+        if self.ENABLE_DELISTING_DETECTION and self.DELISTING_VOLUME_ZERO_DAYS < 1:
+            raise ValueError("DELISTING_VOLUME_ZERO_DAYS must be >= 1")
+        if self.ENABLE_DELISTING_DETECTION and self.DELISTING_PRICE_STALE_DAYS < 1:
+            raise ValueError("DELISTING_PRICE_STALE_DAYS must be >= 1")
+        if self.DELISTING_FORCE_LIQUIDATE_PRICE not in ("last_close", "last_available"):
+            raise ValueError("DELISTING_FORCE_LIQUIDATE_PRICE must be 'last_close' or 'last_available'")
+        return self
+
     # ── 리짓 필터 ──────────────────────────────────────────────
     REGIME_FILTER_ENABLED: bool = Field(
         default=True,
@@ -340,6 +359,54 @@ class K200MQConfig(BacktestConfig):
     MAX_POSITION_WEIGHT: float = Field(
         default=0.10,
         description="단일 포지션 최대 비중 (10%)",
+    )
+
+    # ── 리스크 가드레일 ──────────────────────────────────────────────
+    ENABLE_DAILY_LOSS_LIMIT: bool = Field(
+        default=False,
+        description="일일 손실 한도 초과 시 거래 중단 및 현금화 여부",
+    )
+    DAILY_LOSS_LIMIT_PCT: float = Field(
+        default=-0.03,
+        description="일일 NAV 하락 한도 (음수; -0.03 = -3%). ENABLE_DAILY_LOSS_LIMIT=True일 때만 적용",
+    )
+    ENABLE_MONTHLY_LOSS_LIMIT: bool = Field(
+        default=False,
+        description="월간 누적 손실 한도 초과 시 거래 중단 및 현금화 여부",
+    )
+    MONTHLY_LOSS_LIMIT_PCT: float = Field(
+        default=-0.10,
+        description="월간 NAV 누적 하락 한도 (음수; -0.10 = -10%). ENABLE_MONTHLY_LOSS_LIMIT=True일 때만 적용",
+    )
+    ENABLE_DRAWDOWN_HALT: bool = Field(
+        default=False,
+        description="최고점 대비 드로다운 한도 초과 시 거래 중단 여부",
+    )
+    DRAWDOWN_HALT_PCT: float = Field(
+        default=-0.20,
+        description="피크 대비 최대 드로다운 한도 (음수; -0.20 = -20%). ENABLE_DRAWDOWN_HALT=True일 때만 적용",
+    )
+    DRAWDOWN_HALT_COOLDOWN_DAYS: int = Field(
+        default=20,
+        description="드로다운 중단 후 거래 재개 전 최소 쿨다운 거래일 수 (1 이상)",
+    )
+
+    # ── 상장폐지/거래정지 감지 ─────────────────────────────────────
+    ENABLE_DELISTING_DETECTION: bool = Field(
+        default=True,
+        description="상장폐지/거래정지 감지 및 강제 청산 활성화 여부",
+    )
+    DELISTING_VOLUME_ZERO_DAYS: int = Field(
+        default=5,
+        description="거래량 0이 지속되는 일수 임계값 (이상 시 상장폐지/거래정지 의심)",
+    )
+    DELISTING_PRICE_STALE_DAYS: int = Field(
+        default=10,
+        description="가격 데이터가 갱신되지 않는 일수 임계값 (이상 시 상장폐지/거래정지 의심)",
+    )
+    DELISTING_FORCE_LIQUIDATE_PRICE: str = Field(
+        default="last_close",
+        description="강제 청산 기준 가격 (last_close 또는 last_available)",
     )
 
     # ── 종목 제외 ──────────────────────────────────────────────

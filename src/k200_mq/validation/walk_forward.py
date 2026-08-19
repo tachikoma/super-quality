@@ -243,6 +243,21 @@ DEFAULT_CANDIDATE_LIBRARY: tuple[CandidateSpec, ...] = (
     CandidateSpec("TOP_N_10", {"TOP_N": 10, "REGIME_FILTER_ENABLED": True}),
     CandidateSpec("TOP_N_30", {"TOP_N": 30, "REGIME_FILTER_ENABLED": True}),
     CandidateSpec("REGIME_OFF", {"TOP_N": 20, "REGIME_FILTER_ENABLED": False}),
+    # Regime reduction-axis candidates.  REGIME_OFF removes the filter entirely;
+    # these let the train pass choose an optimal reduction ratio instead of the
+    # binary on/off.
+    CandidateSpec(
+        "REGIME_70",
+        {"TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.70},
+    ),
+    CandidateSpec(
+        "REGIME_50",
+        {"TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.50},
+    ),
+    CandidateSpec(
+        "REGIME_30",
+        {"TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.30},
+    ),
 )
 CANDIDATE_LIBRARY = DEFAULT_CANDIDATE_LIBRARY
 

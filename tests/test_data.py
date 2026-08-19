@@ -231,6 +231,8 @@ class TestGetPaidInCapitalIncreases:
     def test_get_paid_in_capital_increases_mocked(self, monkeypatch) -> None:
         """Parses DART report rows with '유상' in the style column correctly."""
         import sys
+        import super_quality.data.loader as loader_module
+        from super_quality.data.cache import DataCache
         from super_quality.data.loader import get_paid_in_capital_increases
 
         class MockDartReader:
@@ -246,6 +248,9 @@ class TestGetPaidInCapitalIncreases:
                 })
 
         monkeypatch.setitem(sys.modules, "OpenDartReader", MockDartReader)
+        # Hermetic: isolate from the real DART cache and the rate-limit gate.
+        monkeypatch.setattr(loader_module, "_cache", DataCache(tempfile.mkdtemp()))
+        monkeypatch.setattr(loader_module, "_check_dart_rate_limited", lambda: False)
 
         dates = get_paid_in_capital_increases("079160", [2023], api_key="mock_key")
         assert len(dates) == 2

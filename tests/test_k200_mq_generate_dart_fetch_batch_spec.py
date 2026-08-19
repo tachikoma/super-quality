@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+
 
 def _load_script_module(path: Path):
     spec = importlib.util.spec_from_file_location("generate_dart_fetch_batch_spec", path)
@@ -18,7 +20,7 @@ def _load_script_module(path: Path):
 
 
 def test_generate_both_mode_specs_from_inline_corp_codes(tmp_path: Path) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/generate_dart_fetch_batch_spec.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "generate_dart_fetch_batch_spec.py")
     output = tmp_path / "batch.json"
 
     argv_backup = sys.argv[:]
@@ -46,7 +48,7 @@ def test_generate_both_mode_specs_from_inline_corp_codes(tmp_path: Path) -> None
 
 
 def test_generate_filing_specs_from_corp_code_file(tmp_path: Path) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/generate_dart_fetch_batch_spec.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "generate_dart_fetch_batch_spec.py")
     corp_file = tmp_path / "corp_codes.txt"
     corp_file.write_text("123456\n87654321\n", encoding="utf-8")
     output = tmp_path / "filing_batch.json"
@@ -74,7 +76,7 @@ def test_generate_filing_specs_from_corp_code_file(tmp_path: Path) -> None:
 
 
 def test_generate_specs_from_ticker_mapping_file(tmp_path: Path) -> None:
-    script = _load_script_module(Path("/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/scripts/generate_dart_fetch_batch_spec.py"))
+    script = _load_script_module(_SCRIPTS_DIR / "generate_dart_fetch_batch_spec.py")
     tickers = tmp_path / "tickers.txt"
     tickers.write_text("005930\n000660\n", encoding="utf-8")
     corp_map = tmp_path / "corp_map.csv"
@@ -106,24 +108,14 @@ def test_generate_specs_from_ticker_mapping_file(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("value", ["ABC123", "123456789"])
 def test_rejects_invalid_corp_codes(value: str) -> None:
-    script = _load_script_module(
-        Path(
-            "/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/"
-            "scripts/generate_dart_fetch_batch_spec.py"
-        )
-    )
+    script = _load_script_module(_SCRIPTS_DIR / "generate_dart_fetch_batch_spec.py")
 
     with pytest.raises(RuntimeError, match="corp_code"):
         script._load_corp_codes(value, "")
 
 
 def test_rejects_financial_specs_before_2015() -> None:
-    script = _load_script_module(
-        Path(
-            "/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/"
-            "scripts/generate_dart_fetch_batch_spec.py"
-        )
-    )
+    script = _load_script_module(_SCRIPTS_DIR / "generate_dart_fetch_batch_spec.py")
 
     with pytest.raises(RuntimeError, match="FY2014.*unavailable.*fnlttSinglAcntAll"):
         script._financial_specs(
@@ -136,12 +128,7 @@ def test_rejects_financial_specs_before_2015() -> None:
 
 
 def test_filing_only_specs_allow_start_year_before_2015(tmp_path: Path) -> None:
-    script = _load_script_module(
-        Path(
-            "/Users/durkjaeyun/Documents/DjY/projects/investment/super-quality/"
-            "scripts/generate_dart_fetch_batch_spec.py"
-        )
-    )
+    script = _load_script_module(_SCRIPTS_DIR / "generate_dart_fetch_batch_spec.py")
     output = tmp_path / "filing_batch.json"
     argv_backup = sys.argv[:]
     try:
