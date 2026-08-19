@@ -54,6 +54,25 @@ point 통과.
 - EXCLUDE_KOSPI_TOP_N=0 고정 필수 (validated 숫자 재현 전제). quality 커버리지
   36.5%는 quality_z 63.5%가 neutral 채움 → "quality 가중 0.3"의 실질 효과 제한.
 
+### 2026-08-19 실전 준비 진행 상황 (커밋 `f47bf9b`)
+
+- ✅ ① WF 후보화: MOM60/MOM70/SL20/SL20_CASH10 추가 (커밋 `48f3fc8`)
+- ② ADV 유동성 정책: **비활성 기본 유지**. ENABLE_ADV_FILTER=True 시
+  fail-open 정책(커버리지 누락 티커는 경고+제외, None 맵은 fail-closed).
+  PIT 유니버스에서 상장폐지 종목 mcap=0 → ADV 미측정 → 제외. 필터 자체가
+  후보 풀 축소 → 분산 붕괴 → 성과 악화를 일관되게 유발 (Day 11 -1.37%,
+  Day 19 -22.74%). **비활성 유지 권장**.
+- ✅ ③ 상장폐지/거래정지 감지+강제청산: `_update_delisting_status()` 구현.
+  가격 0 또는 거래량 0 연속 streak → 마지막 알려진 가격으로 강제 체결.
+  ENABLE_DELISTING_DETECTION=True 기본.
+- ④ 데이터 갱신 자동화: 스크립트 작성 중 (`scripts/refresh_data.sh`).
+- ✅ ⑤ 리스크 가드레일: 일일/월간 손실 한도 + 드로다운 중단 + 쿨다운.
+  opt-in(기본 비활성). `_check_risk_guardrails()` 구현.
+- **보너스**: 리짓 축소 비율 WFA 후보 추가 (REGIME_70/50/30, v5 라이브러리
+  8→11개). `REGIME_REDUCTION`을 `_SAFE_RUNTIME_FIELDS`에 추가해 WFA가
+  축소 비율을 선택 가능하게 함. 데이터로 실행 시 모든 5폴드 REGIME_OFF
+  선택 원인 분석 완료 — 이진 신호의 고정 50% 축소가 성과를 악화시킴.
+
 ## 5) 최종 판정
 
 - Continue: 필수 게이트 모두 통과 + 성과 컷오프 충족
