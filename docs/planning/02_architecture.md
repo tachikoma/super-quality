@@ -150,7 +150,7 @@ provenance 계약은 여러 스냅샷의 날짜별 원천, 원시 바이트 SHA-
 - **신호**: KPI200 종가 > `MA(REGIME_MA_PERIOD)` AND 20거래일 누적 수익률 >
   `REGIME_MIN_RETURN` (기본 0.0; 수익률 구간은 20일 고정)
 - **참**: 전체 익스포저(100%)
-- **거짓**: 50% 익스포저 (리밸런싱에도 반영)
+- **거짓**: 50% 익스포저 (리밸런싱에도 반영; `REGIME_REDUCTION`으로 축소 비율 조정 가능 — v5 라이브러리에서 WFA가 선택)
 
 ### 종합 점수
 
@@ -224,6 +224,13 @@ class PortfolioRebalanceEngine:
 | `MIN_ADV_RATIO` | 0.01 | `ENABLE_ADV_FILTER=True`에서 최소 ADV turnover 비율 임계값 |
 | `ADV_LOOKBACK_DAYS` | 20 | ADV turnover 계산에 사용하는 trailing 룩백 일수 |
 | `ENABLE_ADV_FILTER` | false | ADV turnover 기반 유동성 필터 적용 여부 |
+| `DAILY_LOSS_LIMIT_PCT` | 0.0 | opt-in 일일 NAV 대비 최대 손실 비율 (0=비활성) |
+| `MONTHLY_LOSS_LIMIT_PCT` | 0.0 | opt-in 월간(22거래일) NAV 대비 최대 손실 비율 (0=비활성) |
+| `DRAWDOWN_HALT_PCT` | 0.0 | opt-in 최고 대비 드로다운 halt 임계값 (0=비활성) |
+| `DRAWDOWN_HALT_COOLDOWN_DAYS` | 5 | halt 해소 후 재개 전 최소 대기 거래일 |
+| `ENABLE_DELISTING_DETECTION` | true | 보유 종목 상장폐지/거래정지 감지 (기본 활성) |
+| `DELISTING_ZERO_VOLUME_DAYS` | 3 | 거래량 0 연속 일수로 상장폐지 판정 |
+| `DELISTING_STALE_PRICE_DAYS` | 5 | 가격 0 연속 일수로 상장폐지 판정 |
 
 `MIN_CASH_RATIO`와 `MAX_HOLDINGS`는 현재 엔진에서 각각 최소 현금 버퍼와 동시
 보유 수 상한으로 적용됩니다. `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`,
