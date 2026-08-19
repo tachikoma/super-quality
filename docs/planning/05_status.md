@@ -2,7 +2,30 @@
 
 이 문서는 현재 상태를 기록하는 정식 문서입니다.
 
-최종 갱신: 2026-08-16
+최종 갱신: 2026-08-19
+
+## 2026-08-19 현재 체크포인트
+
+- **Test suite 복구 (커밋 `f47bf9b`)**: macOS 하드코딩 절대 경로로 인한
+  30개 테스트 실패를 `__file__` 기반 경로 해석으로 전환 (6개 DART 스크립트
+  로더 테스트 + `test_data.py` 1건 실제 버그 수정). ruff lint 클린.
+- **Risk guardrails 구현 (커밋 `f47bf9b`)**: `config.py`에 일일/월간 손실
+  한도 + 드로다운 중단(cooldown 포함) + 상장폐지/거래정지 감지 설정 12필드
+  추가 (opt-in, 기본 비활성). `portfolio_engine.py`에 `_check_risk_guardrails`
+  메서드, `_update_delisting_status` 메서드, 강제 청산 로직 추가. 신규
+  테스트 `test_k200_mq_risk_guardrails.py` (8건 통과). 기존 백테스트
+  영향 없음 (기본 비활성).
+- **Regime factor 개선 (커밋 `f47bf9b`)**: `REGIME_REDUCTION`을
+  `_SAFE_RUNTIME_FIELDS`에 추가 (`prepared.py`). 후보 라이브러리 v5
+  (8→11개): `REGIME_70`(0.70), `REGIME_50`(0.50), `REGIME_30`(0.30)
+  추가 — WFA가 리짓 축소 비율을 선택 가능하게 함. 기존 모든 5폴드
+  REGIME_OFF 선택 원인 분석: 이진 리짓 신호(close>MA200 AND 20d
+  return>0)의 고정 50% 축소가 성과를 일관되게 악화.
+- **정리**: 15개 파일 변경, 632줄 추가, 65줄 제거. 테스트 484 passed,
+  1 skipped, 0 failed.
+- **Next priority**: ① WFA 재실행으로 REGIME_70/50/30 후보가 train에서
+  선택되는지 검증 (데이터 필요), ② 실전 준비 5항목 중 ②-⑤ 진행,
+  ③ scorecard Go 조건 재정립.
 
 ## 2026-08-16 현재 체크포인트
 
@@ -97,7 +120,7 @@
 
 | 범주 | 현재 상태 |
 |------|-----------|
-| 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, 테스트가 구현됨. |
+| 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, risk guardrails(일일/월간 손실한도, 드로다운 중단, 상장폐지/거래정지 감지), 테스트가 구현됨. 후보 라이브러리 v5 (11개) — regime 축소 비율 차원 추가. |
 | 기계적 비-PIT 진단 | `robustness` 독립 하위 기간 테스트와 expanding-window `true-walkforward`를 사용할 수 있음. |
 | 검증된 PIT 근거 | **classification 승격 달성 (2026-08-17, Day 18)**: `validated_expanding_walk_forward_pit` 최초 산출. 유니버스 PIT + 재무 PIT validator 통과 + 5/5 fold valid + `filing_date_used` 하드 증명. coverage_summary에 실측 커버리지(36.5%/60.5%) 명시. |
 | 유니버스 PIT | **달성 (2026-08-16)**: `data/universe/kospi200_bundle_pit/` — pykrx KRX 공식 역사 구성원 120개 as-of, 전 as-of `pit_valid=true`. |
@@ -105,7 +128,7 @@
 | 현재 공식 진단 | Day 22/23 strict WF (PIT 유니버스, 2020-2024, v4 후보): **classification=`validated_expanding_walk_forward_pit`**, stitched **+16.85%** (Day 23, 재무 보강 후). 5/5 valid. **성과 게이트 미달은 구조적** — 파라미터 경로(Day 22)와 데이터/커버리지 경로(Day 23) 모두 기각. |
 | 파라미터/데이터 진단 | 파라미터 그리드 8개(Day 21) + 후보 경쟁(Day 22) + DART 재무 보강(Day 23): 모멘텀 가중 0.7/손절 -20%/현금 10% 조합 모두 사후 스누핑으로 기각, 재무 커버리지 70%+ 개선에도 성과 무개선. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | ① 전략 차원 변경 검토 (regime 강화, quality 팩터 재설계, 팩터 window 조정) — 파라미터·데이터 경로 기각 후 유일한 구조적 경로, ② 실전 준비 5항목 중 ②-⑤ 진행 (paper trading 조건부 시작), ③ scorecard Go 조건 재정립 (파라미터·데이터 축 제외 명시). |
+| 다음 게이트 | ① WFA 재실행으로 REGIME_70/50/30 후보가 train에서 선택되는지 검증 (데이터 필요), ② 실전 준비 5항목 중 ②-⑤ 진행 (ADV 정책 명시, 데이터 갱신 자동화, 리스크 가드레일) — 가드레일/상장폐지 감지 완료, ③ scorecard Go 조건 재정립 (파라미터·데이터 축 제외 명시). |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
@@ -143,6 +166,8 @@ merge에서 품질 결측을 허용하는 경우에만 quality가 neutral-fill(0
   순서대로 수행합니다.
 - 포트폴리오 엔진은 regime 비중 조절, trailing stop-loss, 다음 세션 실행, 목표
   비중 조정, 현금 전파, 설정된 수수료/슬리피지/매도세 처리를 포함합니다.
+  opt-in risk guardrails(일일/월간 손실 한도, 드로다운 중단 및 쿨다운,
+  상장폐지/거래정지 감지+강제 청산)가 추가되었습니다.
 - `run`, `robustness`, `true-walkforward` 모듈 CLI 경로가 연결되어 있습니다.
 - `robustness`는 학습이나 파라미터 적합이 없는 독립 하위 기간 테스트이며
   walk-forward 교차검증이 아닙니다.
@@ -157,6 +182,10 @@ merge에서 품질 결측을 허용하는 경우에만 quality가 neutral-fill(0
   metrics, 매니페스트의 비용 합계를 서로 조정·일치시킵니다.
 - 의미 안전성 수정과 테스트가 구현되어 있습니다: v4 skipped-return 모멘텀,
   명시적 품질 가중치, regime 수익률 기준, 손절 검증 및 관련 실행 도메인 검사.
+- risk guardrails(일일/월간 손실 한도, 드로다운 중단+쿨다운, 상장폐지/거래정지
+  감지+강제 청산)과 regime 축소 비율 WFA 후보(REGIME_70/50/30)가 추가되었습니다.
+  guardrails는 opt-in(기본 비활성), 상장폐지 감지는 기본 활성이나 anomaly
+  streak에서만 발동합니다. 기존 백테스트 실행에 영향 없습니다.
 - K200MQ 팩터, 전략, 엔진, provenance, 벤치마크, 비용, WF 회귀 테스트가 구현되어
   있습니다. 레거시 `src/super_quality/` 패키지는 동결된 상태입니다.
 - 로컬 파일 구조 후보 importer가 `src/k200_mq/data/pit_universe.py`에 구현되어

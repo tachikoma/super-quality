@@ -98,6 +98,13 @@
 - [x] `ENABLE_CORRELATION_FILTER=True`에서 trailing close 수익률 기반
   pairwise 상관계수(`MAX_PAIR_CORRELATION`, `CORRELATION_LOOKBACK_DAYS`)를
   사용해 고상관 페어를 greedy 방식으로 제한.
+- [x] risk guardrails(일일/월간 손실 한도, 드로다운 중단+쿨다운,
+  상장폐지/거래정지 감지+강제 청산) 구현 (opt-in, 기본 비활성).
+  (`2026-08-19`, 커밋 `f47bf9b`)
+- [x] regime 축소 비율 WFA 차원 추가: `REGIME_REDUCTION`을
+  `_SAFE_RUNTIME_FIELDS`에 추가하고 후보 라이브러리 v5(8→11개)로
+  REGIME_70(0.70)/REGIME_50(0.50)/REGIME_30(0.30) 추가.
+  (`2026-08-19`, 커밋 `f47bf9b`)
 
 ## 4단계: 통합과 검증
 

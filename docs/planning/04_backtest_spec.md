@@ -57,6 +57,25 @@ Fold 5: Train 2015-2023 | Test 2024
 무효입니다. 산출물은 `true_walkforward/selection_and_folds.json`, `summary.csv`,
 `oos_returns.csv`와 비밀값을 제외한 config/hash, git, preparation 맥락으로 저장됩니다.
 
+### 후보 라이브러리 (v5, 11개)
+
+| ID | 차원 |
+|----|------|
+| BASE | 기본 설정 (TOP_N=20, regime on, 0.5/0.5, SL-15%) |
+| MOM60 | 모멘텀 가중 0.6/품질 0.4 |
+| MOM70 | 모멘텀 가중 0.7/품질 0.3 |
+| SL20 | 손절 -20% |
+| SL20_CASH10 | 손절 -20% + 현금 버퍼 10% |
+| TOP_N_10 | TOP_N=10 |
+| TOP_N_30 | TOP_N=30 |
+| REGIME_OFF | regime 필터 비활성 |
+| **REGIME_70** | regime on, 축소 비율 0.70 |
+| **REGIME_50** | regime on, 축소 비율 0.50 (기본값) |
+| **REGIME_30** | regime on, 축소 비율 0.30 |
+
+굵은 항목은 2026-08-19 추가 (커밋 `f47bf9b`). `REGIME_REDUCTION`을
+`_SAFE_RUNTIME_FIELDS`에 추가해 WFA가 축소 비율을 선택할 수 있게 했습니다.
+
 실제 검증기가 제공되지 않는 한 이는 기계적 비-PIT WF입니다. proxy 구성원, 회계기간
 재무 데이터, 임의의 PIT 플래그 또는 합성 근거에 기반한 실행에는
 `validated_expanding_walk_forward_pit` 라벨을 사용해서는 안 됩니다. 다음 데이터
@@ -107,6 +126,37 @@ DART_API_KEY="" uv run python -m k200_mq.main true-walkforward \
 매수/매도 명목금액, 회전율, 총비용은 거래 로그, 실행 통계, 포트폴리오 스냅샷,
 `metrics.json`, 해당되는 경우 `run_manifest.json` 사이에서 조정·일치합니다. 이는
 사전 ADV 시장 영향 추정치가 아닙니다.
+
+## Risk Guardrails (opt-in)
+
+포트폴리오 엔진에 다음 risk guardrails이 구현되어 있습니다 (2026-08-19). 모두
+opt-in이며 기본 비활성입니다. 기존 백테스트 실행에 영향 없습니다.
+
+### 일일/월간 손실 한도
+
+- `DAILY_LOSS_LIMIT_PCT`: 일일 NAV 대비 최대 허용 손실 비율. 초과 시 전 포지션
+  강제 청산 + 거래 중단(halt).
+- `MONTHLY_LOSS_LIMIT_PCT`: 월간(22거래일) NAV 대비 최대 허용 손실 비율. 초과 시
+  동일하게 강제 청산 + halt.
+- halt 상태에서는 신호 생성이 스킵되고 `regime_scale=0.0`이 적용됩니다.
+
+### 드로다운 중단
+
+- `DRAWDOWN_HALT_PCT`: 최고 대비 현재 NAV 드로다운이 이 임계값을 초과하면 halt.
+- `DRAWDOWN_HALT_COOLDOWN_DAYS`: halt 해소 후 재개 전 최소 대기 거래일 수.
+  쿨다운 중에는 재개되지 않습니다.
+
+### 상장폐지/거래정지 감지
+
+- `ENABLE_DELISTING_DETECTION`: 기본 활성 (True). 보유 포지션 중 가격 0 또는
+  거래량 0이 연속(`DELISTING_STALE_PRICE_DAYS` 또는 `DELISTING_ZERO_VOLUME_DAYS`)
+  발생하면 해당 종목을 마지막 알려진 가격으로 강제 체결합니다.
+- `ENABLE_TRADING_HALT_DETECTION`: 기본 비활성. 거래 정지 종목 감지.
+
+### halt 이벤트
+
+엔진 실행 결과에 `halt_events` 리스트가 포함됩니다. 각 이벤트는 `date`,
+`reason`(`daily_loss`/`monthly_loss`/`drawdown_halt`), `details`를 포함합니다.
 
 ## 벤치마크
 
