@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-27 (updated 2026-08-03)
+**Generated:** 2026-06-27 (updated 2026-08-19)
 **Branch:** main
 
 ## OVERVIEW
@@ -404,3 +404,26 @@ ruff check
   팩터 재설계, 팩터 window 조정), ② 실전 준비 5항목 중 ②-⑤ 진행 (paper
   trading 조건부 시작), ③ scorecard Go 조건 재정립 (파라미터·데이터 축
   제외 명시).
+
+## TASK LOG — 2026-08-19
+
+- **Test suite 복구 (커밋 `f47bf9b`)**: macOS 하드코딩 절대 경로로 인한
+  30개 테스트 실패를 `__file__` 기반 경로 해석으로 전환 (6개 DART 스크립트
+  로더 테스트 + `test_data.py` 1건 실제 버그 수정). ruff lint 클린.
+- **Risk guardrails 구현 (커밋 `f47bf9b`)**: `config.py`에 일일/월간 손실
+  한도 + 드로다운 중단(cooldown 포함) + 상장폐지/거래정지 감지 설정 12필드
+  추가 (opt-in, 기본 비활성). `portfolio_engine.py`에 `_check_risk_guardrails`
+  메서드, `_update_delisting_status` 메서드, 강제 청산 로직 추가. 신규
+  테스트 `test_k200_mq_risk_guardrails.py` (8건 통과). 기존 백테스트
+  영향 없음 (기본 비활성).
+- **Regime factor 개선**: `REGIME_REDUCTION`을 `_SAFE_RUNTIME_FIELDS`에
+  추가 (`prepared.py`). 후보 라이브러리 v5 (8→11개): `REGIME_70`(0.70),
+  `REGIME_50`(0.50), `REGIME_30`(0.30) 추가 — WFA가 리짓 축소 비율을
+  선택 가능하게 함. 기존的所有 5폴드 REGIME_OFF 선택 원인 분석: 이진
+  리짓 신호(close>MA200 AND 20d return>0)의 고정 50% 축소가 성과를
+  일관되게 악화. 후보 확장으로 축소 비율 축 차원 추가.
+- **정리**: 15개 파일 변경, 632줄 추가, 65줄 제거. 테스트 484 passed,
+  1 skipped, 0 failed.
+- **Next priority**: ① WFA 재실행으로 REGIME_70/50/30 후보가 train에서
+  선택되는지 검증 (데이터 필요), ② 실전 준비 5항목 중 ②-⑤ 진행,
+  ③ scorecard Go 조건 재정립.
