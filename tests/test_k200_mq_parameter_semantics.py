@@ -285,7 +285,7 @@ def test_manifest_does_not_allow_stale_factor_definitions_to_override_current_se
     assert definitions["momentum"]["default_formula"] == "close[t-42] / close[t-252] - 1"
     assert definitions["momentum"]["ranking_column"] == "momentum_z"
     assert definitions["momentum"]["source"] == "legacy-cache"
-    assert definitions["regime"]["version"].endswith("-v2")
+    assert definitions["regime"]["version"].endswith("-v6")
     assert definitions["regime"]["formula"] == (
         "close > rolling_ma(ma_period) and cum_return(min_return_days) > min_return"
     )

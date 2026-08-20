@@ -80,13 +80,25 @@ class MomentumQualityStrategy:
                 logger.warning("리밸런싱 %s: ADV 필터 통과 종목 없음", as_of)
                 return []
 
-        # 모멘텀 가중치 + 품질 가중치 = 복합 스코어
-        w_mom = self.config.WEIGHT_MOMENTUM
-        w_qual = self.config.WEIGHT_QUALITY
-        eligible["composite_z"] = (
-            w_mom * eligible["momentum_z"].fillna(0)
-            + w_qual * eligible["quality_z"].fillna(0)
-        )
+        # 복합 스코어 계산
+        if getattr(self.config, "QUALITY_PRIMARY", False):
+            # v6: quality_z를 기본으로, momentum_z에 regime_scale 곱하여 틸트
+            # regime_scale이 없으면 momentum의 절반 가중치 적용
+            mom_tilt = eligible.get("regime_scale", pd.Series(0.5, index=eligible.index))
+            if mom_tilt is None:
+                mom_tilt = pd.Series(0.5, index=eligible.index)
+            eligible["composite_z"] = (
+                eligible["quality_z"].fillna(0)
+                + eligible["momentum_z"].fillna(0) * mom_tilt.fillna(0.5)
+            )
+        else:
+            # 기존: weighted sum
+            w_mom = self.config.WEIGHT_MOMENTUM
+            w_qual = self.config.WEIGHT_QUALITY
+            eligible["composite_z"] = (
+                w_mom * eligible["momentum_z"].fillna(0)
+                + w_qual * eligible["quality_z"].fillna(0)
+            )
 
         # 종목 선택 (top N)
         top_n = self.config.TOP_N
@@ -332,12 +344,22 @@ class MomentumQualityStrategy:
             factor_data["date"] == as_of
         ].copy() if "date" in factor_data.columns else factor_data.copy()
 
-        w_mom = self.config.WEIGHT_MOMENTUM
-        w_qual = self.config.WEIGHT_QUALITY
-        eligible["composite_z"] = (
-            w_mom * eligible.get("momentum_z", pd.Series(0, index=eligible.index))
-            + w_qual * eligible.get("quality_z", pd.Series(0, index=eligible.index))
-        )
+        if getattr(self.config, "QUALITY_PRIMARY", False):
+            mom_tilt = eligible.get("regime_scale", pd.Series(0.5, index=eligible.index))
+            if mom_tilt is None:
+                mom_tilt = pd.Series(0.5, index=eligible.index)
+            eligible["composite_z"] = (
+                eligible.get("quality_z", pd.Series(0, index=eligible.index)).fillna(0)
+                + eligible.get("momentum_z", pd.Series(0, index=eligible.index)).fillna(0)
+                * mom_tilt.fillna(0.5)
+            )
+        else:
+            w_mom = self.config.WEIGHT_MOMENTUM
+            w_qual = self.config.WEIGHT_QUALITY
+            eligible["composite_z"] = (
+                w_mom * eligible.get("momentum_z", pd.Series(0, index=eligible.index))
+                + w_qual * eligible.get("quality_z", pd.Series(0, index=eligible.index))
+            )
 
         return eligible[["ticker", "composite_z"]]
 

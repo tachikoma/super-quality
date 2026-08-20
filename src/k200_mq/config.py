@@ -290,6 +290,16 @@ class K200MQConfig(BacktestConfig):
             raise ValueError("DELISTING_FORCE_LIQUIDATE_PRICE must be 'last_close' or 'last_available'")
         return self
 
+    @model_validator(mode="after")
+    def validate_regime_v6(self) -> "K200MQConfig":
+        """Validate v6 regime and scoring fields."""
+        if self.CONTINUOUS_REGIME:
+            if not 0.0 < self.TARGET_VOL <= 1.0:
+                raise ValueError("TARGET_VOL must satisfy 0.0 < TARGET_VOL <= 1.0 when CONTINUOUS_REGIME=True")
+            if self.VOL_LOOKBACK < 5:
+                raise ValueError("VOL_LOOKBACK must be >= 5 when CONTINUOUS_REGIME=True")
+        return self
+
     # ── 리짓 필터 ──────────────────────────────────────────────
     REGIME_FILTER_ENABLED: bool = Field(
         default=True,
@@ -309,6 +319,24 @@ class K200MQConfig(BacktestConfig):
     REGIME_REDUCTION: float = Field(
         default=0.50,
         description="리�트 비활성 시 포지션 축소 비율 (0.5 = 50%)",
+    )
+
+    # ── 리짓 모드 (v6 재설계) ────────────────────────────────
+    CONTINUOUS_REGIME: bool = Field(
+        default=True,
+        description="연속 변동성 타겟팅 리짓 사용 여부 (False 시 기존 이진 모드)",
+    )
+    TARGET_VOL: float = Field(
+        default=0.15,
+        description="연간 목표 변동성 (0.15 = 15%); CONTINUOUS_REGIME=True일 때만 적용",
+    )
+    VOL_LOOKBACK: int = Field(
+        default=20,
+        description="실현 변동성 룩백 일수 (최소 5); CONTINUOUS_REGIME=True일 때만 적용",
+    )
+    QUALITY_PRIMARY: bool = Field(
+        default=True,
+        description="품질 우선 스코어링 (composite = quality_z + momentum_z * regime_scale)",
     )
 
     # ── 리밸런싱 ──────────────────────────────────────────────
