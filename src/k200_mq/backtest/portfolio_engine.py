@@ -601,6 +601,13 @@ class PortfolioRebalanceEngine:
                 tickers=candidate_tickers,
             )
 
+        # Inject market-level regime_scale into factor_data so the strategy's
+        # quality-primary mode can use it as a momentum tilt factor.
+        current_regime_scale = 0.0 if self._trading_halted else self._regime_scale(regime_scale_map, signal_date)
+        if not factor_at_date.empty and getattr(self.config, "QUALITY_PRIMARY", False):
+            factor_at_date = factor_at_date.copy()
+            factor_at_date["regime_scale"] = current_regime_scale
+
         selected = self.strategy.select_portfolio(
             factor_data=factor_at_date,
             universe=universe,
@@ -611,7 +618,7 @@ class PortfolioRebalanceEngine:
         return {
             "signal_date": signal_date,
             "selected": selected,
-            "regime_scale": 0.0 if self._trading_halted else self._regime_scale(regime_scale_map, signal_date),
+            "regime_scale": current_regime_scale,
         }
 
     def _build_adv_ratio_map(
