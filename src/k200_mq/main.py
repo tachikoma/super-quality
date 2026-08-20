@@ -2269,24 +2269,40 @@ def prepare_k200mq_inputs(
         if not index_raw.empty:
             regime_factor = RegimeFactor()
             index_for_regime = index_raw.reset_index()
-            regime_df = regime_factor.compute(
-                index_for_regime,
-                ma_period=config.REGIME_MA_PERIOD,
-                min_return_days=20,
-                min_return=config.REGIME_MIN_RETURN,
-                reduction=config.REGIME_REDUCTION,
-            )
-            measured_regime = regime_df[
-                regime_df["date"].isin(pd.to_datetime(backtest_dates))
-            ].dropna(subset=["regime", "position_scale"])
-            regime_scale_map = measured_regime.set_index("date")["position_scale"].to_dict()
-            valid_regime = regime_df.dropna(subset=["regime"])
-            logger.info(
-                "  리짓: %d일 중 Bullish %d일 (%.1f%%)",
-                len(valid_regime),
-                int(valid_regime["regime"].sum()),
-                valid_regime["regime"].mean() * 100 if not valid_regime.empty else 0.0,
-            )
+            use_continuous = getattr(config, "CONTINUOUS_REGIME", False)
+            if use_continuous:
+                regime_df = regime_factor.compute_continuous(
+                    index_for_regime,
+                    ma_period=config.REGIME_MA_PERIOD,
+                    target_vol=getattr(config, "TARGET_VOL", 0.15),
+                    vol_lookback=getattr(config, "VOL_LOOKBACK", 20),
+                )
+                regime_scale_map = regime_df.set_index("date")["position_scale"].to_dict()
+                valid_regime = regime_df.dropna(subset=["position_scale"])
+                logger.info(
+                    "  리짓(연속): %d일 중 평균 스케일 %.3f",
+                    len(valid_regime),
+                    valid_regime["position_scale"].mean() if not valid_regime.empty else 0.0,
+                )
+            else:
+                regime_df = regime_factor.compute(
+                    index_for_regime,
+                    ma_period=config.REGIME_MA_PERIOD,
+                    min_return_days=20,
+                    min_return=config.REGIME_MIN_RETURN,
+                    reduction=config.REGIME_REDUCTION,
+                )
+                measured_regime = regime_df[
+                    regime_df["date"].isin(pd.to_datetime(backtest_dates))
+                ].dropna(subset=["regime", "position_scale"])
+                regime_scale_map = measured_regime.set_index("date")["position_scale"].to_dict()
+                valid_regime = regime_df.dropna(subset=["regime"])
+                logger.info(
+                    "  리짓(이진): %d일 중 Bullish %d일 (%.1f%%)",
+                    len(valid_regime),
+                    int(valid_regime["regime"].sum()),
+                    valid_regime["regime"].mean() * 100 if not valid_regime.empty else 0.0,
+                )
             manifest_context["regime_map"] = {
                 "enabled": True,
                 "status": "applied",
