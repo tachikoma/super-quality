@@ -30,7 +30,7 @@ VALIDATED_EXPANDING_WALK_FORWARD_PIT = "validated_expanding_walk_forward_pit"
 mechanical_expanding_walk_forward_non_pit = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
 validated_expanding_walk_forward_pit = VALIDATED_EXPANDING_WALK_FORWARD_PIT
 
-CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v4"
+CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v6"
 DEFAULT_MIN_EXITS = 5
 DEFAULT_TIE_TOLERANCE = 0.05
 OBJECTIVE_TRAIN_SHARPE = "train_sharpe"
@@ -192,10 +192,9 @@ BASE_CANDIDATE = CandidateSpec(
 )
 
 DEFAULT_CANDIDATE_LIBRARY: tuple[CandidateSpec, ...] = (
+    # ── Baseline ────────────────────────────────────────────
     BASE_CANDIDATE,
-    # Momentum/quality weight-axis snapshots.  BASE is the 0.5/0.5 midpoint;
-    # MOM60 and MOM70 let the train pass select a momentum-leaning weight
-    # instead of leaving it to post-hoc sensitivity search.
+    # ── Momentum/quality weight axis ────────────────────────
     CandidateSpec(
         "MOM60",
         {
@@ -214,11 +213,7 @@ DEFAULT_CANDIDATE_LIBRARY: tuple[CandidateSpec, ...] = (
             "WEIGHT_QUALITY": 0.3,
         },
     ),
-    # Grid-derived improvements over MOM70 (validated PIT universe).  SL20 is
-    # the best-performing grid cell (stop-loss -20%); SL20_CASH10 adds a 10%
-    # cash buffer which was the only cell to clear the -25% MDD gate.  Both
-    # stop-loss and cash-reserve are runtime-only engine settings, so they are
-    # safe candidate dimensions.
+    # ── Stop-loss candidates ────────────────────────────────
     CandidateSpec(
         "SL20",
         {
@@ -240,23 +235,52 @@ DEFAULT_CANDIDATE_LIBRARY: tuple[CandidateSpec, ...] = (
             "MIN_CASH_RATIO": 0.10,
         },
     ),
+    # ── Top-N axis ──────────────────────────────────────────
     CandidateSpec("TOP_N_10", {"TOP_N": 10, "REGIME_FILTER_ENABLED": True}),
     CandidateSpec("TOP_N_30", {"TOP_N": 30, "REGIME_FILTER_ENABLED": True}),
+    # ── Regime axis ─────────────────────────────────────────
     CandidateSpec("REGIME_OFF", {"TOP_N": 20, "REGIME_FILTER_ENABLED": False}),
-    # Regime reduction-axis candidates.  REGIME_OFF removes the filter entirely;
-    # these let the train pass choose an optimal reduction ratio instead of the
-    # binary on/off.
+    # ── v6: Quality-primary + continuous regime ─────────────
     CandidateSpec(
-        "REGIME_70",
-        {"TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.70},
+        "QP_V6",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "QUALITY_PRIMARY": True,
+            "CONTINUOUS_REGIME": True,
+        },
     ),
     CandidateSpec(
-        "REGIME_50",
-        {"TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.50},
+        "QP_V6_MOM70",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "QUALITY_PRIMARY": True,
+            "CONTINUOUS_REGIME": True,
+            "WEIGHT_MOMENTUM": 0.7,
+            "WEIGHT_QUALITY": 0.3,
+        },
     ),
     CandidateSpec(
-        "REGIME_30",
-        {"TOP_N": 20, "REGIME_FILTER_ENABLED": True, "REGIME_REDUCTION": 0.30},
+        "QP_V6_SL20",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "QUALITY_PRIMARY": True,
+            "CONTINUOUS_REGIME": True,
+            "SL_STOP_LOSS": -0.20,
+        },
+    ),
+    CandidateSpec(
+        "QP_V6_SL20_CASH10",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "QUALITY_PRIMARY": True,
+            "CONTINUOUS_REGIME": True,
+            "SL_STOP_LOSS": -0.20,
+            "MIN_CASH_RATIO": 0.10,
+        },
     ),
 )
 CANDIDATE_LIBRARY = DEFAULT_CANDIDATE_LIBRARY
