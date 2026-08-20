@@ -427,3 +427,27 @@ ruff check
 - **Next priority**: ① WFA 재실행으로 REGIME_70/50/30 후보가 train에서
   선택되는지 검증 (데이터 필요), ② 실전 준비 5항목 중 ②-⑤ 진행,
   ③ scorecard Go 조건 재정립.
+
+## TASK LOG — 2026-08-19 (cont., Day 24: REGIME_REDUCTION axis 검증)
+
+- **Day 24 WFA v5 실행 (`outputs_k200mq_day24_v5_candidates`)**: 11개
+  후보(REGIME_70/50/30 포함) 경쟁, classification=`validated_expanding_walk_forward_pit`,
+  valid=True, 5/5 폴드, OOS 1,231점.
+- **REGIME_70/50/30 선택 0건**: 모든 폴드에서 BASE, REGIME_30, REGIME_50,
+  REGIME_70가 동일한 train_sharpe 기록 — REGIME_REDUCTION 파라미터가
+  전략 결과에 영향 없음. 리짓 신호 자체(이진 close>MA200 AND 20d return>0)
+  가 성과에 기여하지 않아 축소 비율 조정이 무의미.
+- **폴드별 선택**: Fold 1-3 REGIME_OFF / Fold 4-5 MOM60 (Day 22와 동일 패턴).
+- **OOS 성과**: stitched **+16.41%** (Day 22 +20.55% 대비 -4.1%p 하락),
+  CAGR 3.16%, Sharpe 0.274, MDD -37.99%, Calmar 0.083. MDD 악화(-20.8%→
+  -37.99%)는 새로 다운로드된 가격 데이터에서 상장폐지 종목의 price history
+  변화와 상장폐지 감지(logic: `ENABLE_DELISTING_DETECTION=true`) 활성화가
+  복합 영향.
+- **정리**: REGIME_REDUCTION 축은 구조적으로 실패 확증. 리짓 신호 자체가
+  불리하면 축소 비율은 무의미. regime 강화의 유일한 경로는 신호 자체 재설계
+  (continuous scaling, multi-indicator regime, 등).
+- **다운로드 로그**: PIT 유니버스 323개 티커 백필로 pykrx 가격 재다운로드
+  (~50분 소요), 재무 PIT 매핑 (~3시간 소요, 468K facts).
+- **Next priority**: ① regime 신호 재설계 검토 (continuous MA200 거리 기반,
+  multi-indicator), ② scorecard 재판정 (Day 24 결과 반영), ③ 실전 준비
+  항목 추가 검토.
