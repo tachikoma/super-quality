@@ -104,7 +104,9 @@
 - [x] regime 축소 비율 WFA 차원 추가: `REGIME_REDUCTION`을
   `_SAFE_RUNTIME_FIELDS`에 추가하고 후보 라이브러리 v5(8→11개)로
   REGIME_70(0.70)/REGIME_50(0.50)/REGIME_30(0.30) 추가.
-  (`2026-08-19`, 커밋 `f47bf9b`)
+  (`2026-08-19`, 커밋 `f47bf9b`). **Day 24 검증 결과: REGIME_70/50/30
+  선택 0건 — 이진 리짓 신호 자체가 성과에 기여하지 않아 축소 비율 조정
+  무의미 확증. REGIME_REDUCTION 축은 구조적 실패.**
 
 ## 4단계: 통합과 검증
 
