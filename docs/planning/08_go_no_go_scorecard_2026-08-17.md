@@ -1,9 +1,42 @@
-# Go/No-Go 판정표 (2026-08-17 Day 20 validated + Monte Carlo CI)
+# Go/No-Go 판정표 (2026-08-21 Iteration 1–2b 최종 결정)
 
 기준 템플릿: `docs/planning/08_go_no_go_scorecard_template.md`
 이전 판정: `docs/planning/08_go_no_go_scorecard_2026-08-16.md` (Hold — Day 14)
 
-## 실행 개요
+## 최종 결정
+
+- **MQ 연구는 중단하고 피벗한다.** Iteration 3 섹터 30% cap은 실행하지 않으며,
+  **live trading도 하지 않는다.** 아래 수치는 투자 성과 근거가 아닌 진단 기록이다.
+- **Iteration 1 v6** — quality-primary + continuous volatility-targeted regime
+  통합 배선 수정 후 QP 후보 0/5 선택. OOS stitched **-0.87%**, CAGR
+  **-0.18%**, Sharpe **-0.010**, MDD **-35.80%**, Calmar **-0.005**.
+  모든 성과 게이트 미달.
+- **Iteration 2 v7** — candidate window override는 유효한 모멘텀 성과 실험이
+  아니다. 후보 override 전에 factor data를 한 번만 계산해 MOM6_1과 해당 기본
+  후보의 train Sharpe가 동일했다. 아키텍처 발견으로만 기록한다.
+- **Iteration 2b direct fixed 6-1** — 임시 long 126일/skip 21일 후 되돌림.
+  OOS stitched **+7.15%**, CAGR **1.48%**, Sharpe **0.124**, MDD **-30.35%**,
+  Calmar **0.049**. 2020 **+17.0%**, 2021 **+0.6%**, 2022 **-6.1%**,
+  2023 **+7.3%**, 2024 **-12.6%**; 모든 성과 게이트 미달. Day 24 baseline보다
+  MDD는 방향성 개선이나 CAGR/Sharpe는 낮아졌다.
+- Oracle 권고에 따라 섹터 cap은 실행하지 않는다. 섹터 집중이 손실 원인이라고
+  입증되지 않았고, 현재 cap은 benchmark-neutral이 아닌 절대 cap이다. 핵심 문제는
+  signal strength와 구조적 drawdown이다.
+
+### 재사용 전 필수 비성과 감사
+
+1. fold winner와 selected Sharpe가 tie threshold를 준수하는지 확인한다.
+2. effective config와 momentum series fingerprint를 함께 기록한다.
+3. factor-computation 설정을 runtime-safe candidate override에서 제거하거나,
+   후보별 factor 재계산을 명시한다.
+
+새 전략은 별도 경제적 정당화와 사전 등록이 필요하다. 2025–2026 및 향후
+prospective paper 기간은 보존하고 현재 OOS는 추가 튜닝하지 않는다. 향후 MQ 유사
+주장은 strict PIT 유효 유니버스, DART filing-date 재무, 관련 시 PIT sector map,
+5/5 folds, validated classification, 동일 cost/delisting 규칙,
+`EXCLUDE_KOSPI_TOP_N=0`, 모든 성과 게이트를 한 번의 사전 등록 실행에서 충족해야 한다.
+
+## 과거 실행 개요 (Day 18/20/24)
 
 - 검증 대상: `outputs_k200mq_day20_validated_mom70/` — 모멘텀 가중 0.7/0.3,
   PIT 유니버스, classification=`validated_expanding_walk_forward_pit`
@@ -44,9 +77,11 @@
 | 서브기간 편중 | 과도 편중 없음 | 2020 한 해가 stitched 성과의 대부분 (+54.7%) | 편중 있음 | `oos_returns.csv` |
 | 샘플 불확실성 | 신뢰구간 폭 | MDD CI 폭 ~39%p, Sharpe CI 폭 ~2.05 | 통과 (기록용) | 부트스트랩 |
 
-## 4) 실전 적용 검토 (Oracle, 2026-08-17)
+## 4) 실전 적용 검토 (과거 기록; 2026-08-17)
 
-- **결론: 자동 주문 실전 No, paper trading 조건부 Yes.** 주문 실행 레이어 없음,
+- **당시 결론: 자동 주문 실전 No, paper trading 조건부 Yes.** 이는 최종 종료
+  결정 전 검토이며, 현재는 paper trading을 포함한 live trading을 하지 않는다.
+  주문 실행 레이어 없음,
   유동성/상폐 처리/데이터 갱신/파라미터 검증 4개 갭 존재.
 - 실전 전 필수 5개: ① 모멘텀 0.7/0.3을 WF 후보로 재검증(스누핑 해소 —
   **완료, 커밋 `48f3fc8` MOM60/MOM70 후보 추가**), ② ADV 유동성 정책 명시,
@@ -83,12 +118,16 @@
 - Hold: 필수 게이트 통과, 성과 컷오프 일부 미달
 - Pivot: 필수 게이트 미통과 또는 안정성 반복 실패
 
-최종 판정: **Hold (성과 게이트 미달 — Day 24 v5에서 모든 지표 악화. REGIME_REDUCTION 축 실패 확증. 전략 차원 변경만 남음)**
+최종 판정: **Pivot (MQ 연구 중단 — Iteration 1–2b에서 모든 성과 게이트 미달. Iteration 3 섹터 cap 미실행, live trading 금지)**
 
-판정 사유 (3줄 요약):
-1. **Day 24 WFA v5 (`outputs_k200mq_day24_v5_candidates`)**: 11개 후보 경쟁 → REGIME_70/50/30 선택 0건, 모든 폴드 REGIME_OFF×3 + MOM60×2 (Day 22와 동일). stitched **+16.41%** (Day 22 +20.55% 대비 -4.1%p 하락), MDD **-37.99%** (Day 22 -20.8% 대비 -17.2%p 악화). 데이터 갱신 + 상장폐지 감지 활성화의 복합 영향.
-2. **REGIME_REDUCTION 축 구조적 실패 확증**: BASE/REGIME_30/50/70이 모든 폴드에서 동일 train_sharpe — 이진 리짓 신호(close>MA200 AND 20d return>0)의 축소 비율 조정이 성과에 영향 없음. regime 강화의 유일한 경로는 신호 자체 재설계.
-3. **실전 준비 5항목 모두 완료** (① WF 후보화, ② ADV 정책, ③ 상장폐지 감지, ④ 데이터 갱신 자동화, ⑤ 리스크 가드레일). 그러나 성과 게이트 미달로 실전 자본 배치 불가. **OOS/게이트 기준 재검토 또는 전략 차원 변경(regime 신호 재설계, quality 팩터 개선) 필요.**
+판정 사유:
+1. **Iteration 1 v6**: QP 후보 0/5, stitched -0.87%, CAGR -0.18%, Sharpe
+   -0.010, MDD -35.80%, Calmar -0.005 — 모든 게이트 미달.
+2. **Iteration 2 v7**: factor 선계산으로 candidate window override가 무효인
+   아키텍처 진단이며, 성과 근거로 사용할 수 없다.
+3. **Iteration 2b**: stitched +7.15%, CAGR 1.48%, Sharpe 0.124, MDD -30.35%,
+   Calmar 0.049 — 모든 게이트 미달. 따라서 섹터 cap 추가 실행이나 live trading을
+   진행하지 않는다.
 
 관련 산출물:
 - `outputs_k200mq_day22_candidate_v4/`, `outputs_k200mq_day23_pit_annual_merge/`

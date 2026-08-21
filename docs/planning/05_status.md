@@ -2,9 +2,49 @@
 
 이 문서는 현재 상태를 기록하는 정식 문서입니다.
 
-최종 갱신: 2026-08-20
+최종 갱신: 2026-08-21
 
-## 2026-08-20 현재 체크포인트 (Day 24: REGIME_REDUCTION 축 검증 완료)
+## 2026-08-21 최종 결정 (Iteration 1–2b)
+
+- **MQ 연구는 중단하고 전략을 피벗한다.** Iteration 3 섹터 30% cap은 실행하지
+  않으며, **실전 매매와 live trading은 하지 않는다.** 현재 결과는 진단 기록일
+  뿐 투자 성과 근거가 아니다.
+- **Iteration 1 — v6**: quality-primary + continuous volatility-targeted regime
+  통합 배선 수정 후 QP 후보는 0/5 선택. OOS stitched **-0.87%**, CAGR
+  **-0.18%**, Sharpe **-0.010**, MDD **-35.80%**, Calmar **-0.005**.
+  모든 성과 게이트 미달.
+- **Iteration 2 — v7**: candidate window override는 유효한 모멘텀 실험이 아니다.
+  후보 override 전에 factor data를 한 번만 계산하므로 MOM6_1과 해당 기본 후보의
+  train Sharpe가 동일했다. 이는 성과 근거가 아니라 **아키텍처 발견**으로만
+  기록한다.
+- **Iteration 2b — direct fixed 6-1**: 임시로 long 126일/skip 21일을 기본값으로
+  사용한 뒤 되돌렸다. OOS stitched **+7.15%**, CAGR **1.48%**, Sharpe
+  **0.124**, MDD **-30.35%**, Calmar **0.049**. 연도별은 2020 **+17.0%**,
+  2021 **+0.6%**, 2022 **-6.1%**, 2023 **+7.3%**, 2024 **-12.6%**이며,
+  모든 성과 게이트 미달이다. Day 24 baseline보다 MDD는 방향성 개선이나
+  CAGR/Sharpe는 낮아졌다.
+- Oracle 권고에 따라 섹터 30% cap은 실행하지 않는다. 손실의 원인이 섹터
+  집중이라고 입증되지 않았고, 현재 cap은 benchmark-neutral cap이 아닌 절대 cap이다.
+  현재 관찰된 핵심 문제는 signal strength와 구조적 drawdown이다.
+
+### 재사용 전 필수 비성과 감사
+
+다음 항목을 닫기 전에는 현재 MQ 결과를 재사용하거나 추가 튜닝하지 않는다.
+
+1. fold winner와 selected Sharpe의 관계가 사전 정의한 tie threshold를 준수하는지
+   확인한다.
+2. effective config와 momentum series fingerprint를 함께 기록한다.
+3. factor-computation 설정을 runtime-safe candidate override에서 제거하거나,
+   후보별 factor 재계산을 명시적으로 구현한다.
+
+새 전략은 별도 경제적 가설로 정당화하고 사전 등록해야 한다. 2025–2026 및
+향후 prospective paper 기간은 손대지 않은 채 보존하며, 현재 OOS를 더 튜닝하지
+않는다. 향후 MQ 유사 주장을 하려면 한 번의 사전 등록 실행에서 strict PIT 유효
+유니버스, DART filing-date 재무, 관련 시 PIT sector map, 5/5 folds,
+`validated_expanding_walk_forward_pit`, 동일한 cost/delisting 규칙,
+`EXCLUDE_KOSPI_TOP_N=0`, 모든 성과 게이트를 함께 충족해야 한다.
+
+## 2026-08-20 체크포인트 (Day 24: REGIME_REDUCTION 축 검증 완료, 보관)
 
 - **Day 24 WFA v5 실행 (`outputs_k200mq_day24_v5_candidates`)**: 11개 후보
   (REGIME_70/50/30 포함) 경쟁. classification=`validated_expanding_walk_forward_pit`,
@@ -19,8 +59,7 @@
   MDD -37.99%는 상장폐지 감지 활성화와 새 가격 데이터의 복합 영향.
 - **실전 준비 5항목 모두 완료**: ① WF 후보화, ② ADV 정책, ③ 상장폐지 감지,
   ④ 데이터 갱신 자동화, ⑤ 리스크 가드레일.
-- **Next priority**: ① regime 신호 재설계 검토 (continuous MA200 거리 기반,
-  multi-indicator), ② OOS/게이트 기준 재검토, ③ quality 팩터 재설계 검토.
+- **후속 작업**: 현재 MQ에는 없다. 위 최종 결정과 재사용 전 감사 조건을 따른다.
 
 ## 2026-08-16 현재 체크포인트
 
@@ -115,15 +154,15 @@
 
 | 범주 | 현재 상태 |
 |------|-----------|
-| 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, risk guardrails(일일/월간 손실한도, 드로다운 중단, 상장폐지/거래정지 감지), 테스트가 구현됨. 후보 라이브러리 v5 (11개) — regime 축소 비율 차원 추가. |
+| 구현된 인프라 | 파이프라인, 팩터, 포트폴리오 엔진, CLI, 벤치마크, 실제 체결 비용 귀속, KRX/DART 로컬 provenance 계약, 검증 보호 장치, risk guardrails(일일/월간 손실한도, 드로다운 중단, 상장폐지/거래정지 감지), 테스트가 구현됨. MQ 연구는 중단·피벗하며 live trading은 하지 않는다. |
 | 기계적 비-PIT 진단 | `robustness` 독립 하위 기간 테스트와 expanding-window `true-walkforward`를 사용할 수 있음. |
 | 검증된 PIT 근거 | **classification 승격 달성 (2026-08-17, Day 18)**: `validated_expanding_walk_forward_pit` 최초 산출. 유니버스 PIT + 재무 PIT validator 통과 + 5/5 fold valid + `filing_date_used` 하드 증명. coverage_summary에 실측 커버리지(36.5%/60.5%) 명시. |
 | 유니버스 PIT | **달성 (2026-08-16)**: `data/universe/kospi200_bundle_pit/` — pykrx KRX 공식 역사 구성원 120개 as-of, 전 as-of `pit_valid=true`. |
 | 재무 PIT | 달성: `dart_aggregated_day4_extended_fy2014_pit/` (FY2014 XBRL + PIT 연간 2015-2024 보강, 커밋 `7dabdc1`), `pit_filing_date` + `pit_valid=true`. |
-| 현재 공식 진단 | Day 22/23 strict WF (PIT 유니버스, 2020-2024, v4 후보): **classification=`validated_expanding_walk_forward_pit`**, stitched **+16.85%** (Day 23, 재무 보강 후). 5/5 valid. **성과 게이트 미달은 구조적** — 파라미터 경로(Day 22)와 데이터/커버리지 경로(Day 23) 모두 기각. |
-| 파라미터/데이터 진단 | 파라미터 그리드 8개(Day 21) + 후보 경쟁(Day 22) + DART 재무 보강(Day 23): 모멘텀 가중 0.7/손절 -20%/현금 10% 조합 모두 사후 스누핑으로 기각, 재무 커버리지 70%+ 개선에도 성과 무개선. |
+| 현재 공식 진단 | MQ 연구 종료 결정. Iteration 1 v6와 Iteration 2b direct fixed 6-1은 모든 성과 게이트 미달. Iteration 2 v7 window override는 factor 선계산으로 무효인 아키텍처 진단. |
+| 파라미터/데이터 진단 | 현재 OOS 추가 튜닝 금지. 재사용 전 tie threshold, effective config·momentum fingerprint, 후보별 factor 재계산 여부를 감사한다. |
 | 폐기된 결과 | v4 이전 및 현금 전파 수정 이전의 모든 성과 출력은 감사 전용이며 현재 결과가 아님. |
-| 다음 게이트 | ① WFA 재실행으로 REGIME_70/50/30 후보가 train에서 선택되는지 검증 (데이터 필요), ② 실전 준비 5항목 중 ②-⑤ 진행 (ADV 정책 명시, 데이터 갱신 자동화, 리스크 가드레일) — 가드레일/상장폐지 감지 완료, ③ scorecard Go 조건 재정립 (파라미터·데이터 축 제외 명시). |
+| 다음 게이트 | MQ에는 없음. 새 전략은 별도 경제적 정당화·사전 등록과 손대지 않은 2025–2026/ prospective paper 기간을 전제로 한다. |
 
 이 프로젝트는 검증된 투자 전략이 아니라 베타 단계의 인프라입니다.
 
@@ -399,9 +438,10 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
 현금 전파 수정 전의 실행도 포함되어 있습니다. 어느 것도 현재 근거, 검증된 결과,
 파라미터 선택의 기반이 아닙니다.
 
-## PIT 게이트와 다음 우선순위
+## PIT 게이트와 종료 결정
 
-현재 다음 우선순위는 다음과 같습니다.
+아래 항목은 과거 완료 기록이다. Iteration 1–2b 종료 결정 이후 추가 MQ 실행
+우선순위는 없다.
 
 1. ~~bundle-directory 유니버스의 198 구성원 역사 날짜를 documented transition exception
   또는 원천 보정으로 정리해 strict preflight를 통과시킵니다.~~
@@ -432,17 +472,15 @@ v4 모멘텀 의미 교정 이전에 생성된 모든 결과는 `obsolete_pre_mo
    (`outputs_k200mq_day18_validation_check_v2`)에서 최초
    `validated_expanding_walk_forward_pit` 산출 (coverage_summary 0.365/0.605,
    limitations에 실측 커버리지 명시, "Mechanical non-PIT" 잔존 없음).
-6. **성과 게이트 미달 분석 (다음 게이트)**: scorecard 2026-08-16 **Hold** —
-   OOS CAGR/Sharpe/Calmar 기준 미달 + 2020 서브기간 편중. 모멘텀 가중
-   0.7/0.3(Day 16 +53.23%) 승격 후 재검증, ADV 필터 PIT 재실행, PIT 기준
-   재무 커버리지 개선(73/200 = 36.5%).
+6. **종료 (2026-08-21)**: Iteration 1–2b 연구 후 MQ를 중단·피벗한다.
+   Iteration 3 섹터 30% cap은 실행하지 않으며 live trading도 하지 않는다.
 
-이 단계가 완료될 때까지 출력 수치는 기계적 진단으로만 취급합니다. (Day 14 실행은 strict
+당시 단계에서 출력 수치는 기계적 진단으로만 취급했습니다. (Day 14 실행은 strict
 preflight(유니버스 전 as-of `pit_valid=true` + financial `pit_filing_date`)를 통과하고
 5/5 valid를 달성했으나 `validated_expanding_walk_forward_pit` 승격은 위 전제조건 2건과
 별도 검증 게이트를 충족한 뒤 adapter 변경으로 결정됩니다.)
 
-### OpenDART 로컬 계약과 다음 단계
+### OpenDART 로컬 계약과 과거 다음 단계
 
 로컬 DART 계층은 다음 OpenDART 응답 계약을 기준으로 설계되어 있습니다.
 
@@ -459,10 +497,10 @@ preflight(유니버스 전 as-of `pit_valid=true` + financial `pit_filing_date`)
   포함될 때까지 보류합니다. 조인 후 시각을 주입하는 방식은 거부하며 철회 제출과
   미지정 정정 정책도 거부합니다.
 
-다음 단계는 OpenDART API/벌크 다운로드를 이 원시 로컬 파일과 매니페스트에 연결하는
-것입니다. 원시 로컬 파일 → 품질 팩터 소비 경로는 공용 계정 매핑과 long→wide pivot으로
-이미 연결되어 있습니다(2026-08-06). 수집 어댑터와 역사 파일이 준비될 때까지 현재
-품질 동작과 모든 비-PIT 진단은 변하지 않습니다.
+당시 다음 단계는 OpenDART API/벌크 다운로드를 이 원시 로컬 파일과 매니페스트에
+연결하는 것이었습니다. 원시 로컬 파일 → 품질 팩터 소비 경로는 공용 계정 매핑과
+long→wide pivot으로 이미 연결되어 있습니다(2026-08-06). 이 기록은 MQ 종료 결정
+이전의 PIT 작업 이력이다.
 
 ## 보류 또는 미지원 설정
 

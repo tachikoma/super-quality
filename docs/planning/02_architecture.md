@@ -1,5 +1,11 @@
 # 아키텍처 설계 — KOSPI 200 모멘텀 + 품질
 
+> **보관·대체 공지 (2026-08-21)**: 이 문서는 K200 MQ 아키텍처의 역사적 설계 및
+> 감사 참고용이다. MQ 연구는 중단·피벗되었고, 문서에 남은 미래 지향적 지침은
+> 실행하지 않는다. 최종 결정은 [`05_status.md`](05_status.md) 및
+> [`08_go_no_go_scorecard_2026-08-17.md`](08_go_no_go_scorecard_2026-08-17.md)를
+> 참조한다. live/paper trading과 현재 OOS 추가 튜닝은 하지 않는다.
+
 ## 패키지 구조
 
 ```text
@@ -86,7 +92,7 @@ docs/planning/
     │         └─ mcap 기준 상위 50개 제외 (KOSPI 50 희석)
     │
     ├── 6. 포트폴리오 구성: 동일 비중 또는 순위 가중
-    │    ├─ 섹터 노출 한도: ENABLE_SECTOR_CAP + PIT 섹터 맵 조건에서만 적용
+    │    ├─ 섹터 노출 한도: 역사 설계상 경로이며 최종 결정상 구현·실행하지 않음
     │    ├─ ADV 유동성 필터: ENABLE_ADV_FILTER + trailing ADV turnover 조건에서 적용
     │    └─ 상관관계 제약: ENABLE_CORRELATION_FILTER + trailing return 이력 조건에서 적용
     │
@@ -111,7 +117,7 @@ provenance 계약은 여러 스냅샷의 날짜별 원천, 원시 바이트 SHA-
 타임스탬프, 행 수, 스냅샷 식별자, 재로딩 결과와 최종 정규화 프레임의 일치를
 검증합니다. 로컬 OpenDART 계약은 존재하며, 2026-08-06부터 공용 account→wide 매핑
 (`data/account_mapping.py`)과 long→wide pivot(`dart_pit.pivot_financial_facts_to_wide`)을
-통해 품질 팩터 기본 경로에 연결되었습니다. 남은 작업은 원시 API/벌크 수집으로
+통해 품질 팩터 기본 경로에 연결되었습니다. 당시 남은 작업은 원시 API/벌크 수집으로
 역사 데이터를 확보하는 것입니다.
 
 ## 팩터 설계 상세
@@ -239,9 +245,13 @@ class PortfolioRebalanceEngine:
 않습니다. `MOMENTUM_WINDOW_SHORT`는 진단용 표시만 계산하며 민감도 또는
 readiness/운영 파라미터로 취급하지 않습니다.
 
+### 섹터 cap 경로 (역사 설계; 구현·실행하지 않음)
+
 `src/k200_mq/data/sector_pit.py`
 계약 레이어는 PIT 섹터 맵 정규화/검증과 as-of 스냅샷 생성을 제공하며, 실행 엔진은
-`ENABLE_SECTOR_CAP=True`에서 해당 준비 산출물의 검증/전체 커버리지를 요구합니다.
+`ENABLE_SECTOR_CAP=True`에서 해당 준비 산출물의 검증/전체 커버리지를 요구하도록
+설계되었다. 그러나 Oracle 권고와 2026-08-21 최종 결정에 따라 Iteration 3 섹터
+30% cap 경로는 구현·실행하지 않는다.
 ADV 유동성 필터는 준비 아티팩트 없이 엔진에서 계산되며, 리밸런싱 신호일까지의
 trailing ADV turnover(`volume*close/mcap`) 평균이 `MIN_ADV_RATIO` 이상인 후보만
 유지합니다.

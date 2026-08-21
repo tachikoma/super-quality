@@ -1,5 +1,11 @@
 # 커버리지 갭 분석 — 첫 리밸런스 missing 51 티커 (2026-08-11; superseded erratum)
 
+> **보관·대체 공지 (2026-08-21)**: 이 문서는 K200 MQ 커버리지 분석의 역사적·감사
+> 참고용이다. MQ 연구는 중단·피벗되었고, 문서에 남은 미래 지향적 remediation 및
+> 실행 지침은 실행하지 않는다. 최종 결정은 [`05_status.md`](05_status.md) 및
+> [`08_go_no_go_scorecard_2026-08-17.md`](08_go_no_go_scorecard_2026-08-17.md)를
+> 참조한다. live/paper trading과 현재 OOS 추가 튜닝도 하지 않는다.
+
 배경: Day 8 strict PIT WF(`outputs_k200mq_day8_strict_extended/`)의 first-ready
 리밸런스(2015-05-29)에서 `momentum_z` usable 147/198, missing 51 티커로 확인됨.
 `quality_required=false`이므로 이 수치는 financial/quality coverage가 아니라
@@ -97,7 +103,10 @@ financial-gap 해석의 감사 이력이다):
 - 51개 전부가 2015-05-29 스냅샷(`kospi200_2015-05-29.csv`, 198종목)에 포함.
 - 따라서 유니버스 누락이 아니라 데이터 갭 + proxy 특성.
 
-## 해결 방안
+## 해결 방안 (superseded; 조치 없음)
+
+아래 DART/PIT remediation 제안은 2026-08-21 최종 결정으로 대체되었다. 역사적
+분석으로만 보존하며 추가 수집·보강·재실행은 하지 않는다.
 
 1. **D 유형 (7개)**: `--financial-start-year 2014`로 배치 스펙 재생성 후 2014회계연도
    facts 수집 (DART API 키 필요). 1년 갭 4개(018260/028260/112610/204320)는 즉시 해소.

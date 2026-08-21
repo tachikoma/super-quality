@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-27 (updated 2026-08-19)
+**Generated:** 2026-06-27 (updated 2026-08-21)
 **Branch:** main
 
 ## OVERVIEW
@@ -21,7 +21,7 @@ Super Quality 2.0 is a Python‑based quantitative backtesting system for Korean
 | Version | Status | Tag |
 |---------|--------|-----|
 | Super Quality 2.0 (KOSDAQ small-cap) | **ABANDONED** | `v2.0-abandoned` |
-| KOSPI 200 Momentum + Quality | Beta; mechanical non-PIT diagnostics only | — |
+| KOSPI 200 Momentum + Quality | Research stopped/pivoted; no live trading | — |
 
 ## WHERE TO LOOK (LEGACY)
 | Task | Location | Notes |
@@ -37,7 +37,7 @@ Super Quality 2.0 is a Python‑based quantitative backtesting system for Korean
 ## WHERE TO LOOK (NEW — KOSPI 200 MQ)
 | Task | Location | Notes |
 |------|----------|-------|
-| New strategy package | `src/k200_mq/` | Beta infrastructure; PIT evidence pending |
+| New strategy package | `src/k200_mq/` | Research archive; no live trading |
 | Architecture docs | `docs/planning/` | Planning documents covering pivot, architecture, plan, spec, status, and benchmark/cost attribution |
 | Core factor interface | `src/k200_mq/core/factors/base.py` | Reusable from legacy |
 | New CLI | `src/k200_mq/main.py` | Use `uv run python -m k200_mq.main` |
@@ -451,3 +451,26 @@ ruff check
 - **Next priority**: ① regime 신호 재설계 검토 (continuous MA200 거리 기반,
   multi-indicator), ② scorecard 재판정 (Day 24 결과 반영), ③ 실전 준비
   항목 추가 검토.
+
+## TASK LOG — 2026-08-21 (Iteration 1–2b 최종 결정)
+
+- **MQ 연구 중단·피벗**: Iteration 3 섹터 30% cap은 실행하지 않으며 live
+  trading도 하지 않는다. 현재 결과는 진단 기록일 뿐 투자 성과 근거가 아니다.
+- **Iteration 1 v6**: quality-primary + continuous volatility-targeted regime
+  통합 배선 수정 후 QP 후보 0/5 선택. OOS stitched -0.87%, CAGR -0.18%,
+  Sharpe -0.010, MDD -35.80%, Calmar -0.005 — 모든 게이트 미달.
+- **Iteration 2 v7**: candidate window override는 factor data가 override 전에
+  한 번만 계산되어 MOM6_1과 해당 기본 후보의 train Sharpe가 동일했다. 유효한
+  모멘텀 성과 실험이 아니라 아키텍처 발견으로 기록한다.
+- **Iteration 2b direct fixed 6-1**: 임시 126일 long/21일 skip 후 되돌림.
+  OOS stitched +7.15%, CAGR 1.48%, Sharpe 0.124, MDD -30.35%, Calmar 0.049;
+  2020 +17.0%, 2021 +0.6%, 2022 -6.1%, 2023 +7.3%, 2024 -12.6% — 모든
+  게이트 미달. Day 24 baseline 대비 MDD는 개선 방향이나 CAGR/Sharpe는 하락.
+- 재사용 전 감사: fold winner의 tie threshold 준수, effective config와 momentum
+  series fingerprint 기록, factor-computation 설정의 runtime-safe override 제거
+  또는 후보별 factor 재계산 명시가 필요하다.
+- 새 전략은 별도 경제적 정당화와 사전 등록이 필요하며, 2025–2026/향후
+  prospective paper 기간은 보존하고 현재 OOS는 추가 튜닝하지 않는다. 향후
+  MQ 유사 주장은 strict PIT 유니버스, DART filing-date 재무, 필요 시 PIT sector
+  map, 5/5 folds, validated classification, 동일 cost/delisting 규칙,
+  EXCLUDE_KOSPI_TOP_N=0, 모든 성과 게이트를 한 번의 사전 등록 실행에서 충족해야 한다.
