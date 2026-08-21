@@ -30,7 +30,7 @@ VALIDATED_EXPANDING_WALK_FORWARD_PIT = "validated_expanding_walk_forward_pit"
 mechanical_expanding_walk_forward_non_pit = MECHANICAL_EXPANDING_WALK_FORWARD_NON_PIT
 validated_expanding_walk_forward_pit = VALIDATED_EXPANDING_WALK_FORWARD_PIT
 
-CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v6"
+CANDIDATE_LIBRARY_VERSION = "k200mq-wf-candidates-v7"
 DEFAULT_MIN_EXITS = 5
 DEFAULT_TIE_TOLERANCE = 0.05
 OBJECTIVE_TRAIN_SHARPE = "train_sharpe"
@@ -280,6 +280,48 @@ DEFAULT_CANDIDATE_LIBRARY: tuple[CandidateSpec, ...] = (
             "CONTINUOUS_REGIME": True,
             "SL_STOP_LOSS": -0.20,
             "MIN_CASH_RATIO": 0.10,
+        },
+    ),
+    # ── v7: 6-1 momentum (Korean 2-month reversal cycle) ─────
+    CandidateSpec(
+        "MOM6_1",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "MOMENTUM_WINDOW_LONG": 126,
+            "MOMENTUM_SKIP_DAYS": 21,
+        },
+    ),
+    CandidateSpec(
+        "MOM6_1_MOM70",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "MOMENTUM_WINDOW_LONG": 126,
+            "MOMENTUM_SKIP_DAYS": 21,
+            "WEIGHT_MOMENTUM": 0.7,
+            "WEIGHT_QUALITY": 0.3,
+        },
+    ),
+    CandidateSpec(
+        "MOM6_1_SL20",
+        {
+            "TOP_N": 20,
+            "REGIME_FILTER_ENABLED": True,
+            "MOMENTUM_WINDOW_LONG": 126,
+            "MOMENTUM_SKIP_DAYS": 21,
+            "WEIGHT_MOMENTUM": 0.7,
+            "WEIGHT_QUALITY": 0.3,
+            "SL_STOP_LOSS": -0.20,
+        },
+    ),
+    CandidateSpec(
+        "MOM6_1_TOP10",
+        {
+            "TOP_N": 10,
+            "REGIME_FILTER_ENABLED": True,
+            "MOMENTUM_WINDOW_LONG": 126,
+            "MOMENTUM_SKIP_DAYS": 21,
         },
     ),
 )

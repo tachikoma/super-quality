@@ -58,9 +58,10 @@ def test_candidate_library_is_versioned_and_conservative() -> None:
         "BASE", "MOM60", "MOM70", "SL20", "SL20_CASH10",
         "TOP_N_10", "TOP_N_30", "REGIME_OFF",
         "QP_V6", "QP_V6_MOM70", "QP_V6_SL20", "QP_V6_SL20_CASH10",
+        "MOM6_1", "MOM6_1_MOM70", "MOM6_1_SL20", "MOM6_1_TOP10",
     ]
     assert all(
-        candidate.library_version == "k200mq-wf-candidates-v6"
+        candidate.library_version == "k200mq-wf-candidates-v7"
         for candidate in DEFAULT_CANDIDATE_LIBRARY
     )
     assert all("MAX_HOLDINGS" not in candidate.parameters for candidate in DEFAULT_CANDIDATE_LIBRARY)
@@ -98,6 +99,15 @@ def test_candidate_library_is_versioned_and_conservative() -> None:
     assert by_id["QP_V6_SL20_CASH10"]["MIN_CASH_RATIO"] == 0.10
     assert by_id["REGIME_OFF"]["REGIME_FILTER_ENABLED"] is False
     assert "REGIME_REDUCTION" not in by_id["REGIME_OFF"]
+    # v7: 6-1 momentum (Korean 2-month reversal) candidates
+    assert by_id["MOM6_1"]["MOMENTUM_WINDOW_LONG"] == 126
+    assert by_id["MOM6_1"]["MOMENTUM_SKIP_DAYS"] == 21
+    assert by_id["MOM6_1_MOM70"]["WEIGHT_MOMENTUM"] == 0.7
+    assert by_id["MOM6_1_MOM70"]["MOMENTUM_WINDOW_LONG"] == 126
+    assert by_id["MOM6_1_SL20"]["SL_STOP_LOSS"] == -0.20
+    assert by_id["MOM6_1_SL20"]["MOMENTUM_WINDOW_LONG"] == 126
+    assert by_id["MOM6_1_TOP10"]["TOP_N"] == 10
+    assert by_id["MOM6_1_TOP10"]["MOMENTUM_WINDOW_LONG"] == 126
 
 
 def _scores(**sharpes: float) -> dict[str, dict[str, object]]:
