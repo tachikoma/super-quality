@@ -1,9 +1,8 @@
 # 2주 실행 체크리스트 (Strict PIT Gate; 보관·종료)
 
-> **보관·대체 공지 (2026-08-21)**: 이 문서는 K200 MQ 2주 실행 계획과 역사적 실행
-> 기록의 감사 참고용이다. MQ 연구는 중단·피벗되었고, 미완료 항목과 문서에 남은
-> 미래 지향적 실행 지침은 실행하지 않는다. 최종 결정은 [`05_status.md`](05_status.md)
-> 및 [`08_go_no_go_scorecard_2026-08-17.md`](08_go_no_go_scorecard_2026-08-17.md)를
+> **보관·대체 공지 (2026-08-21)**: MQ는 보관·피벗되었으며, 이 문서의 미래 MQ
+> 실행·튜닝 단계는 실행하지 않는다. 활성 연구와 현재 상태는
+> [`05_status.md`](05_status.md) 및 [`10_low_volatility_preregistration.md`](10_low_volatility_preregistration.md)를
 > 참조한다. live/paper trading과 현재 OOS 추가 튜닝도 하지 않는다.
 
 > **체크리스트 종료**: 이 체크리스트는 2026-08-21에 닫혔다. 남은 작업·재실행·추가

@@ -474,3 +474,14 @@ ruff check
   MQ 유사 주장은 strict PIT 유니버스, DART filing-date 재무, 필요 시 PIT sector
   map, 5/5 folds, validated classification, 동일 cost/delisting 규칙,
   EXCLUDE_KOSPI_TOP_N=0, 모든 성과 게이트를 한 번의 사전 등록 실행에서 충족해야 한다.
+
+## TASK LOG — 2026-08-21 (저변동성 Phase 0–1 완료)
+
+- **MQ 연구는 보관·피벗**되었으며, 추가 MQ 실행·튜닝과 live trading은 하지 않는다.
+- MQ와 별개의 가격수익률 기반 **KOSPI 200 저변동성 연구 Phase 0 사전등록 및
+  Phase 1 구현이 완료**되었고 Oracle Pass를 받았다. Phase 1에는 factor·selector,
+  분기 스케줄, engine injection, 기업행동 합성 정책, cutoff guard가 포함된다.
+- 검증 근거는 focused 테스트 35 passed, 전체 테스트 518 passed, Ruff passed이다.
+- 다음 단계는 검증된 PIT raw KRX OHLCV + 기업행동 ledger data-contract 및
+  validator 구현뿐이다. 실제 raw 데이터 수집과 역사적 WFA는 validator 및 원천
+  증거가 승인될 때까지 금지한다. Phase 2 데이터는 수집·검증 완료로 간주하지 않는다.

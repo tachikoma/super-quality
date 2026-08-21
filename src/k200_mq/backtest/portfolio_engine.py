@@ -11,7 +11,7 @@ import logging
 from collections.abc import Mapping
 from datetime import date
 from itertools import combinations
-from typing import Any
+from typing import Any, Callable, Protocol
 
 import pandas as pd
 
@@ -20,6 +20,19 @@ from k200_mq.backtest.benchmark import benchmark_metadata, build_price_return_be
 from k200_mq.strategies.momentum_quality import MomentumQualityStrategy
 
 logger = logging.getLogger(__name__)
+
+
+class PortfolioTargetProvider(Protocol):
+    """Strategy boundary used to provide close-time portfolio targets."""
+
+    def select_portfolio(
+        self,
+        factor_data: pd.DataFrame,
+        universe: list[str],
+        as_of: Any,
+        adv_ratio_by_ticker: Mapping[str, float] | None = None,
+        pair_correlation_map: Mapping[tuple[str, str], float] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 class PortfolioRebalanceEngine:
@@ -43,12 +56,18 @@ class PortfolioRebalanceEngine:
         config: K200MQConfig,
         kospi_mcap_ranking: tuple[str, ...] | None = None,
         sector_map_by_as_of: Mapping[str, Mapping[str, str]] | None = None,
+        strategy: PortfolioTargetProvider | None = None,
     ) -> None:
         self.config = config
-        self.strategy = MomentumQualityStrategy(
-            config,
-            kospi_mcap_ranking,
-            sector_map_by_as_of=sector_map_by_as_of,
+        self._strategy_injected = strategy is not None
+        self.strategy = (
+            strategy
+            if strategy is not None
+            else MomentumQualityStrategy(
+                config,
+                kospi_mcap_ranking,
+                sector_map_by_as_of=sector_map_by_as_of,
+            )
         )
         self._execution_stats = self._zero_execution_stats()
         # Risk guardrail state
@@ -65,6 +84,11 @@ class PortfolioRebalanceEngine:
         self._price_stale_streak: dict[str, int] = {}
         self._last_known_price: dict[str, tuple[pd.Timestamp, float]] = {}
 
+    def set_target_provider(self, strategy: PortfolioTargetProvider) -> None:
+        """Replace the default MQ strategy with an explicitly injected provider."""
+        self.strategy = strategy
+        self._strategy_injected = True
+
     def run(
         self,
         price_data: pd.DataFrame,
@@ -75,6 +99,9 @@ class PortfolioRebalanceEngine:
         measured_start: date | pd.Timestamp | None = None,
         measured_end: date | pd.Timestamp | None = None,
         active_trading_start: date | pd.Timestamp | None = None,
+        corporate_action_hook: Callable[
+            [dict[str, dict[str, Any]], pd.Timestamp, pd.DataFrame], Mapping[str, Any] | None
+        ] | None = None,
     ) -> dict[str, Any]:
         """백테스트 시뮬레이션을 실행합니다.
 
@@ -171,9 +198,18 @@ class PortfolioRebalanceEngine:
         # to keep this engine's public surface small.
         pending_rebalance: dict[str, Any] | None = None
         pending_stops: dict[str, dict[str, Any]] = {}
+        action_blocked_tickers: set[str] = set()
 
         for i, current_date in enumerate(all_dates):
             current_ts = pd.Timestamp(current_date)
+
+            if corporate_action_hook is not None:
+                action_result = corporate_action_hook(positions, current_ts, price_data)
+                if action_result is not None:
+                    cash += float(action_result.get("cash_delta", 0.0))
+                    action_blocked_tickers.update(
+                        str(ticker) for ticker in action_result.get("blocked_tickers", ())
+                    )
 
             # Orders formed at the prior close execute before any new signal
             # is formed at today's close.
@@ -197,7 +233,7 @@ class PortfolioRebalanceEngine:
                         current_ts,
                         trade_log,
                         date_ordinal,
-                        stop_tickers,
+                        stop_tickers | action_blocked_tickers,
                     )
                     pending_rebalance = None
 
@@ -397,9 +433,16 @@ class PortfolioRebalanceEngine:
     ) -> float:
         value = 0.0
         for ticker, position in positions.items():
+            if position.get("trading_blocked", False):
+                last_close = position.get("last_official_close")
+                if last_close is not None and last_close > 0:
+                    value += position["shares"] * last_close
+                continue
             price = self._price(price_data, ticker, ts, column)
             if price is not None and price > 0:
                 value += position["shares"] * price
+                if column == "close":
+                    position["last_official_close"] = price
         return value
 
     def _check_risk_guardrails(
@@ -508,6 +551,8 @@ class PortfolioRebalanceEngine:
         if not bool(getattr(self.config, "ENABLE_STOP_LOSS", True)):
             return
         for ticker, position in positions.items():
+            if position.get("trading_blocked", False):
+                continue
             current_close = self._price(price_data, ticker, signal_date, "close")
             if current_close is None or current_close <= 0:
                 continue
@@ -536,6 +581,8 @@ class PortfolioRebalanceEngine:
         remaining: dict[str, dict[str, Any]] = {}
         for ticker, order in pending_stops.items():
             if ticker not in positions:
+                continue
+            if positions[ticker].get("trading_blocked", False):
                 continue
             sell_price = self._price(price_data, ticker, execution_date, "open")
             # Use forced price if provided (delisting case)
@@ -576,7 +623,9 @@ class PortfolioRebalanceEngine:
 
         universe_set = {str(ticker) for ticker in universe}
         adv_ratio_by_ticker: dict[str, float] | None = None
-        if bool(getattr(self.config, "ENABLE_ADV_FILTER", False)):
+        if not self._strategy_injected and bool(
+            getattr(self.config, "ENABLE_ADV_FILTER", False)
+        ):
             candidate_tickers = {
                 str(ticker)
                 for ticker in factor_at_date["ticker"].dropna().tolist()
@@ -589,7 +638,9 @@ class PortfolioRebalanceEngine:
             )
 
         pair_correlation_map: dict[tuple[str, str], float] | None = None
-        if bool(getattr(self.config, "ENABLE_CORRELATION_FILTER", False)):
+        if not self._strategy_injected and bool(
+            getattr(self.config, "ENABLE_CORRELATION_FILTER", False)
+        ):
             candidate_tickers = {
                 str(ticker)
                 for ticker in factor_at_date["ticker"].dropna().tolist()
@@ -601,20 +652,33 @@ class PortfolioRebalanceEngine:
                 tickers=candidate_tickers,
             )
 
-        # Inject market-level regime_scale into factor_data so the strategy's
-        # quality-primary mode can use it as a momentum tilt factor.
-        current_regime_scale = 0.0 if self._trading_halted else self._regime_scale(regime_scale_map, signal_date)
-        if not factor_at_date.empty and getattr(self.config, "QUALITY_PRIMARY", False):
+        # Inject regime data only for the engine-owned MQ strategy.  An
+        # injected strategy is an explicit strategy boundary and must not
+        # receive MQ-only columns or controls.
+        current_regime_scale = (
+            1.0
+            if self._strategy_injected
+            else 0.0 if self._trading_halted else self._regime_scale(regime_scale_map, signal_date)
+        )
+        if (
+            not self._strategy_injected
+            and not factor_at_date.empty
+            and getattr(self.config, "QUALITY_PRIMARY", False)
+        ):
             factor_at_date = factor_at_date.copy()
             factor_at_date["regime_scale"] = current_regime_scale
 
-        selected = self.strategy.select_portfolio(
-            factor_data=factor_at_date,
-            universe=universe,
-            as_of=signal_date,
-            adv_ratio_by_ticker=adv_ratio_by_ticker,
-            pair_correlation_map=pair_correlation_map,
-        )
+        strategy_kwargs: dict[str, Any] = {
+            "factor_data": factor_at_date,
+            "universe": universe,
+            "as_of": signal_date,
+        }
+        if not getattr(self.strategy, "is_low_volatility", False):
+            strategy_kwargs.update({
+                "adv_ratio_by_ticker": adv_ratio_by_ticker,
+                "pair_correlation_map": pair_correlation_map,
+            })
+        selected = self.strategy.select_portfolio(**strategy_kwargs)
         return {
             "signal_date": signal_date,
             "selected": selected,
@@ -765,9 +829,9 @@ class PortfolioRebalanceEngine:
         nav = cash + self._holdings_value(
             positions, price_data, execution_date, "open"
         )
-        max_holdings = int(self.config.MAX_HOLDINGS)
-        reserve_cash = max(nav * float(self.config.MIN_CASH_RATIO), 0.0)
-        regime_scale = float(order.get("regime_scale", 1.0))
+        low_volatility = bool(getattr(self.strategy, "is_low_volatility", False))
+        reserve_cash = 0.0 if low_volatility else max(nav * float(self.config.MIN_CASH_RATIO), 0.0)
+        regime_scale = 1.0 if low_volatility else float(order.get("regime_scale", 1.0))
         if pd.isna(regime_scale):
             regime_scale = 1.0
         regime_scale = max(regime_scale, 0.0)
@@ -790,10 +854,14 @@ class PortfolioRebalanceEngine:
             target_shares[ticker] = int(target_value / buy_price)
             target_prices[ticker] = buy_price
 
+        max_holdings = len(target_shares) if low_volatility else int(self.config.MAX_HOLDINGS)
+
         # This is intentionally before all buys.  It permits proceeds from
         # outgoing and overweight positions to fund same-bar increases.
         outgoing = sorted(ticker for ticker in positions if ticker not in target_tickers)
         for ticker in outgoing:
+            if positions[ticker].get("trading_blocked", False):
+                continue
             sell_price = self._price(price_data, ticker, execution_date, "open")
             if sell_price is None or sell_price <= 0:
                 # Sparse/missing next-open policy: retain the position and do
@@ -815,7 +883,11 @@ class PortfolioRebalanceEngine:
         # increases.  A stop-loss ticker is blocked for this execution date,
         # so it cannot be sold and immediately repurchased by this rebalance.
         for ticker in sorted(target_shares):
-            if ticker in stopped_tickers or ticker not in positions:
+            if (
+                ticker in stopped_tickers
+                or ticker not in positions
+                or positions[ticker].get("trading_blocked", False)
+            ):
                 continue
             current_shares = int(positions[ticker]["shares"])
             excess_shares = current_shares - target_shares[ticker]
@@ -840,7 +912,9 @@ class PortfolioRebalanceEngine:
         buy_requests: list[tuple[str, int, float]] = []
         open_slots = max(max_holdings - len(positions), 0)
         for ticker in sorted(target_shares):
-            if ticker in stopped_tickers:
+            if ticker in stopped_tickers or (
+                ticker in positions and positions[ticker].get("trading_blocked", False)
+            ):
                 continue
             buy_price = target_prices[ticker]
             current_shares = int(positions[ticker]["shares"]) if ticker in positions else 0

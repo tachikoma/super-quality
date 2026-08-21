@@ -1,11 +1,21 @@
-# KOSPI 200 저변동성 연구 사전등록 (Phase 0)
+# KOSPI 200 저변동성 연구 사전등록 (Phase 0–1 완료)
 
 **등록일: 2026-08-21**
+
+**상태: Phase 0 사전등록 및 Phase 1 구현 완료 — Oracle Pass**
 
 > 이 문서는 **연구 전용** 사전등록이다. live trading과 paper trading을 하지
 > 않는다. 폐기·중단된 KOSPI 200 Momentum + Quality(MQ) 전략과 별개의 가격 전용
 > 가설이다. 이 문서만으로 과거 WFA 실행이나 2025년 이후 holdout 실행을 승인하지
 > 않는다.
+
+## Phase 1 완료 기록
+
+- Oracle Pass를 완료했다.
+- 고정 사양의 factor·selector, 분기 리밸런싱 스케줄, engine injection 경계,
+  기업행동 합성(synthetic) 정책, development cutoff guard를 구현·확인했다.
+- 검증 근거는 focused 테스트 35 passed, 전체 테스트 518 passed, Ruff passed이다.
+- Phase 1에서는 역사적 WFA와 실제 2025년 이후 데이터에 접근하지 않았다.
 
 ## 1. 가설과 고정 사양
 
@@ -99,7 +109,7 @@ Phase 0의 아래 내용은 향후 평가 레이아웃을 고정하는 것이며
 - 2x cost stress는 commission/slippage만 2배로 하며, CAGR `> 0` 및 Sharpe
   `>= 0.55`를 충족.
 
-## Phase 1 authorization boundary
+## Phase 1 authorization boundary (완료 범위)
 
 ### 허용
 
@@ -112,3 +122,11 @@ carry-in test, fingerprint 기록만 허용한다.
 실제 ledger 데이터 수집, 2015–2024 WFA, 2025년 이후 데이터 접근, 후보·grid·민감도
 실험, 백테스트 결과 주장을 금지한다. 위 범위를 벗어나는 변경이나 실행은 새 가설과
 새 사전등록 없이는 수행하지 않는다.
+
+## Phase 2 authorization boundary (다음 단계; 실행 승인 아님)
+
+Phase 2에서 허용되는 작업은 **검증된 PIT raw KRX OHLCV + 기업행동 ledger의
+data-contract 및 validator 구현**뿐이다. validator fixture/unit test, provenance,
+cutoff, fail-closed 검사를 함께 구현할 수 있다. 실제 raw 데이터 수집·연결과
+역사적 WFA는 validator와 원천 증거가 별도 승인될 때까지 차단한다. 따라서 Phase 2
+데이터가 수집되었거나 검증되었다고 해석해서는 안 된다.

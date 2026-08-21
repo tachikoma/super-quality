@@ -4,6 +4,22 @@
 
 최종 갱신: 2026-08-21
 
+## 2026-08-21 현재 체크포인트 (저변동성 Phase 1 완료)
+
+- **MQ는 보관·피벗되었다.** MQ의 추가 실행·튜닝과 live trading은 중단한다.
+- 현재 활성 연구는 MQ와 별개의 **가격수익률 기반 저변동성 연구**이며, Phase 0
+  사전등록과 Phase 1 구현을 완료하고 Oracle Pass를 받았다.
+- Phase 1에는 저변동성 factor·selector, 분기 스케줄, engine injection 경계,
+  기업행동 합성(synthetic) 정책, development cutoff guard가 포함된다.
+- 역사적 WFA와 실제 2025년 이후 데이터 접근은 수행·허용되지 않았다. Phase 2의
+  다음 전제조건은 **검증된 PIT raw KRX OHLCV + 기업행동 ledger 계약**이다. 이는
+  아직 수집·검증 완료를 의미하지 않는다.
+- 검증 근거: focused 테스트 **35 passed**, 전체 테스트 **518 passed**,
+  **Ruff passed**.
+- 활성 연구의 고정 규칙과 Phase 2 승인 경계는
+  [`10_low_volatility_preregistration.md`](10_low_volatility_preregistration.md)를
+  따른다.
+
 ## 2026-08-21 최종 결정 (Iteration 1–2b)
 
 - **MQ 연구는 중단하고 전략을 피벗한다.** Iteration 3 섹터 30% cap은 실행하지

@@ -1,9 +1,8 @@
 # 커버리지 갭 분석 — 첫 리밸런스 missing 51 티커 (2026-08-11; superseded erratum)
 
-> **보관·대체 공지 (2026-08-21)**: 이 문서는 K200 MQ 커버리지 분석의 역사적·감사
-> 참고용이다. MQ 연구는 중단·피벗되었고, 문서에 남은 미래 지향적 remediation 및
-> 실행 지침은 실행하지 않는다. 최종 결정은 [`05_status.md`](05_status.md) 및
-> [`08_go_no_go_scorecard_2026-08-17.md`](08_go_no_go_scorecard_2026-08-17.md)를
+> **보관·대체 공지 (2026-08-21)**: MQ는 보관·피벗되었으며, 이 문서의 미래 MQ
+> 실행·튜닝 단계와 remediation은 실행하지 않는다. 활성 연구와 현재 상태는
+> [`05_status.md`](05_status.md) 및 [`10_low_volatility_preregistration.md`](10_low_volatility_preregistration.md)를
 > 참조한다. live/paper trading과 현재 OOS 추가 튜닝도 하지 않는다.
 
 배경: Day 8 strict PIT WF(`outputs_k200mq_day8_strict_extended/`)의 first-ready

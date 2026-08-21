@@ -1,0 +1,84 @@
+"""Frozen, price-only KOSPI 200 low-volatility research primitives.
+
+This package deliberately contains no loaders, backtest runner, or market-data
+access.  Its inputs are explicit in-memory synthetic contracts so that the
+Phase 1 implementation can be tested without touching a real ledger.
+"""
+
+from k200_low_vol.contract import (
+    DEVELOPMENT_CUTOFF,
+    PriceActionBundle,
+    RawPriceActionBundle,
+    SUSPENSION_POLICY,
+    SyntheticBundleError,
+    UNCONFIRMED_DELISTING_RECOVERY,
+    apply_corporate_action_adjustments,
+    apply_split_adjustments,
+    build_synthetic_manifest,
+    construct_prices,
+    dataframe_sha256,
+    delisting_recovery_value,
+    process_action_bundle,
+    validate_rows_cutoff,
+    validate_cache_rows_cutoff,
+    validate_canonical_session_panel,
+    validate_development_cutoff,
+    validate_development_inputs,
+    validate_price_action_bundle,
+)
+from k200_low_vol.factor import LowVolatilityFactor
+from k200_low_vol.fold import FoldCarryInResult, PendingCloseTarget, execute_fold_carry_in
+from k200_low_vol.adapter import (
+    CutoffValidationEvidence,
+    LowVolatilityExecutionAdapter,
+    PITUniverseEvidence,
+    ValidatedPriceActionEvidence,
+    ValidatedRawPriceActionBundle,
+    build_cutoff_validation_evidence,
+    build_pit_universe_evidence,
+    build_validated_price_action_evidence,
+    validate_low_vol_execution_config,
+)
+from k200_low_vol.schedule import krx_quarterly_schedule, quarterly_schedule
+from k200_low_vol.selector import LowVolatilitySelector, LowVolatilityStrategy
+from k200_low_vol.spec import LowVolSpec
+
+__all__ = [
+    "DEVELOPMENT_CUTOFF",
+    "LowVolSpec",
+    "LowVolatilityFactor",
+    "FoldCarryInResult",
+    "LowVolatilityExecutionAdapter",
+    "LowVolatilitySelector",
+    "LowVolatilityStrategy",
+    "PriceActionBundle",
+    "PITUniverseEvidence",
+    "RawPriceActionBundle",
+    "SUSPENSION_POLICY",
+    "SyntheticBundleError",
+    "UNCONFIRMED_DELISTING_RECOVERY",
+    "CutoffValidationEvidence",
+    "ValidatedPriceActionEvidence",
+    "ValidatedRawPriceActionBundle",
+    "apply_corporate_action_adjustments",
+    "apply_split_adjustments",
+    "build_synthetic_manifest",
+    "build_cutoff_validation_evidence",
+    "build_pit_universe_evidence",
+    "build_validated_price_action_evidence",
+    "validate_low_vol_execution_config",
+    "construct_prices",
+    "dataframe_sha256",
+    "delisting_recovery_value",
+    "PendingCloseTarget",
+    "execute_fold_carry_in",
+    "krx_quarterly_schedule",
+    "quarterly_schedule",
+    "validate_cache_rows_cutoff",
+    "validate_canonical_session_panel",
+    "validate_development_cutoff",
+    "validate_development_inputs",
+    "validate_price_action_bundle",
+    "validate_rows_cutoff",
+    "process_action_bundle",
+]

@@ -1,9 +1,8 @@
 # 구현 계획 - KOSPI 200 모멘텀 + 품질
 
-> **보관·대체 공지 (2026-08-21)**: 이 문서는 K200 MQ 구현의 역사적 계획 및 감사
-> 참고용이다. MQ 연구는 중단·피벗되었고, 문서에 남은 미래 지향적 지침과 미완료
-> 항목은 실행하지 않는다. 최종 결정은 [`05_status.md`](05_status.md) 및
-> [`08_go_no_go_scorecard_2026-08-17.md`](08_go_no_go_scorecard_2026-08-17.md)를
+> **보관·대체 공지 (2026-08-21)**: MQ는 보관·피벗되었으며, 이 문서의 미래 MQ
+> 실행·튜닝 단계는 실행하지 않는다. 활성 연구와 현재 상태는
+> [`05_status.md`](05_status.md) 및 [`10_low_volatility_preregistration.md`](10_low_volatility_preregistration.md)를
 > 참조한다. live/paper trading과 현재 OOS 추가 튜닝도 하지 않는다.
 
 2026-08-04 기준. 이 계획은 전략이 검증된 성과를 냈다는 주장이 아니라 현재 구현
