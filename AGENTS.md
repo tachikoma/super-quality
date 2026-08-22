@@ -551,6 +551,29 @@ ruff check
   OpenDART 단독으로는 완전한 cutoff-safe 기업행동 + status ledger 계약 미충족. 연구는
   종료·보관 유지.
 
+## TASK LOG — 2026-08-22 (저변동성 진단 계층 예외 선언)
+
+- 사용자 승인(2026-08-22)으로 연구 종료 상태에 범위 한정 진단 계층 예외를 선언했다
+  (Oracle 권고). 기존 pykrx adjusted-price 캐시를 동결 저변동성 스펙(분기 신호일,
+  trailing 252세션 변동성, 하위 20% 동일비중)에 적용하는 단일 실행 진단.
+- adjusted price는 총수익률을 근사하므로 가격수익률 목표를 과대평가(optimistic
+  upper-bound)한다. 명시 라벨 `diagnostic_adjusted_price_non_validated`. 검증된
+  주장이 아니며 classification 승격 불가.
+- 사전 고정 판단 규칙(실행 전 확정, 사후 변경 금지): adjusted-price 진단이 모두
+  충족할 때만 기업행동 ledger 인프라 작업 진행 — CAGR ≥ 7%, Sharpe ≥ 0.75, MDD ≥
+  −25%. 하나라도 미달이면 신규 경제적 가설 부재 시 저변동성 가설은 영구 보관.
+- 무결성 guardrail: 2024-12-31 development cutoff guard 재사용; 사후 스펙 변경 금지;
+  2025+ 데이터 미접촉; 출력 namespace는 검증 artifact와 분리; 단일 실행, 튜닝/반복
+  OOS 없음.
+- Oracle 동기: (a) 동결 validator가 adjusted-price provenance를 전면 거부하므로 진단은
+  패키지 외부 standalone script로만 존재; (b) 향후 재개는 지원 action 집합을
+  {split, reverse_split, cash_dividend, suspension, delisting} 이상으로 확장 + 가격
+  파생 suspension/resumption 일자 포함 필요 — 침묵 아닌 선언적 수정; (c) 구조적 역풍:
+  저변동성은 고배당 종목에 치우치나 스펙은 가격수익률(CAGR≥5% 게이트) 기준.
+- 정지 조건 재확인: 진단 실패 → 영구 보관; 검증 단일샷 미달 → 사전등록대로 종료;
+  ledger 작업 >6주 또는 cutoff-safety 위반 → 중단; 이 유니버스에서 3회 연속 실패한
+  사전등록 가설군 → 해당 시장 연구 중단.
+
 ## TASK LOG — 2026-08-22 (저변동성 Phase 2 연구 종료·보관)
 
 - KRX/KSD probe로 cutoff-safe full action/status source를 확립하지 못해 저변동성
