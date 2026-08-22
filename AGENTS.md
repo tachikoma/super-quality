@@ -574,6 +574,27 @@ ruff check
   ledger 작업 >6주 또는 cutoff-safety 위반 → 중단; 이 유니버스에서 3회 연속 실패한
   사전등록 가설군 → 해당 시장 연구 중단.
 
+## TASK LOG — 2026-08-22 (저변동성 adjusted-price 진단 실행 결과)
+
+- 사전 고정 판단 규칙에 따라 단일 실행을 수행했다 (실행 전 커밋 `b9f79dd`). 스크립트:
+  `scripts/run_low_vol_diagnostic.py` + `tests/test_low_vol_diagnostic.py` (6 passed,
+  ruff clean). 출력: `outputs_k200_lowvol_diagnostic/` (전부
+  `diagnostic_adjusted_price_non_validated` 라벨).
+- 결과 (adjusted-price 낙관적 상한): 연결 총수익률 +8.20% (~9.75년), CAGR 0.81%
+  (게이트 ≥7% — FAIL), Sharpe 0.141 (게이트 ≥0.75 — FAIL), MDD −61.49% (게이트
+  >−25% — FAIL), Calmar 0.013. 연도별: 2015 −12.2%, 2016 +21.2%, 2017 +21.8%,
+  2018 −27.8%, 2019 +8.6%, 2020 −3.5%, 2021 +3.8%, 2022 −10.2%, 2023 +8.4%,
+  2024 +9.1%.
+- 판정: ARCHIVE_PERMANENTLY — 세 게이트 모두 결정적 실패. adjusted price는 총수익률을
+  근사해 가격수익률 목표를 과대평가하므로 검증된 가격수익률 버전은 a fortiori 실패.
+  사전 규칙에 따라 저변동성 가설은 영구 보관된다.
+- 상태: 저변동성 연구는 이제 영구 보관(기존에는 데이터 원천 대기 종료). MQ는 보관·
+  피벗 유지. 양쪽 모두 live trading, 추가 튜닝, OOS 반복 없음. Phase 0/1/2A code
+  contract는 유효한 역사적 인프라로 유지.
+- 정지 조건 맥락: 이 유니버스/윈도우에서 두 번째 실패한 사전등록 가설군(MQ, 그다음
+  저변동성). 선언된 메타 조건에 따라 3회 연속 실패 시 해당 시장 연구 전면 중단. 향후
+  연구는 새로운 경제적 정당화와 별도 사전등록이 필요하다.
+
 ## TASK LOG — 2026-08-22 (저변동성 Phase 2 연구 종료·보관)
 
 - KRX/KSD probe로 cutoff-safe full action/status source를 확립하지 못해 저변동성
