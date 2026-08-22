@@ -516,3 +516,17 @@ ruff check
   원천(예: KSD/FSC rights-schedule API)의 명시적 승인 또는 연구 종료가 다음 게이트이며,
   그 전까지 실제 raw bundle 수집과 WFA를 금지한다. valid production bundle이나
   Phase 2 완료를 주장하지 않는다.
+
+## TASK LOG — 2026-08-22 (사용자 승인 KSD/FSC schema probe)
+
+- dataset `15059609`의 `FSC_KSD_RIGHTS_SERVICE_KEY` 인증은 성공했다. 기업 필터를
+  적용한 `2024-12-30` 요청은 정상적인 zero-event envelope를 반환했지만, 포괄적인
+  no-action coverage를 입증하지 않는다.
+- 비필터 `basDt=20241230` schema 응답에는 `2025-01-13`까지의 권리 일정일이
+  노출되어 raw artifact와 sidecar를 즉시 폐기했다. `basDt`는 cutoff-safe
+  effective/event-date 경계가 아니며, KSD/FSC 원천은 현재 strict development
+  cutoff 계약에 채택하지 않는다.
+- KRX 가격/유니버스는 부분 관찰 상태이고 KRX/KSD action/status coverage는
+  불충분하다. 데이터 수집이나 유효한 action ledger, valid production bundle을
+  주장하지 않는다. 명시적으로 승인된 cutoff-safe historical action/status 원천이
+  없으면 연구를 종료하며, 실제 bundle 수집과 WFA는 금지한다.

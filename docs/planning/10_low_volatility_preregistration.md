@@ -52,6 +52,20 @@
 - 다음 게이트는 준수 가능한 action/status 원천(예: KSD/FSC rights-schedule API)의
   명시적 승인 또는 연구 종료다. 실제 raw bundle 수집과 WFA는 그 전까지 차단한다.
 
+## KSD/FSC schema probe 기록 (dataset 15059609; 2026-08-22; Phase 2 완료 아님)
+
+- `FSC_KSD_RIGHTS_SERVICE_KEY` 인증은 성공했다. 기업 필터를 적용한
+  `2024-12-30` 요청은 정상적인 zero-event envelope를 반환했으나, 이는 포괄적인
+  no-action coverage를 입증하지 않는다.
+- 비필터 `basDt=20241230` schema 응답에는 `2025-01-13`까지의 권리 일정일이
+  노출되었다. raw artifact와 sidecar는 즉시 폐기했다.
+- 따라서 `basDt`는 cutoff-safe effective/event-date 경계가 아니다. KSD/FSC 원천은
+  현재 strict development cutoff 계약에 채택하지 않는다. 데이터 수집이나 유효한
+  action ledger를 주장하지 않는다.
+- KRX 가격/유니버스는 부분 관찰 상태이며 KRX/KSD action/status coverage는 여전히
+  불충분하다. 명시적으로 승인된 cutoff-safe historical action/status 원천이 없으면
+  연구를 종료하며, 실제 bundle 수집과 WFA는 허용하지 않는다.
+
 ## 1. 가설과 고정 사양
 
 ### 가설
