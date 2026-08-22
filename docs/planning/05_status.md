@@ -4,7 +4,7 @@
 
 최종 갱신: 2026-08-22
 
-## 2026-08-22 현재 체크포인트 (저변동성 Phase 2 Stage A 완료)
+## 2026-08-22 현재 체크포인트 (KRX schema probe 완료; Phase 2 전체 미완료)
 
 - **MQ는 보관·피벗되었다.** MQ의 추가 실행·튜닝과 live trading은 중단한다.
 - 현재 활성 연구는 MQ와 별개의 **가격수익률 기반 저변동성 연구**이며, Phase 0
@@ -20,11 +20,31 @@
   않았다.
 - 검증 근거: focused 테스트 **66 passed**, 전체 테스트 **549 passed**,
   **Ruff passed**.
-- 다음 게이트는 정확한 공식 KRX OHLCV/action/status endpoint 계약 또는 승인된
-  schema probe다. 명시적 승인이 있을 때까지 실제 수집은 차단한다.
+- 사용자 승인 KRX schema probe를 완료했다. probe raw artifact는 local/gitignored이며,
+  역사적 데이터 수집과 WFA는 수행하지 않았다.
+- KRX 가격/유니버스 계약은 부분적으로 관찰되었으나 action/status coverage는
+  입증되지 않았다. KRX만으로 완전한 기업행동 ledger를 구성할 수 없다.
+- 다음 게이트는 준수 가능한 action/status 원천(예: KSD/FSC rights-schedule API)의
+  명시적 승인 또는 연구 종료다. 실제 raw bundle 수집과 WFA는 그 전까지 차단한다.
 - 활성 연구의 고정 규칙과 Phase 2 승인 경계는
   [`10_low_volatility_preregistration.md`](10_low_volatility_preregistration.md)를
   따른다.
+
+### 2026-08-22 KRX schema probe 기록 (Phase 2 완료 아님)
+
+- `2024-12-30` `MDCSTAT01501` (KOSPI)은 `ISU_CD`, `ISU_SRT_CD`, OHLCV 및
+  상장주식수 필드를 포함한 raw OHLCV 961행을 반환했다.
+- 같은 날 `MDCSTAT00601`은 KOSPI 200 200행을 반환했으나 `ISU_CD`가 아닌
+  `ISU_SRT_CD`만 포함했다. 운영 identity에는 같은 날짜 raw OHLCV와의 대조가
+  필요하다.
+- 2024년 `MDCSTAT23801`은 `ISU_CD`, 상장폐지일·사유, successor ticker 후보를
+  포함한 상장폐지 56행을 반환했다. `MDCSTAT23902` selected-case query는 유효한
+  zero-row 응답을 반환했으므로 price-history row schema를 입증하지 못했다.
+- `MDCSTAT212`는 문서화된 UI에 historical-date query가 없어 호출하지 않았다.
+  `MDCSTAT20901`의 2024 요청은 current-price 필드를 노출했으므로 응답과 sidecar를
+  즉시 폐기했으며, cutoff-safe historical action source에서 제외한다.
+- 결론: KRX price/universe 계약은 부분 관찰 상태이고 action/status coverage는
+  미입증이다. valid production bundle이나 Phase 2 완료를 주장하지 않는다.
 
 ## 2026-08-21 최종 결정 (Iteration 1–2b)
 

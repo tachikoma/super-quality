@@ -497,3 +497,22 @@ ruff check
   2025년 이후 데이터 접근은 수행하지 않았다. Stage 2 데이터는 수집·검증되지 않았다.
 - 다음 게이트는 정확한 공식 KRX OHLCV/action/status endpoint 계약 또는 승인된
   schema probe다. 명시적 승인이 있을 때까지 실제 수집은 차단한다.
+
+## TASK LOG — 2026-08-22 (사용자 승인 KRX schema probe)
+
+- 사용자 승인 schema probe를 완료했다. probe raw artifact는 local/gitignored이며,
+  역사적 데이터 수집과 WFA는 수행하지 않았다.
+- `2024-12-30` `MDCSTAT01501` (KOSPI)은 `ISU_CD`, `ISU_SRT_CD`, OHLCV 및
+  상장주식수 필드를 포함한 raw OHLCV 961행을 반환했다. 같은 날
+  `MDCSTAT00601`은 KOSPI 200 200행을 반환했으나 `ISU_SRT_CD`만 포함해,
+  운영 identity에는 같은 날짜 raw OHLCV 대조가 필요하다.
+- 2024년 `MDCSTAT23801`은 상장폐지 56행을 반환했다. `MDCSTAT23902`
+  selected-case query는 유효한 zero-row 응답으로 price-history row schema를
+  입증하지 못했다. `MDCSTAT212`는 historical-date query 부재로 호출하지 않았다.
+  `MDCSTAT20901`은 current-price 필드 노출로 응답/sidecar를 즉시 폐기하고
+  cutoff-safe historical action source에서 제외했다.
+- KRX price/universe 계약은 부분 관찰 상태이며 action/status coverage는 미입증이다.
+  KRX만으로 완전한 기업행동 ledger를 수용하지 않는다. 준수 가능한 action/status
+  원천(예: KSD/FSC rights-schedule API)의 명시적 승인 또는 연구 종료가 다음 게이트이며,
+  그 전까지 실제 raw bundle 수집과 WFA를 금지한다. valid production bundle이나
+  Phase 2 완료를 주장하지 않는다.
