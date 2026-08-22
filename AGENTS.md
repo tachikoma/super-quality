@@ -530,3 +530,16 @@ ruff check
   불충분하다. 데이터 수집이나 유효한 action ledger, valid production bundle을
   주장하지 않는다. 명시적으로 승인된 cutoff-safe historical action/status 원천이
   없으면 연구를 종료하며, 실제 bundle 수집과 WFA는 금지한다.
+
+## TASK LOG — 2026-08-22 (저변동성 Phase 2 연구 종료·보관)
+
+- KRX/KSD probe로 cutoff-safe full action/status source를 확립하지 못해 저변동성
+  Phase 2 연구를 종료·보관한다. Phase 0/1과 Phase 2 Stage A offline validator
+  foundation의 완료·승인 상태는 유지되며, code contract를 무효화하는 결정이 아니다.
+- valid raw production bundle은 없다. 역사적 WFA, holdout, live/paper trading,
+  raw bundle 수집, 추가 튜닝은 수행하지 않으며 허용하지 않는다.
+- KRX 가격/유니버스 partial probe와 KSD cutoff 실패는 역사적 진단일 뿐이다. 미래를
+  노출한 KSD artifact는 폐기되었으며 evidence가 아니다.
+- 재개는 compliant cutoff-safe historical action/status 원천의 명시적 승인과 새로운
+  evidence review 이후에만 가능하다. 정책을 조용히 완화하거나 adjusted-price/vendor
+  data로 대체하지 않는다.

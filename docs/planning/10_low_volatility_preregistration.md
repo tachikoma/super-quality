@@ -1,10 +1,10 @@
-# KOSPI 200 저변동성 연구 사전등록 (Phase 2 Stage A까지)
+# KOSPI 200 저변동성 연구 사전등록 (종료·보관; Phase 2 Stage A까지)
 
 **등록일: 2026-08-21**
 
 **최종 갱신: 2026-08-22**
 
-**상태: Phase 0 사전등록, Phase 1 구현 및 Phase 2 Stage A 오프라인 기반 완료 — Oracle Pass; Phase 2 전체 미완료**
+**상태: Phase 0 사전등록, Phase 1 구현 및 Phase 2 Stage A 오프라인 기반 완료 — Oracle Pass; 연구 종료·보관**
 
 > 이 문서는 **연구 전용** 사전등록이다. live trading과 paper trading을 하지
 > 않는다. 폐기·중단된 KOSPI 200 Momentum + Quality(MQ) 전략과 별개의 가격 전용
@@ -65,6 +65,19 @@
 - KRX 가격/유니버스는 부분 관찰 상태이며 KRX/KSD action/status coverage는 여전히
   불충분하다. 명시적으로 승인된 cutoff-safe historical action/status 원천이 없으면
   연구를 종료하며, 실제 bundle 수집과 WFA는 허용하지 않는다.
+
+## 연구 종료·보관 기록 (2026-08-22)
+
+- KRX/KSD probe로 cutoff-safe full action/status source를 확립하지 못해 Phase 2
+  연구를 종료한다. Phase 0/1과 Phase 2 Stage A offline validator foundation의
+  완료·승인 상태는 유지되며, 이번 결정은 해당 code contract의 무효화가 아니다.
+- valid raw production bundle은 존재하지 않는다. 역사적 WFA, holdout, live/paper
+  trading, raw bundle 수집, 추가 튜닝은 수행하지 않으며 허용하지 않는다.
+- KRX 가격/유니버스 및 KSD cutoff 실패 probe는 역사적 진단일 뿐이다. 미래를 노출한
+  KSD artifact는 즉시 폐기되어 evidence가 아니다.
+- 연구는 향후 source approval 전까지 종료·보관한다. 재개에는 compliant cutoff-safe
+  historical action/status 원천의 명시적 승인과 새로운 evidence review가 필요하다.
+  정책을 조용히 완화하거나 adjusted-price/vendor data로 대체하지 않는다.
 
 ## 1. 가설과 고정 사양
 

@@ -4,28 +4,30 @@
 
 최종 갱신: 2026-08-22
 
-## 2026-08-22 현재 체크포인트 (KRX schema probe 완료; Phase 2 전체 미완료)
+## 2026-08-22 현재 체크포인트 (저변동성 연구 종료·보관)
 
 - **MQ는 보관·피벗되었다.** MQ의 추가 실행·튜닝과 live trading은 중단한다.
-- 현재 활성 연구는 MQ와 별개의 **가격수익률 기반 저변동성 연구**이며, Phase 0
-  사전등록과 Phase 1 구현, Phase 2 Stage A 오프라인 production-evidence 기반을
-  완료하고 Oracle Pass를 받았다.
+- MQ와 별개의 **가격수익률 기반 저변동성 연구**는 Phase 0 사전등록과 Phase 1
+  구현, Phase 2 Stage A 오프라인 validator foundation을 완료하고 Oracle Pass를
+  받았다. 이번 종료는 해당 code contract의 무효화가 아니다.
 - Phase 1에는 저변동성 factor·selector, 분기 스케줄, engine injection 경계,
   기업행동 합성(synthetic) 정책, development cutoff guard가 포함된다.
 - Stage A는 KRX raw-byte provenance, ISU_CD/ISIN identity, raw-to-canonical binding,
   root validator, zero-event action coverage, same-artifact transition marker,
   fail-closed 정책을 synthetic fixture만으로 구현·확인했다.
-- 네트워크 호출, raw 데이터 수집, WFA, adapter/engine production wiring, 실제
-  2025년 이후 데이터 접근은 수행하지 않았다. Stage 2 데이터는 수집·검증되지
-  않았다.
+- 유효한 raw production bundle은 존재하지 않는다. 역사적 WFA, holdout,
+  live/paper trading, raw bundle 수집, 추가 튜닝은 수행하지 않으며 허용하지 않는다.
 - 검증 근거: focused 테스트 **66 passed**, 전체 테스트 **549 passed**,
   **Ruff passed**.
 - 사용자 승인 KRX schema probe를 완료했다. probe raw artifact는 local/gitignored이며,
   역사적 데이터 수집과 WFA는 수행하지 않았다.
 - KRX 가격/유니버스 계약은 부분적으로 관찰되었으나 action/status coverage는
   입증되지 않았다. KRX만으로 완전한 기업행동 ledger를 구성할 수 없다.
-- 다음 게이트는 준수 가능한 action/status 원천(예: KSD/FSC rights-schedule API)의
-  명시적 승인 또는 연구 종료다. 실제 raw bundle 수집과 WFA는 그 전까지 차단한다.
+- KRX 가격/유니버스 및 KSD cutoff 실패 probe는 역사적 진단일 뿐이다. 미래를
+  노출한 KSD artifact는 폐기되었으며 증거로 사용하지 않는다.
+- 저변동성 연구는 **종료·보관**한다. 재개는 cutoff-safe historical action/status
+  원천의 명시적 승인과 새로운 evidence review가 모두 있을 때만 가능하다.
+  정책을 조용히 완화하거나 adjusted-price/vendor data로 대체하지 않는다.
 - 활성 연구의 고정 규칙과 Phase 2 승인 경계는
   [`10_low_volatility_preregistration.md`](10_low_volatility_preregistration.md)를
   따른다.
@@ -59,6 +61,17 @@
 - KRX 가격/유니버스는 부분 관찰 상태이며 KRX/KSD action/status coverage는 여전히
   불충분하다. 명시적으로 승인된 cutoff-safe historical action/status 원천이 없으면
   연구를 종료하며, 실제 bundle 수집과 WFA는 허용하지 않는다.
+
+### 저변동성 연구 종료 기록 (2026-08-22)
+
+- KRX/KSD probe로 cutoff-safe full action/status source를 확립하지 못해 Phase 2
+  연구를 종료한다. Phase 0/1과 Phase 2 Stage A offline validator foundation의
+  완료·승인 상태는 유지되며, 이번 결정은 그 code contract의 무효화가 아니다.
+- valid raw production bundle은 없으며, probe는 역사적 진단일 뿐이다. 특히 미래를
+  노출한 KSD artifact는 즉시 폐기되어 evidence가 아니다.
+- 명시적으로 승인된 compliant cutoff-safe historical action/status 원천과 새로운
+  evidence review 없이는 재개하지 않는다. adjusted-price/vendor data로 대체하거나
+  cutoff 정책을 완화하지 않는다.
 
 ## 2026-08-21 최종 결정 (Iteration 1–2b)
 
