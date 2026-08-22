@@ -1,18 +1,20 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-27 (updated 2026-08-21)
-**Branch:** main
+**Generated:** 2026-06-27 (updated 2026-08-22)
+**Branch:** feature/k200-low-volatility (main 기반 연구 브랜치)
 
 ## OVERVIEW
-Super Quality 2.0 is a Python‑based quantitative backtesting system for Korean stocks. **Abandoned 2026-07-25** — replaced by KOSPI 200 Momentum + Quality (`src/k200_mq/`).
+Super Quality 2.0 is a Python‑based quantitative backtesting system for Korean stocks. **Abandoned 2026-07-25** — replaced by KOSPI 200 Momentum + Quality (`src/k200_mq/`). MQ도 2026-08-21 중단·피벗되었고, 후속 KOSPI 200 저변동성 가설은 2026-08-22 adjusted-price 진단 세 게이트 결정적 실패로 **영구 보관**되었다. 현재 활성 연구는 없으며 live trading은 하지 않는다.
 
 ## STRUCTURE
 ```
 ./
 ├── docs/planning/      # Strategy pivot docs & implementation plans
 ├── data/               # Raw / processed datasets
-├── outputs/            # Backtest result files (new strategy; diagnostics)
-├── src/k200_mq/        # New KOSPI 200 Momentum + Quality package (Beta)
+├── outputs*/           # Backtest result files (local; diagnostics)
+├── scripts/            # One-shot runners & data tooling (incl. low-vol diagnostic)
+├── src/k200_low_vol/   # KOSPI 200 Low-Volatility package (archived hypothesis; valid code contract)
+├── src/k200_mq/        # KOSPI 200 Momentum + Quality package (archived research)
 ├── src/super_quality/  # LEGACY — frozen at v2.0-abandoned (do not modify)
 └── tests/              # Pytest suite
 ```
@@ -21,7 +23,12 @@ Super Quality 2.0 is a Python‑based quantitative backtesting system for Korean
 | Version | Status | Tag |
 |---------|--------|-----|
 | Super Quality 2.0 (KOSDAQ small-cap) | **ABANDONED** | `v2.0-abandoned` |
-| KOSPI 200 Momentum + Quality | Research stopped/pivoted; no live trading | — |
+| KOSPI 200 Momentum + Quality | Archived/pivoted; no live trading | — |
+| KOSPI 200 Low-Volatility | **ARCHIVED PERMANENTLY** (2026-08-22 diagnostic failed all gates) | — |
+
+## KNOWN ISSUES (2026-08-22)
+- `tests/test_strategy.py` (legacy): 1 failed, 23 errors — pre-existing on this branch, unrelated to recent changes (verified via stash).
+- `ruff check` 전체 실행 시 legacy 스크립트(`scripts/build_local_pit_universe_bundle.py`, `condition_diagnosis.py` 등)에서 10건 경고 — 신규 코드는 클린.
 
 ## WHERE TO LOOK (LEGACY)
 | Task | Location | Notes |
