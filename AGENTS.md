@@ -485,3 +485,15 @@ ruff check
 - 다음 단계는 검증된 PIT raw KRX OHLCV + 기업행동 ledger data-contract 및
   validator 구현뿐이다. 실제 raw 데이터 수집과 역사적 WFA는 validator 및 원천
   증거가 승인될 때까지 금지한다. Phase 2 데이터는 수집·검증 완료로 간주하지 않는다.
+
+## TASK LOG — 2026-08-22 (저변동성 Phase 2 Stage A Oracle Pass)
+
+- **Phase 2 Stage A 오프라인 production-evidence 기반을 완료**하고 Oracle Pass를
+  받았다. synthetic fixture만으로 KRX raw-byte provenance, ISU_CD/ISIN identity,
+  raw-to-canonical binding, root validator, zero-event action coverage,
+  same-artifact transition marker, fail-closed 정책을 구현·확인했다.
+- 검증 근거는 focused 테스트 66 passed, 전체 테스트 549 passed, Ruff passed이다.
+- 네트워크 호출, raw 데이터 수집, WFA, adapter/engine production wiring, 실제
+  2025년 이후 데이터 접근은 수행하지 않았다. Stage 2 데이터는 수집·검증되지 않았다.
+- 다음 게이트는 정확한 공식 KRX OHLCV/action/status endpoint 계약 또는 승인된
+  schema probe다. 명시적 승인이 있을 때까지 실제 수집은 차단한다.

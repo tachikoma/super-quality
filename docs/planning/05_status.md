@@ -2,20 +2,26 @@
 
 이 문서는 현재 상태를 기록하는 정식 문서입니다.
 
-최종 갱신: 2026-08-21
+최종 갱신: 2026-08-22
 
-## 2026-08-21 현재 체크포인트 (저변동성 Phase 1 완료)
+## 2026-08-22 현재 체크포인트 (저변동성 Phase 2 Stage A 완료)
 
 - **MQ는 보관·피벗되었다.** MQ의 추가 실행·튜닝과 live trading은 중단한다.
 - 현재 활성 연구는 MQ와 별개의 **가격수익률 기반 저변동성 연구**이며, Phase 0
-  사전등록과 Phase 1 구현을 완료하고 Oracle Pass를 받았다.
+  사전등록과 Phase 1 구현, Phase 2 Stage A 오프라인 production-evidence 기반을
+  완료하고 Oracle Pass를 받았다.
 - Phase 1에는 저변동성 factor·selector, 분기 스케줄, engine injection 경계,
   기업행동 합성(synthetic) 정책, development cutoff guard가 포함된다.
-- 역사적 WFA와 실제 2025년 이후 데이터 접근은 수행·허용되지 않았다. Phase 2의
-  다음 전제조건은 **검증된 PIT raw KRX OHLCV + 기업행동 ledger 계약**이다. 이는
-  아직 수집·검증 완료를 의미하지 않는다.
-- 검증 근거: focused 테스트 **35 passed**, 전체 테스트 **518 passed**,
+- Stage A는 KRX raw-byte provenance, ISU_CD/ISIN identity, raw-to-canonical binding,
+  root validator, zero-event action coverage, same-artifact transition marker,
+  fail-closed 정책을 synthetic fixture만으로 구현·확인했다.
+- 네트워크 호출, raw 데이터 수집, WFA, adapter/engine production wiring, 실제
+  2025년 이후 데이터 접근은 수행하지 않았다. Stage 2 데이터는 수집·검증되지
+  않았다.
+- 검증 근거: focused 테스트 **66 passed**, 전체 테스트 **549 passed**,
   **Ruff passed**.
+- 다음 게이트는 정확한 공식 KRX OHLCV/action/status endpoint 계약 또는 승인된
+  schema probe다. 명시적 승인이 있을 때까지 실제 수집은 차단한다.
 - 활성 연구의 고정 규칙과 Phase 2 승인 경계는
   [`10_low_volatility_preregistration.md`](10_low_volatility_preregistration.md)를
   따른다.

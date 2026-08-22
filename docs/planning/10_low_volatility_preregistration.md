@@ -1,8 +1,10 @@
-# KOSPI 200 저변동성 연구 사전등록 (Phase 0–1 완료)
+# KOSPI 200 저변동성 연구 사전등록 (Phase 0–2 Stage A 완료)
 
 **등록일: 2026-08-21**
 
-**상태: Phase 0 사전등록 및 Phase 1 구현 완료 — Oracle Pass**
+**최종 갱신: 2026-08-22**
+
+**상태: Phase 0 사전등록, Phase 1 구현 및 Phase 2 Stage A 오프라인 기반 완료 — Oracle Pass**
 
 > 이 문서는 **연구 전용** 사전등록이다. live trading과 paper trading을 하지
 > 않는다. 폐기·중단된 KOSPI 200 Momentum + Quality(MQ) 전략과 별개의 가격 전용
@@ -16,6 +18,18 @@
   기업행동 합성(synthetic) 정책, development cutoff guard를 구현·확인했다.
 - 검증 근거는 focused 테스트 35 passed, 전체 테스트 518 passed, Ruff passed이다.
 - Phase 1에서는 역사적 WFA와 실제 2025년 이후 데이터에 접근하지 않았다.
+
+## Phase 2 Stage A 완료 기록 (2026-08-22)
+
+- 오프라인 production-evidence 기반을 완료하고 Oracle Pass를 받았다.
+- synthetic fixture만으로 KRX raw-byte provenance, ISU_CD/ISIN identity,
+  raw-to-canonical binding, root validator, zero-event action coverage,
+  same-artifact transition marker, fail-closed 정책을 구현·확인했다.
+- 검증 근거는 focused 테스트 66 passed, 전체 테스트 549 passed, Ruff passed이다.
+- 네트워크 호출, raw 데이터 수집, WFA, adapter/engine production wiring, 실제
+  2025년 이후 데이터 접근은 수행하지 않았다. Stage 2 데이터는 수집·검증되지 않았다.
+- 다음 게이트는 정확한 공식 KRX OHLCV/action/status endpoint 계약 또는 승인된
+  schema probe다. 명시적 승인이 있을 때까지 실제 수집은 차단한다.
 
 ## 1. 가설과 고정 사양
 
