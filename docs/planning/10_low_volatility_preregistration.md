@@ -66,6 +66,29 @@
   불충분하다. 명시적으로 승인된 cutoff-safe historical action/status 원천이 없으면
   연구를 종료하며, 실제 bundle 수집과 WFA는 허용하지 않는다.
 
+## OpenDART 기업행동 schema probe 기록 (2026-08-22; Phase 2 완료 아님)
+
+- 기존 `DART_API_KEY` 사용, 모든 쿼리는 `2024-12-31` 이하로 제한. raw artifact와
+  SHA-256 manifest는 local/gitignored `data/raw/k200_low_vol_schema_probe/opendart_actions/`에
+  보관. bundle 수집이나 WFA는 수행하지 않았다.
+- `/api/list.json` (삼성전자 corp_code 00126380): 접수일 범위 쿼리가 누수 없이
+  동작(`rcept_dt` 2024-12-09~2024-12-23 for Dec window). 2024-10~12 전체 페이지네이션
+  (112행, 12페이지; `per_page` 무시, 10행/페이지 기본) 중 배당 관련 공시는
+  `현금ㆍ현물배당결정` 하나(`rcept_dt=2024-10-31`)뿐 — 이사회 결정 공시는 통상
+  ex-date보다 먼저 인덱스에 게재된다. cutoff-safe publication-bounded 인덱스 경로다.
+- `/api/alotMatter.json` (bsns_year=2023, reprt_code=11011): 실제 스키마는
+  `se`(구분)/`thstrm`/`frmtrm`/`lwfr`/`stlm_dt`(결산기준일)/`stock_knd`/`rcept_no`.
+  ex-date/record-date/payment-date 필드는 없다 — 기존 desk-research 주장(커뮤니티
+  필드명)은 오류였고 raw probe가 이를 바로잡았다. 사업보고서 기준이라 회계연도 말
+  이후 수개월 공시 지연이 있다.
+- `/api/irdsSttus.json`: 사업보고서 기준 회계연도 키 `isu_dcrs_*` 필드. 삼성전자
+  2023은 자본 변동 없음(전부 '-'). 동일한 지연 한계.
+- 거래정지(suspension): OpenDART에 전혀 없음이 확인되었다.
+- 결론: OpenDART는 PARTIAL 후보일 뿐이다. 적시 경로는 있으나 이벤트 상세는 비표준
+  원문 파싱이 필요하고, 구조화 endpoint는 지연된 회계연도 요약이며, status(거래정지)
+  커버리지가 누락된다. OpenDART 단독으로는 저변동성 전략의 완전한 cutoff-safe
+  기업행동 + status ledger 계약을 충족하지 못한다. 연구는 종료·보관 유지.
+
 ## 연구 종료·보관 기록 (2026-08-22)
 
 - KRX/KSD probe로 cutoff-safe full action/status source를 확립하지 못해 Phase 2
