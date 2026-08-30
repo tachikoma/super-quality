@@ -3,47 +3,29 @@
 | 전략 | 상태 | 태그 |
 |------|------|------|
 | Super Quality 2.0 (KOSDAQ 소형주 밸류+품질) | **ABANDONED** | `v2.0-abandoned` |
-| KOSPI 200 Momentum + Quality | 베타 (Beta), mechanical non-PIT diagnostics only | — |
+| KOSPI 200 Momentum + Quality | **보관·피벗 (ARCHIVED)** — 운용 없음 | — |
+| KOSPI 200 저변동성 (Low-Vol) | **영구 보관 (ARCHIVED PERMANENTLY)** | 2026-08-22 diagnostic 실패 |
 
 **Super Quality 2.0**은 강환국 스타일의 한국 주식 퀀트 백테스팅 시스템입니다. 10년(2015-2024) 백테스트 결과 어떤 파라미터 조합으로도 양수 수익을 달성하지 못해 2026-07-25에 전략을 폐기했습니다.
 
-**KOSPI 200 Momentum + Quality**는 폐기된 전략의 인프라(data pipeline, backtest engine, factor framework, reporting)를 재사용하여 KOSPI 200 대형주 중심의 모멘텀+품질 전략으로 새 출발하는 프로젝트입니다.
+**KOSPI 200 Momentum + Quality**는 폐기된 전략의 인프라(data pipeline, backtest engine, factor framework, reporting)를 재사용하여 KOSPI 200 대형주 중심의 모멘텀+품질 전략으로 출발했으나, 2026-08-21에 보관·피벗되었고 현재 운용하지 않습니다.
 
-> **Current evidence boundary:** The current v4 true-WF result is a
-> momentum-only mechanical non-PIT diagnostic, not validated performance
-> evidence. With DART unset it reports **+4.0408% stitched return**,
-> **-32.0408% stitched MDD**, and **1,231 OOS points** (2020-2024).
-> Historical PIT constituents and filing-date financial data are not connected
-> yet. See [docs/planning/05_status.md](docs/planning/05_status.md) for the
-> canonical status and obsolete-result boundary.
+**KOSPI 200 저변동성** 가설은 2026-08-22 adjusted-price 단일 진단에서 3개 게이트를 모두 결정적으로 실패(CAGR 0.81%, Sharpe 0.141, MDD -61.49%)하여 영구 보관되었습니다. 세 전략 모두 live/paper trading과 추가 튜닝을 하지 않습니다.
 
-### Structural PIT candidate importer (not verified KRX ingestion)
+> **현재 근거 경계:** 현재 v4 true-WF 결과는 모멘텀 전용 기계적 non-PIT 진단이며 검증된 성과 근거가 아닙니다. DART 미설정 시 **+4.0408% 누적 수익**, **-32.0408% MDD**, **1,231 OOS 포인트(2020-2024)** 를 보고합니다. 역사적 PIT 구성종목과 공시일 기반 재무 데이터가 연결되지 않은 상태의 진단입니다. 최신 상태와 폐기된 결과 경계는 [docs/planning/05_status.md](docs/planning/05_status.md)를 참조하세요. 저변동성 진단 결과는 [docs/planning/10_low_volatility_preregistration.md](docs/planning/10_low_volatility_preregistration.md)와 `outputs_k200_lowvol_diagnostic/`을 참조하세요.
 
-The repository includes a local-file-only structural importer at
-`k200_mq.data.pit_universe`; it does not call KRX, DART, or any other live API.
-Normalization of a CSV, JSON, Parquet, bytes, or DataFrame produces only an
-unverified `pit_candidate`. It cannot emit `pit_valid=True` or `pit`
-provenance. Promotion requires a separate acquisition-manifest sidecar with an
-official HTTPS KRX URL, query/date parameters, timezone-aware retrieval time,
-an allowed KRX source type, explicit KRX attestation, and a SHA-256 digest
-verified against the raw bytes. Local paths, `file://` URLs, mtimes, embedded
-hashes, DataFrames, and caller-supplied PIT flags are never official evidence.
+### 구조적 PIT 후보 importer (미검증 — KRX 수집 아님)
 
-The candidate snapshot schema is:
+이 저장소에는 로컬 파일 전용 구조적 importer(`k200_mq.data.pit_universe`)가 포함되어 있습니다. KRX·DART 등 외부 API를 호출하지 않습니다. CSV·JSON·Parquet·bytes·DataFrame을 정규화해도 **미검증 `pit_candidate`** 만 생성되며, `pit_valid=True`나 `pit` provenance를 발급할 수 없습니다. 검증된 provenance로 승격하려면 공식 HTTPS KRX URL, 질의/날짜 파라미터, 시간대 포함 수집 시각, 허용된 KRX 소스 타입, 명시적 KRX 확인, 원시 바이트 기준 SHA-256을 담은 **별도 수집 매니페스트 sidecar**가 필요합니다. 로컬 경로, `file://` URL, mtime, 내장 해시, DataFrame, 호출자가 넘긴 PIT 플래그는 공식 근거가 아닙니다.
+
+후보 스냅샷 스키마는 다음과 같습니다.
 
 ```text
-index_code, as_of_date (or effective_date), security_code,
+index_code, as_of_date (또는 effective_date), security_code,
 source_type, source_url, source_file_sha256, retrieved_at_utc
 ```
 
-`name`, `sector`, `index_weight`, `index_shares`, and `free_float` are optional.
-An explicit membership-interval file additionally uses `effective_from`,
-nullable exclusive `effective_to`, `action` or `status`, `announcement_date`,
-and `provenance`; event/event aliases are unsupported. The importer checks
-tickers, strict dates, chronology, duplicates, interval overlaps, per-date
-fingerprints, and target size. No official historical PIT KRX file is
-connected, and no strict WF path consumes this importer yet, so proxy behavior
-and current mechanical non-PIT diagnostics are unchanged.
+`name`, `sector`, `index_weight`, `index_shares`, `free_float`은 선택 사항입니다. 명시적 편입 구간 파일을 추가로 사용할 때는 `effective_from`, nullable exclusive `effective_to`, `action` 또는 `status`, `announcement_date`, `provenance`를 사용합니다. `event`/`event` 별칭은 지원하지 않습니다. importer는 티커, 엄격한 날짜·시계열 순서, 중복, 구간 겹침, 일자별 fingerprint, 목표 규모를 검증합니다. 공식 역사적 PIT KRX 파일은 아직 연결되어 있지 않으며, 이 importer를 소비하는 strict WF 경로도 아직 없으므로 현재 동작은 proxy와 기계적 non-PIT 진단 그대로 유지됩니다.
 
 ## 전략 개요
 
@@ -167,15 +149,9 @@ K200MQ 출력 파일은 `--output` (기본값: `outputs_k200mq/`) 디렉토리�
 | `true_walkforward/summary.csv` | fold별 OOS 지표와 config/git/preparation provenance |
 | `true_walkforward/oos_returns.csv` | exact-coverage 검사를 통과한 stitched OOS 수익률 |
 
-### 현재 deferred / unsupported settings
+### 현재 미지원/보류 설정
 
-PIT historical universe, filing-date financials, strict PIT WF, PIT
-sensitivity, and stress tests are pending. ADV impact/liquidity execution,
-sector caps, `UNIVERSE_SIZE`,
-`USE_52WEEK_HIGH`, and `QUALITY_MIN_TTM_QUARTERS` are unsupported or inert and
-are excluded from current sensitivity claims. `MOMENTUM_WINDOW_SHORT` is
-diagnostic-only. Cost attribution is implemented for actual filled trades; the
-current benchmark is price return rather than total return.
+PIT 역사적 유니버스, 공시일 기반 재무, strict PIT WF, PIT 민감도 및 스트레스 테스트는 보류 중입니다. ADV 영향/유동성 체결, 섹터 캡, `UNIVERSE_SIZE`, `USE_52WEEK_HIGH`, `QUALITY_MIN_TTM_QUARTERS`는 미지원 또는 inert 상태이며 현재 민감도 주장에서 제외됩니다. `MOMENTUM_WINDOW_SHORT`는 진단 전용입니다. 비용 귀속은 실제 체결된 거래에 대해서만 구현되어 있으며, 현재 벤치마크는 가격수익률(price return)입니다.
 
 ## 프로젝트 구조
 
@@ -190,24 +166,28 @@ src/
 │   ├── backtest/
 │   ├── analysis/
 │   └── reporting/
-└── k200_mq/                    # NEW — KOSPI 200 Momentum + Quality (Beta)
-    ├── __init__.py
-    ├── main.py                 # CLI 진입점
-    ├── config.py               # K200MQConfig (BacktestConfig + strategy params)
-    ├── core/                   # Reusable infrastructure from legacy
-    │   ├── cache.py
-    │   ├── factors/base.py
-    │   ├── analysis/metrics.py
-    │   └── reporting/report.py
-    ├── data/                   # Data layer and provenance contracts
-    │   ├── __init__.py
-    │   ├── universe.py         # Proxy universe and PIT provenance contracts
-    │   └── provenance.py       # Filing timestamp/PIT validity contracts
-    ├── factors/                # New factors (momentum, quality, regime)
-    ├── strategies/             # KOSPI 200 Momentum + Quality strategy
-    ├── backtest/               # PortfolioRebalanceEngine
-    ├── analysis/
-    └── reporting/
+└── k200_mq/                    # ARCHIVED — KOSPI 200 Momentum + Quality (보관)
+     ├── __init__.py
+     ├── main.py                 # CLI 진입점
+     ├── config.py               # K200MQConfig (BacktestConfig + strategy params)
+     ├── core/                   # Reusable infrastructure from legacy
+     │   ├── cache.py
+     │   ├── factors/base.py
+     │   ├── analysis/metrics.py
+     │   └── reporting/report.py
+     ├── data/                   # Data layer and provenance contracts
+     │   ├── __init__.py
+     │   ├── universe.py         # Proxy universe and PIT provenance contracts
+     │   └── provenance.py       # Filing timestamp/PIT validity contracts
+     ├── factors/                # New factors (momentum, quality, regime)
+     ├── strategies/             # KOSPI 200 Momentum + Quality strategy
+     ├── backtest/               # PortfolioRebalanceEngine
+     ├── analysis/
+     └── reporting/
+ └── k200_low_vol/               # ARCHIVED PERMANENTLY — KOSPI 200 Low-Volatility (스펙 동결, 계약 유효)
+     ├── spec.py                 # 동결 스펙 (window 252, 하위 20%, 분기, price-return)
+     ├── contract.py             # 컷오프 가드
+     └── data/validator.py       # raw provenance 검증
 ```
 
 ## 데이터 소스
